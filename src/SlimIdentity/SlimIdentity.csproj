@@ -1,14 +1,31 @@
-﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <RootNamespace>BFS.SlimIdentity</RootNamespace>
+    <RootNamespace>SlimIdentity</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+
+    <!-- NuGet -->
+    <IsPackable>true</IsPackable>
+    <PackageId>SlimIdentity</PackageId>
+    <Version>0.1.0</Version>
+    <Description>Pragmatic, database-agnostic authentication and security facade for ASP.NET Core (cookies, JWT, refresh tokens, 2FA, OIDC, API keys) without Identity tables.</Description>
+    <PackageTags>aspnetcore;authentication;identity;jwt;cookies;2fa;totp;oidc</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Library (no Web SDK): pulls in ASP.NET Core incl. Microsoft.Extensions.Identity.Core, DataProtection, RateLimiting, Cookies. -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.9" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Leftover from the Web template; a library has no launch profile. -->
+    <None Remove="Properties\launchSettings.json" />
+    <Content Remove="Properties\launchSettings.json" />
   </ItemGroup>
 
 </Project>

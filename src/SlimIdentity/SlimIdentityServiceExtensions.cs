@@ -1,45 +1,153 @@
-﻿using Microsoft.AspNetCore.Identity;
-using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Configuration;
+using Microsoft.IdentityModel.Tokens;
+using SlimIdentity.Abstractions;
+using SlimIdentity.Authentication;
+using SlimIdentity.Endpoints;
+using SlimIdentity.Http;
+using SlimIdentity.Security;
+using SlimIdentity.Services;
 
-namespace BFS.SlimIdentity;
-
-public class SlimIdentityBuilder
-{
-    public IServiceCollection Services { get; }
-    public SlimIdentityBuilder(IServiceCollection services) => Services = services;
-
-    public SlimIdentityBuilder AddUserStore<TStore>() where TStore : class, ISlimUserStore
-    {
-        Services.AddScoped<ISlimUserStore, TStore>();
-        return this;
-    }
-}
+namespace SlimIdentity;
 
 public static class SlimIdentityServiceExtensions
 {
+    /// <summary>Registers SlimIdentity configured purely in code.</summary>
+    public static SlimIdentityBuilder AddSlimIdentity(this IServiceCollection services, Action<SlimIdentityOptions>? configure = null) =>
+        services.AddSlimIdentity(configuration: null, configure);
+
+    /// <summary>
+    /// Registers SlimIdentity. <paramref name="configuration"/> (e.g. <c>GetSection("SlimIdentity")</c>) is bound first,
+    /// <paramref name="configure"/> is applied afterwards as override. All options are validated at startup.
+    /// </summary>
     public static SlimIdentityBuilder AddSlimIdentity(
         this IServiceCollection services,
-        Action<SlimIdentityOptions>? configureOptions = null)
+        IConfiguration? configuration,
+        Action<SlimIdentityOptions>? configure = null)
     {
-        // 1. Optionen konfigurieren und als Singleton registrieren
-        var options = new SlimIdentityOptions();
-        configureOptions?.Invoke(options);
-        services.AddSingleton(options);
+        ArgumentNullException.ThrowIfNull(services);
 
-        // 2. Den nativen Microsoft Passwort-Hasher registrieren (ohne EF Core Abhängigkeit!)
-        services.AddScoped<IPasswordHasher<SlimUser>, PasswordHasher<SlimUser>>();
+        // ---------------------------------------------------------------- options (explicit & validated)
+        var optionsBuilder = services.AddOptions<SlimIdentityOptions>();
+        if (configuration is not null) optionsBuilder.Bind(configuration);
+        if (configure is not null) optionsBuilder.Configure(configure);
+        optionsBuilder.ValidateOnStart();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<SlimIdentityOptions>, SlimIdentityOptionsValidator>());
 
-        // 3. Den Rate-Limiter für die API-Härtung (Brute-Force-Schutz) konfigurieren
-        services.AddRateLimiter(limiterOptions =>
+        // ---------------------------------------------------------------- framework-native building blocks
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddHttpContextAccessor();
+        services.AddDataProtection();
+        services.TryAddScoped<IPasswordHasher<SlimUser>, PasswordHasher<SlimUser>>();
+
+        // ---------------------------------------------------------------- internal services
+        services.TryAddSingleton<SlimWorkflowTokens>();
+        services.TryAddSingleton<SlimJwtTokenFactory>();
+        services.TryAddSingleton<SlimPasswordPolicy>();
+        services.TryAddScoped<SlimCredentialService>();
+        services.TryAddScoped<SlimAuthManager>();
+        services.TryAddScoped<ISlimAuthManager>(sp => sp.GetRequiredService<SlimAuthManager>());
+        services.TryAddScoped<SlimLoginHandlers>();
+        services.TryAddScoped<SlimAccountHandlers>();
+
+        // ---------------------------------------------------------------- mail dispatch (enumeration-safe timing)
+        services.TryAddSingleton<SlimEmailQueue>();
+        services.TryAddScoped<SlimEmailDispatcher>();
+        services.AddHostedService<SlimEmailBackgroundService>();
+
+        // ---------------------------------------------------------------- layer 1: IP rate limiting
+        services.AddRateLimiter(o => o.AddPolicy<string, SlimBruteForceRateLimiterPolicy>(SlimIdentityDefaults.BruteForcePolicy));
+
+        // ---------------------------------------------------------------- authentication
+        services.AddOptions<AuthenticationOptions>().Configure<IOptions<SlimIdentityOptions>>((auth, slim) =>
         {
-            limiterOptions.AddFixedWindowLimiter("SlimIdentity_BruteForce", opt =>
-            {
-                opt.Window = TimeSpan.FromMinutes(1);
-                opt.PermitLimit = options.Lockout.MaxLoginRequestsPerMinute;
-                opt.QueueLimit = 0;
-            });
+            if (!slim.Value.Endpoints.ConfigureDefaultAuthenticationScheme) return;
+            auth.DefaultScheme = SlimIdentityDefaults.AuthenticationScheme;
+            auth.DefaultChallengeScheme = SlimIdentityDefaults.AuthenticationScheme;
+            auth.DefaultForbidScheme = SlimIdentityDefaults.AuthenticationScheme;
         });
 
-        return new SlimIdentityBuilder(services);
+        var authentication = services.AddAuthentication()
+            .AddPolicyScheme(SlimIdentityDefaults.AuthenticationScheme, "SlimIdentity", o =>
+            {
+                o.ForwardDefaultSelector = context =>
+                {
+                    var authorization = context.Request.Headers.Authorization.ToString();
+                    if (authorization.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                        return SlimIdentityDefaults.BearerScheme;
+                    if (context.Request.Headers.ContainsKey(SlimIdentityDefaults.ApiKeyHeaderName)
+                        && context.RequestServices.GetService<SlimApiKeyMarker>() is not null)
+                        return SlimIdentityDefaults.ApiKeyScheme;
+                    return SlimIdentityDefaults.CookieScheme;
+                };
+            })
+            .AddCookie(SlimIdentityDefaults.CookieScheme)
+            .AddCookie(SlimIdentityDefaults.ExternalScheme)
+            .AddJwtBearer(SlimIdentityDefaults.BearerScheme);
+
+        services.AddOptions<CookieAuthenticationOptions>(SlimIdentityDefaults.CookieScheme)
+            .Configure<IOptions<SlimIdentityOptions>>((cookie, slim) =>
+            {
+                var c = slim.Value.Cookies;
+                cookie.Cookie.Name = c.CookieName;
+                cookie.Cookie.HttpOnly = true;                              // enforced
+                cookie.Cookie.SecurePolicy = CookieSecurePolicy.Always;     // enforced
+                cookie.Cookie.SameSite = c.SameSite;
+                cookie.Cookie.Domain = c.Domain;
+                cookie.Cookie.IsEssential = true;
+                cookie.ExpireTimeSpan = c.ExpireTimeSpan;
+                cookie.SlidingExpiration = c.SlidingExpiration;
+                cookie.Events.OnValidatePrincipal = SlimSecurityStampValidator.ValidateCookieAsync;
+                // JSON API: never redirect to a login page
+                cookie.Events.OnRedirectToLogin = ctx => { ctx.Response.StatusCode = StatusCodes.Status401Unauthorized; return Task.CompletedTask; };
+                cookie.Events.OnRedirectToAccessDenied = ctx => { ctx.Response.StatusCode = StatusCodes.Status403Forbidden; return Task.CompletedTask; };
+            });
+
+        services.AddOptions<CookieAuthenticationOptions>(SlimIdentityDefaults.ExternalScheme)
+            .Configure<IOptions<SlimIdentityOptions>>((cookie, slim) =>
+            {
+                cookie.Cookie.Name = slim.Value.Cookies.CookieName + ".External";
+                cookie.Cookie.HttpOnly = true;
+                cookie.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+                cookie.Cookie.SameSite = SameSiteMode.Lax; // must survive the top-level redirect back from the IdP
+                cookie.Cookie.IsEssential = true;
+                cookie.ExpireTimeSpan = TimeSpan.FromMinutes(10);
+                cookie.SlidingExpiration = false;
+                cookie.Events.OnRedirectToLogin = ctx => { ctx.Response.StatusCode = StatusCodes.Status401Unauthorized; return Task.CompletedTask; };
+            });
+
+        services.AddOptions<JwtBearerOptions>(SlimIdentityDefaults.BearerScheme)
+            .Configure<IOptions<SlimIdentityOptions>>((bearer, slim) =>
+            {
+                var t = slim.Value.Tokens;
+                bearer.MapInboundClaims = false; // keep short claim names (sub, email, role)
+                bearer.TokenValidationParameters = new TokenValidationParameters
+                {
+                    ValidateIssuer = true,
+                    ValidIssuer = t.Issuer,
+                    ValidateAudience = true,
+                    ValidAudience = t.Audience,
+                    ValidateLifetime = true,
+                    RequireExpirationTime = true,
+                    ValidateIssuerSigningKey = true,
+                    IssuerSigningKey = string.IsNullOrEmpty(t.JwtSecret) ? null : SlimJwtTokenFactory.CreateSigningKey(t.JwtSecret),
+                    ValidAlgorithms = [SecurityAlgorithms.HmacSha256],
+                    ClockSkew = t.ClockSkew,
+                    NameClaimType = SlimClaimTypes.Email,
+                    RoleClaimType = SlimClaimTypes.Role,
+                    AuthenticationType = SlimIdentityDefaults.BearerScheme,
+                };
+                bearer.Events = new JwtBearerEvents { OnTokenValidated = SlimSecurityStampValidator.ValidateBearerAsync };
+            });
+
+        // ---------------------------------------------------------------- authorization: sudo policy
+        services.AddAuthorizationBuilder()
+            .AddPolicy(SlimIdentityDefaults.SudoPolicy, policy => policy
+                .RequireAuthenticatedUser()
+                .RequireAssertion(ctx => ctx.User.IsInSudoMode()));
+
+        return new SlimIdentityBuilder(services, authentication);
     }
 }

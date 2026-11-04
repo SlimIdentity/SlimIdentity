@@ -1,14 +1,32 @@
-﻿namespace BFS.SlimIdentity;
+namespace SlimIdentity;
 
+/// <summary>
+/// Mandatory database bridge for basic authentication. Implemented by the host project
+/// (EF Core, Dapper, REST, …). SlimIdentity never touches a database itself.
+/// </summary>
 public interface ISlimUserStore
 {
-    // 1. Wird beim Login aufgerufen, um den Hash und den Lockout-Status zu prüfen
-    Task<SlimUser?> FindByEmailAsync(string email, CancellationToken cancellationToken);
+    /// <summary>Looks a user up by login identifier. Should compare case-insensitively.</summary>
+    Task<SlimUser?> FindByEmailAsync(string email, CancellationToken ct);
 
-    // 2. Wird aufgerufen, wenn der Login fehlschlägt (Zähler hochsetzen) 
-    // oder wenn der User nach einem Lockout wieder freigegeben wird
-    Task UpdateSecurityStateAsync(SlimUser user, CancellationToken cancellationToken);
+    /// <summary>Looks a user up by id (security-stamp validation, refresh, 2FA, …).</summary>
+    Task<SlimUser?> FindByIdAsync(string userId, CancellationToken ct);
 
-    // 3. Wird vom /register Endpoint aufgerufen
-    Task<SlimUser> CreateAsync(string email, string passwordHash, CancellationToken cancellationToken);
+    /// <summary>
+    /// Creates a user. <paramref name="passwordHash"/> is empty for users created through an external login.
+    /// Must return the persisted user including its generated <see cref="SlimUser.Id"/>.
+    /// </summary>
+    Task<SlimUser> CreateAsync(string email, string passwordHash, CancellationToken ct);
+
+    /// <summary>
+    /// Persists all security fields of <paramref name="user"/>:
+    /// PasswordHash, SecurityStamp, EmailConfirmed, FailedLoginAttempts, LockoutEndUtc, TwoFactorEnabled.
+    /// </summary>
+    Task UpdateSecurityStateAsync(SlimUser user, CancellationToken ct);
+
+    /// <summary>
+    /// Host-specific claims (roles, permissions, tenant_id, …) that are added before the cookie / JWT is signed.
+    /// <c>ClaimTypes.Role</c> is normalized to <c>role</c>; reserved SlimIdentity claims are ignored.
+    /// </summary>
+    Task<IReadOnlyCollection<Claim>> GetClaimsAsync(SlimUser user, CancellationToken ct);
 }
