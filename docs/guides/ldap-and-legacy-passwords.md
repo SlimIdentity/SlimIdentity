@@ -35,8 +35,9 @@ public sealed class LegacyHashMigrationValidator(IPasswordHasher<SlimUser> hashe
             return hasher.VerifyHashedPassword(user, user.PasswordHash, password) != PasswordVerificationResult.Failed;
 
         if (!VerifyLegacy(user.PasswordHash, password)) return false;   // your old algorithm, constant-time compare
-        user.PasswordHash = hasher.HashPassword(user, password);        // upgrade to PBKDF2
-        await store.UpdateSecurityStateAsync(user, ct);
+        var upgraded = hasher.HashPassword(user, password);              // upgrade to PBKDF2
+        await store.UpdatePasswordHashAsync(user, user.PasswordHash, upgraded, ct); // only if unchanged meanwhile
+        user.PasswordHash = upgraded;
         return true;
     }
 }

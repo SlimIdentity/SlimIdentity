@@ -118,6 +118,14 @@ internal sealed class SlimTwoFactorService(
         return false;
     }
 
+    /// <summary>Consumes the sign-in challenge (pre-auth token) by its issue time – it completes at most one sign-in.</summary>
+    public async Task<bool> ConsumeChallengeAsync(SlimUser user, long issuedAt, CancellationToken ct)
+    {
+        if (await store.TryMarkChallengeUsedAsync(user, issuedAt, ct)) return true;
+        Log.TwoFactorChallengeReplayed(logger, user.Id);
+        return false;
+    }
+
     /// <summary>Generates new recovery codes, replaces the stored hashes and returns the codes (shown once).</summary>
     public async Task<IReadOnlyList<string>> RegenerateRecoveryCodesAsync(SlimUser user, CancellationToken ct)
     {

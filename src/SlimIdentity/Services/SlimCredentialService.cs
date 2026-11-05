@@ -88,27 +88,25 @@ internal sealed class SlimCredentialService(
         var lockout = options.Value.Lockout;
         if (!lockout.Enabled) return false;
 
-        user.FailedLoginAttempts = user.FailedLoginAttempts == int.MaxValue ? int.MaxValue : user.FailedLoginAttempts + 1;
-        var locked = false;
-        if (user.FailedLoginAttempts % lockout.MaxFailedAttempts == 0)
-        {
-            var lockoutNumber = user.FailedLoginAttempts / lockout.MaxFailedAttempts; // 1, 2, 3, …
-            var duration = LockoutDuration(lockout, lockoutNumber);
-            user.LockoutEndUtc = time.GetUtcNow() + duration;
-            locked = true;
-            Log.LockedOut(logger, user.Id, user.LockoutEndUtc, lockoutNumber);
-            metrics.Lockout();
+        // atomic in the store: parallel failures are all counted, and exactly one of them reaches the next multiple
+        user.FailedLoginAttempts = await store.IncrementFailedLoginAttemptsAsync(user, ct);
+        if (user.FailedLoginAttempts <= 0 || user.FailedLoginAttempts % lockout.MaxFailedAttempts != 0) return false;
 
-            // inform the owner once per attack (first lockout since the last successful sign-in)
-            if (lockoutNumber == 1)
-            {
-                var email = user.Email;
-                var end = user.LockoutEndUtc.Value;
-                await mail.SendAsync("lockout-notification", (s, c) => s.SendLockoutNotificationEmailAsync(email, end, c), ct);
-            }
+        var lockoutNumber = user.FailedLoginAttempts / lockout.MaxFailedAttempts; // 1, 2, 3, …
+        var duration = LockoutDuration(lockout, lockoutNumber);
+        user.LockoutEndUtc = time.GetUtcNow() + duration;
+        await store.SetLockoutEndAsync(user, user.LockoutEndUtc, ct);
+        Log.LockedOut(logger, user.Id, user.LockoutEndUtc, lockoutNumber);
+        metrics.Lockout();
+
+        // inform the owner once per attack (first lockout since the last successful sign-in)
+        if (lockoutNumber == 1)
+        {
+            var email = user.Email;
+            var end = user.LockoutEndUtc.Value;
+            await mail.SendAsync("lockout-notification", (s, c) => s.SendLockoutNotificationEmailAsync(email, end, c), ct);
         }
-        await store.UpdateSecurityStateAsync(user, ct);
-        return locked;
+        return true;
     }
 
     internal static TimeSpan LockoutDuration(SlimLockoutOptions lockout, int lockoutNumber)
@@ -121,23 +119,24 @@ internal sealed class SlimCredentialService(
 
     /// <summary>
     /// Resets lockout counters (unless <paramref name="resetLockout"/> is false) and rehashes outdated hashes.
+    /// Uses the narrow store methods only – <paramref name="user"/> may be outdated by the time the (slow) password
+    /// verification finished, and writing it back as a whole could undo a concurrent password change.
     /// </summary>
     public async Task RegisterSuccessAsync(SlimUser user, string? password, bool rehash, bool resetLockout, CancellationToken ct)
     {
-        var dirty = false;
         if (resetLockout && (user.FailedLoginAttempts != 0 || user.LockoutEndUtc is not null))
         {
             user.FailedLoginAttempts = 0;
             user.LockoutEndUtc = null;
-            dirty = true;
+            await store.ResetFailedLoginAttemptsAsync(user, ct);
         }
-        if (rehash && !string.IsNullOrEmpty(password))
+        if (rehash && !string.IsNullOrEmpty(password) && !string.IsNullOrEmpty(user.PasswordHash))
         {
-            user.PasswordHash = hasher.HashPassword(user, password);
-            dirty = true;
+            var newHash = hasher.HashPassword(user, password);
+            await store.UpdatePasswordHashAsync(user, user.PasswordHash, newHash, ct);
+            user.PasswordHash = newHash;
             Log.PasswordRehashed(logger, user.Id);
         }
-        if (dirty) await store.UpdateSecurityStateAsync(user, ct);
     }
 
     /// <summary>Sets a new password, rotates the stamp and clears lockout state (does not persist).</summary>

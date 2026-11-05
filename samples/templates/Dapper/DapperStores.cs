@@ -46,16 +46,55 @@ public sealed class DapperUserStore(NpgsqlDataSource db) : ISlimUserStore
             $"SELECT {Columns} FROM users WHERE id = @id", new { id }, cancellationToken: ct));
     }
 
-    public async Task<SlimUser> CreateAsync(string email, string passwordHash, CancellationToken ct)
+    public async Task<SlimUser?> CreateAsync(string email, string passwordHash, CancellationToken ct)
     {
         await using var c = await db.OpenConnectionAsync(ct);
-        return await c.QuerySingleAsync<SlimUser>(new CommandDefinition($"""
+        // ON CONFLICT: a concurrent registration with the same address yields no row → null (UNIQUE on normalized_email)
+        return await c.QuerySingleOrDefaultAsync<SlimUser>(new CommandDefinition($"""
             INSERT INTO users (email, normalized_email, password_hash, security_stamp)
             VALUES (@email, @normalized, @hash, @stamp)
+            ON CONFLICT (normalized_email) DO NOTHING
             RETURNING {Columns}
             """,
             new { email, normalized = email.ToUpperInvariant(), hash = passwordHash, stamp = SlimUser.NewSecurityStamp() },
             cancellationToken: ct));
+    }
+
+    // ---- sign-in bookkeeping: narrow, atomic statements (never write back a whole, possibly outdated user)
+
+    public async Task<int> IncrementFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct)
+    {
+        await using var c = await db.OpenConnectionAsync(ct);
+        return await c.ExecuteScalarAsync<int>(new CommandDefinition("""
+            UPDATE users SET failed_login_attempts = failed_login_attempts + 1
+            WHERE id = @id::uuid
+            RETURNING failed_login_attempts
+            """, new { id = user.Id }, cancellationToken: ct));
+    }
+
+    public async Task SetLockoutEndAsync(SlimUser user, DateTimeOffset? lockoutEndUtc, CancellationToken ct)
+    {
+        await using var c = await db.OpenConnectionAsync(ct);
+        await c.ExecuteAsync(new CommandDefinition(
+            "UPDATE users SET lockout_end_utc = @lockoutEndUtc WHERE id = @id::uuid",
+            new { id = user.Id, lockoutEndUtc }, cancellationToken: ct));
+    }
+
+    public async Task ResetFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct)
+    {
+        await using var c = await db.OpenConnectionAsync(ct);
+        await c.ExecuteAsync(new CommandDefinition(
+            "UPDATE users SET failed_login_attempts = 0, lockout_end_utc = NULL WHERE id = @id::uuid",
+            new { id = user.Id }, cancellationToken: ct));
+    }
+
+    // conditional: a password change in the meantime wins over the transparent rehash
+    public async Task UpdatePasswordHashAsync(SlimUser user, string currentHash, string newHash, CancellationToken ct)
+    {
+        await using var c = await db.OpenConnectionAsync(ct);
+        await c.ExecuteAsync(new CommandDefinition(
+            "UPDATE users SET password_hash = @newHash WHERE id = @id::uuid AND password_hash = @currentHash",
+            new { id = user.Id, currentHash, newHash }, cancellationToken: ct));
     }
 
     public async Task UpdateSecurityStateAsync(SlimUser user, CancellationToken ct)
@@ -209,6 +248,16 @@ public sealed class DapperTwoFactorStore(NpgsqlDataSource db) : ISlimTwoFactorSt
             UPDATE users SET last_2fa_code_at = @usedAt
             WHERE id = @id::uuid AND (last_2fa_code_at IS NULL OR last_2fa_code_at < @usedAt)
             """, new { id = user.Id, usedAt }, cancellationToken: ct)) == 1;
+    }
+
+    // same compare-and-set on a separate column: a sign-in challenge completes at most one sign-in
+    public async Task<bool> TryMarkChallengeUsedAsync(SlimUser user, long issuedAt, CancellationToken ct)
+    {
+        await using var c = await db.OpenConnectionAsync(ct);
+        return await c.ExecuteAsync(new CommandDefinition("""
+            UPDATE users SET last_2fa_challenge_at = @issuedAt
+            WHERE id = @id::uuid AND (last_2fa_challenge_at IS NULL OR last_2fa_challenge_at < @issuedAt)
+            """, new { id = user.Id, issuedAt }, cancellationToken: ct)) == 1;
     }
 
     public async Task StoreRecoveryCodesAsync(SlimUser user, IEnumerable<string> hashedCodes, CancellationToken ct)

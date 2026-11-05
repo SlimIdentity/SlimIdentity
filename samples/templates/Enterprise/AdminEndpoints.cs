@@ -94,10 +94,9 @@ public static class AdminEndpoints
         admin.MapPost("/invitations", async (InviteRequest req, ClaimsPrincipal me,
                 ISlimUserStore store, ISlimAuthManager auth, IInvitationMailer mailer, CancellationToken ct) =>
             {
-                if (await store.FindByEmailAsync(req.Email, ct) is not null)
+                // CreateAsync returns null if the address is taken (unique index) – no check-then-act race
+                if (await store.CreateAsync(req.Email, passwordHash: string.Empty, ct) is not { } user)
                     return Results.Conflict(new { status = "already_exists" });
-
-                var user = await store.CreateAsync(req.Email, passwordHash: string.Empty, ct);
                 // TODO: business profile (DisplayName, tenant, roles …) for user.Id
                 var invitation = await auth.CreateInvitationAsync(user, TimeSpan.FromDays(14), ct); // needs Links.InvitationUrl
                 await mailer.SendInvitationAsync(req.Email, req.DisplayName, me.GetSlimEmail(), invitation.Link, invitation.ExpiresAt, ct);

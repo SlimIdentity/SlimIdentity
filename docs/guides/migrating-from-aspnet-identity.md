@@ -23,6 +23,7 @@ working – users do not have to reset their passwords. The migration is mostly 
 | `AspNetUserTokens` (`AuthenticatorKey`) | `ISlimTwoFactorStore.GetTotpSecretAsync` | Identity stores the Base32 key in clear text; encrypt it once during migration: `provider.CreateProtector(SlimIdentityDefaults.TotpSecretProtectionPurpose).Protect(key)` |
 | `AspNetUserTokens` (`RecoveryCodes`) | – | Identity stores them in clear text and with less entropy; users should regenerate codes (`POST /auth/2fa/recovery-codes`) |
 | – | `ISlimTwoFactorStore.TryMarkCodeUsedAsync` | new column for replay protection (nullable `bigint`) |
+| – | `ISlimTwoFactorStore.TryMarkChallengeUsedAsync` | new column for single-use sign-in challenges (nullable `bigint`) |
 
 You can keep the existing tables and implement the stores directly against them (EF Core: map your existing
 `IdentityUser` entity or a plain class to the same table), or migrate into your own schema.

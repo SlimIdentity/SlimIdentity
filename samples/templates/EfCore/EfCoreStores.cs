@@ -33,7 +33,7 @@ public sealed class EfCoreUserStore(AppDbContext db) : ISlimUserStore
         return user is null ? null : Map(user);
     }
 
-    public async Task<SlimUser> CreateAsync(string email, string passwordHash, CancellationToken ct)
+    public async Task<SlimUser?> CreateAsync(string email, string passwordHash, CancellationToken ct)
     {
         var user = new AppUser
         {
@@ -43,8 +43,54 @@ public sealed class EfCoreUserStore(AppDbContext db) : ISlimUserStore
             SecurityStamp = SlimUser.NewSecurityStamp(),
         };
         db.Users.Add(user);
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // unique index on NormalizedEmail: a concurrent registration took the address
+            db.Entry(user).State = EntityState.Detached;
+            return null;
+        }
         return Map(user);
+    }
+
+    // ---- sign-in bookkeeping: narrow, atomic updates (never write back a whole, possibly outdated user)
+
+    public async Task<int> IncrementFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct)
+    {
+        var id = Guid.Parse(user.Id);
+        // portable compare-and-set loop (with raw SQL: UPDATE … SET failed = failed + 1 … RETURNING failed)
+        while (true)
+        {
+            var current = await db.Users.AsNoTracking().Where(u => u.Id == id).Select(u => u.FailedLoginAttempts).FirstAsync(ct);
+            var updated = await db.Users.Where(u => u.Id == id && u.FailedLoginAttempts == current)
+                .ExecuteUpdateAsync(s => s.SetProperty(u => u.FailedLoginAttempts, current + 1), ct);
+            if (updated == 1) return current + 1;
+        }
+    }
+
+    public Task SetLockoutEndAsync(SlimUser user, DateTimeOffset? lockoutEndUtc, CancellationToken ct)
+    {
+        var id = Guid.Parse(user.Id);
+        return db.Users.Where(u => u.Id == id).ExecuteUpdateAsync(s => s.SetProperty(u => u.LockoutEndUtc, lockoutEndUtc), ct);
+    }
+
+    public Task ResetFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct)
+    {
+        var id = Guid.Parse(user.Id);
+        return db.Users.Where(u => u.Id == id).ExecuteUpdateAsync(s => s
+            .SetProperty(u => u.FailedLoginAttempts, 0)
+            .SetProperty(u => u.LockoutEndUtc, (DateTimeOffset?)null), ct);
+    }
+
+    // conditional: a password change in the meantime wins over the transparent rehash
+    public Task UpdatePasswordHashAsync(SlimUser user, string currentHash, string newHash, CancellationToken ct)
+    {
+        var id = Guid.Parse(user.Id);
+        return db.Users.Where(u => u.Id == id && u.PasswordHash == currentHash)
+            .ExecuteUpdateAsync(s => s.SetProperty(u => u.PasswordHash, newHash), ct);
     }
 
     public async Task UpdateSecurityStateAsync(SlimUser user, CancellationToken ct)
@@ -147,6 +193,15 @@ public sealed class EfCoreTwoFactorStore(AppDbContext db) : ISlimTwoFactorStore
         return await db.Users
             .Where(u => u.Id == id && (u.LastTwoFactorCodeAt == null || u.LastTwoFactorCodeAt < usedAt))
             .ExecuteUpdateAsync(s => s.SetProperty(u => u.LastTwoFactorCodeAt, usedAt), ct) == 1;
+    }
+
+    // same compare-and-set on a separate column: a sign-in challenge completes at most one sign-in
+    public async Task<bool> TryMarkChallengeUsedAsync(SlimUser user, long issuedAt, CancellationToken ct)
+    {
+        var id = Guid.Parse(user.Id);
+        return await db.Users
+            .Where(u => u.Id == id && (u.LastTwoFactorChallengeAt == null || u.LastTwoFactorChallengeAt < issuedAt))
+            .ExecuteUpdateAsync(s => s.SetProperty(u => u.LastTwoFactorChallengeAt, issuedAt), ct) == 1;
     }
 
     public async Task StoreRecoveryCodesAsync(SlimUser user, IEnumerable<string> hashedCodes, CancellationToken ct)

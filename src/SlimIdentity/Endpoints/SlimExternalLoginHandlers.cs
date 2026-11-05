@@ -110,6 +110,12 @@ internal sealed class SlimExternalLoginHandlers(
                 if (!O.ExternalLogin.AllowAutoRegistration) return Redirect(returnUrl, "slim_error", "registration_disabled");
 
                 user = await store.CreateAsync(email.Trim(), string.Empty, ct);
+                if (user is null)
+                {
+                    // the address was registered concurrently – never link silently; the next attempt follows the rules above
+                    metrics.ExternalLogin(provider, "conflict");
+                    return Redirect(returnUrl, "slim_error", "account_conflict");
+                }
                 if (emailVerified && !user.EmailConfirmed)
                 {
                     user.EmailConfirmed = true;

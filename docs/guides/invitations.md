@@ -18,7 +18,9 @@ builder.Services.AddSlimIdentity(o =>
 app.MapPost("/api/admin/invitations", async (InviteRequest req, ISlimUserStore store, ISlimAuthManager auth,
         IMyMailer mailer, CancellationToken ct) =>
     {
-        var user = await store.CreateAsync(req.Email, passwordHash: string.Empty, ct);   // no password yet
+        // no password yet; null = the address is already taken
+        if (await store.CreateAsync(req.Email, passwordHash: string.Empty, ct) is not { } user)
+            return Results.Conflict();
         // … create your business data for user.Id (tenant, roles, display name)
         var invitation = await auth.CreateInvitationAsync(user, ct: ct);
         await mailer.SendInvitationAsync(req.Email, invitation.Link, invitation.ExpiresAt, ct);

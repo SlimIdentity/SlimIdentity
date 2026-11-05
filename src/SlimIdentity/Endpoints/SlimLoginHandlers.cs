@@ -160,6 +160,10 @@ internal sealed class SlimLoginHandlers(
         if (request is null || !workflow.TryUnprotect<SlimPreAuthPayload>(SlimWorkflowTokens.PreAuthPurpose, request.PreAuthToken, out var payload))
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
 
+        // This request carries no session cookie and no useCookies flag – only the signed challenge knows that it ends in
+        // a cookie sign-in, so the CSRF filter cannot classify it. Check here.
+        if (payload.UseCookies && SlimCsrfEndpointFilter.Validate(Http.Request, O, logger) is { } csrfError) return csrfError;
+
         var user = await store.FindByIdAsync(payload.Uid, ct);
         if (user is null || !user.IsActive || !SlimHashing.FixedTimeEquals(user.SecurityStamp, payload.Stamp))
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
@@ -197,6 +201,14 @@ internal sealed class SlimLoginHandlers(
             return locked
                 ? SlimResults.Locked(Http, user.LockoutEndUtc!.Value, now)
                 : SlimResults.Status("invalid_two_factor_code", "The code is invalid.", StatusCodes.Status401Unauthorized);
+        }
+
+        // The challenge completes at most one sign-in. Checked after the factor, so a typo does not burn the challenge;
+        // two parallel requests with different valid factors still yield only one session.
+        if (!await twoFactor.ConsumeChallengeAsync(user, payload.IssuedAt, ct))
+        {
+            metrics.TwoFactor(method, "challenge_reused");
+            return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
         }
 
         metrics.TwoFactor(method, "success");

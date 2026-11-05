@@ -7,13 +7,14 @@ builder.Services.AddSlimIdentity(o => o.TwoFactor.AuthenticatorIssuer = "My Prod
     .AddTwoFactorStore<MyTwoFactorStore>();
 ```
 
-`ISlimTwoFactorStore` keeps three things – none of them in clear text:
+`ISlimTwoFactorStore` keeps four things – none of them in clear text:
 
 | Data | What the store receives | Store requirement |
 | :--- | :--- | :--- |
 | TOTP secret | Encrypted with Data Protection (purpose `SlimIdentity.TotpSecret.v1`) | Store the string as is |
 | Recovery codes | SHA-256 hashes, salted per user (codes have 80 bits of entropy) | `ValidateAndConsumeRecoveryCodeAsync` deletes **atomically** |
 | Last used code | Unix milliseconds of the last accepted TOTP step / e-mail code (`bigint`) | `TryMarkCodeUsedAsync` is an **atomic compare-and-set** |
+| Last used challenge | Unix milliseconds at which the last completed sign-in challenge was issued (`bigint`, own column) | `TryMarkChallengeUsedAsync` is an **atomic compare-and-set** |
 
 EF Core and Dapper implementations are in [`samples/templates`](../../samples/templates).
 
@@ -37,14 +38,19 @@ EF Core and Dapper implementations are in [`samples/templates`](../../samples/te
 
 **E-mail codes:** `POST /auth/2fa/enable-email` with the current `password`.
 
-Enabling, disabling and regenerating codes rotate the security stamp: other devices are signed out, the calling device
-gets new tokens/cookie in the response.
+Enabling and disabling rotate the security stamp: other devices are signed out, the calling device gets new
+tokens/cookie in the response. Regenerating recovery codes (`POST /auth/2fa/recovery-codes`, password required) only
+replaces the codes – the old ones stop working at once, sessions stay as they are.
 
 ## Signing in
 
 1. `POST /auth/login` → `401 { "status": "requires_two_factor", "preAuthToken": "…", "twoFactorMethod": "totp" | "email" }`.
    For e-mail 2FA the code has just been sent.
 2. `POST /auth/login/2fa` with `preAuthToken` and `code` – or `recoveryCode` – → session.
+   A wrong code can be corrected with the same `preAuthToken` (failures count towards the lockout); after a successful
+   sign-in the `preAuthToken` is used up. If a user has two challenges open at once (two devices), completing the
+   newer one invalidates the older one – that device signs in again.
+   In cookie mode (`/login?useCookies=true`) this step needs the CSRF header like every other cookie request.
 
 ## Remember this device (optional)
 

@@ -14,8 +14,9 @@ If you find a gap, please report it privately ([SECURITY.md](../SECURITY.md)).
 - The **Data Protection key ring** is persisted, protected and shared between instances
   ([guide](guides/data-protection.md)). It encrypts cookies, refresh tokens, all mail links and the TOTP secrets.
 - `Tokens.JwtSecret` is random (≥ 32 bytes) and kept secret.
-- The stores honour their contracts – in particular case-insensitive e-mail lookup, a unique e-mail constraint and
-  **atomic** consumption of refresh tokens, recovery codes and 2FA time steps.
+- The stores honour their contracts – in particular case-insensitive e-mail lookup, a unique e-mail constraint,
+  **atomic** consumption of refresh tokens, recovery codes, 2FA time steps and sign-in challenges, and **narrow,
+  atomic** updates of the lockout counter and rehashed passwords.
 
 ## Threats and mitigations
 
@@ -28,11 +29,13 @@ If you find a gap, please report it privately ([SECURITY.md](../SECURITY.md)).
 | Account enumeration | Identical answers for `/register`, `/forgot-password`, `/resend-verification`, `/change-email`; mails sent in the background; dummy hashing for unknown, inactive and locked accounts; `/login` hides inactive/locked state by default. |
 | Timing attacks on secrets | Constant-time comparison of tokens, stamps, TOTP codes; passwords via `PasswordHasher` (PBKDF2). |
 | Hash-flooding / DoS with huge passwords | Passwords longer than `Password.MaximumLength` are rejected before hashing. |
-| CSRF on cookie sessions | `SameSite=Strict` by default + mandatory custom header (`X-CSRF`, forces a CORS preflight) + `Origin` check. |
+| CSRF on cookie sessions | `SameSite=Strict` by default + mandatory custom header (`X-CSRF`, forces a CORS preflight) + `Origin` check – also for the 2FA step of a cookie sign-in, which is recognized by its signed challenge. |
 | Cookie theft via XSS | Cookies are `HttpOnly` and `Secure`. (XSS itself must be prevented by the front end.) |
 | Stolen refresh token | Rotation (single use) + reuse detection: replay of a used token revokes the token family (or all sessions). Absolute chain lifetime of 30 days. |
 | Stolen access token | Short lifetime (15 min); with server-side sessions and per-request validation a revoked session stops working immediately. |
 | Replayed 2FA code (phishing proxy, shoulder surfing) | Every TOTP time step and every e-mail code is accepted at most once (RFC 6238 §5.2, atomic store update). Every wrong code counts towards the lockout. |
+| Reused sign-in challenge (`preAuthToken`) | The challenge stands for the verified password; it completes at most one sign-in (atomic store update), so a captured token cannot mint further sessions with later codes or recovery codes. |
+| Parallel requests (races) | Failed attempts are counted with an atomic increment, so parallel guesses cannot slip past the lockout; sign-in bookkeeping never writes back a whole user, so a failed login or a rehash cannot undo a concurrent password change; a duplicate registration gets the uniform answer. |
 | Stolen "remember this device" token | Off by default; the password is still required; the token is bound to user and security stamp, expires (≤ 90 days) and is revoked by password change, sign out everywhere, 2FA changes and "forget all devices". Never issued after a recovery code. |
 | Database leak → 2FA bypass | TOTP secrets are encrypted with Data Protection before they reach the store; recovery codes have 80 bits of entropy and are stored as SHA-256 salted per user. A database dump alone yields neither. |
 | Sessions after password change, ban, 2FA or e-mail change | Security stamp rotation invalidates cookies, JWTs, refresh tokens and pending links; validated on every bearer request and every `SecurityStampValidationInterval` for cookies. |

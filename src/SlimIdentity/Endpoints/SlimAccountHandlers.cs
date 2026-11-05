@@ -46,20 +46,30 @@ internal sealed class SlimAccountHandlers(
             // (sent in the background, so the mail server's latency is not observable).
             credentials.HashPassword(new SlimUser { Email = email! }, request.Password);
             Log.RegistrationForExistingAccount(logger, existing.Id);
-            metrics.Registration("existing_account");
-            var existingEmail = existing.Email;
-            await mail.SendAsync("account-exists", (s, c) => s.SendAccountExistsEmailAsync(existingEmail, c), ct);
-            return accepted;
+            return await AccountExistsAsync(existing.Email);
         }
 
         var hash = credentials.HashPassword(new SlimUser { Email = email! }, request.Password);
         var user = await store.CreateAsync(email!, hash, ct);
+        if (user is null)
+        {
+            // a concurrent registration took the address between the lookup and the insert – same answer as above
+            Log.RegistrationRaceLost(logger);
+            return await AccountExistsAsync(email!);
+        }
         metrics.Registration("created");
 
         if (O.Endpoints.EnableEmailVerification && !user.EmailConfirmed)
             await SendVerificationAsync(user, ct);
 
         return accepted;
+
+        async Task<IResult> AccountExistsAsync(string existingEmail)
+        {
+            metrics.Registration("existing_account");
+            await mail.SendAsync("account-exists", (s, c) => s.SendAccountExistsEmailAsync(existingEmail, c), ct);
+            return accepted;
+        }
     }
 
     // ------------------------------------------------------------------ POST /verify-email & /resend-verification

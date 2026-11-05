@@ -29,4 +29,12 @@ public interface ISlimTwoFactorStore
     /// and return whether a row was updated. A code is thereby accepted at most once.
     /// </summary>
     Task<bool> TryMarkCodeUsedAsync(SlimUser user, long usedAt, CancellationToken ct);
+
+    /// <summary>
+    /// Makes a sign-in challenge (<c>preAuthToken</c>) single use: stores <paramref name="issuedAt"/> (unix milliseconds
+    /// at which the challenge was issued) and returns <c>true</c> only if it is <b>greater</b> than the value stored
+    /// before. Same atomic compare-and-set as <see cref="TryMarkCodeUsedAsync"/>, but on a <b>separate</b> value, e.g.
+    /// <c>UPDATE users SET last_2fa_challenge_at = @issuedAt WHERE id = @id AND (last_2fa_challenge_at IS NULL OR last_2fa_challenge_at &lt; @issuedAt)</c>.
+    /// </summary>
+    Task<bool> TryMarkChallengeUsedAsync(SlimUser user, long issuedAt, CancellationToken ct);
 }

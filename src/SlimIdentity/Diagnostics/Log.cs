@@ -45,6 +45,9 @@ internal static partial class Log
     [LoggerMessage(2006, LogLevel.Error, "SlimIdentity: the TOTP secret of user {UserId} cannot be decrypted (Data Protection key ring lost or changed?). The user has to sign in with a recovery code.")]
     public static partial void TotpSecretUndecryptable(ILogger logger, Exception exception, string userId);
 
+    [LoggerMessage(2008, LogLevel.Warning, "SlimIdentity: reused or superseded sign-in challenge for user {UserId} rejected.")]
+    public static partial void TwoFactorChallengeReplayed(ILogger logger, string userId);
+
     // ---------------------------------------------------------------- 3xxx tokens and sessions
     [LoggerMessage(3001, LogLevel.Information, "SlimIdentity: unknown refresh token for user {UserId}.")]
     public static partial void UnknownRefreshToken(ILogger logger, string userId);
@@ -64,6 +67,9 @@ internal static partial class Log
     // ---------------------------------------------------------------- 4xxx account
     [LoggerMessage(4001, LogLevel.Information, "SlimIdentity: registration attempt for existing account {UserId}.")]
     public static partial void RegistrationForExistingAccount(ILogger logger, string userId);
+
+    [LoggerMessage(4006, LogLevel.Information, "SlimIdentity: concurrent registration for an address that was taken in the meantime.")]
+    public static partial void RegistrationRaceLost(ILogger logger);
 
     [LoggerMessage(4002, LogLevel.Information, "SlimIdentity: password of user {UserId} reset.")]
     public static partial void PasswordReset(ILogger logger, string userId);

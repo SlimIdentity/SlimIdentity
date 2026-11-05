@@ -19,11 +19,21 @@ public interface ISlimUserStore
 {
     Task<SlimUser?> FindByEmailAsync(string email, CancellationToken ct);              // case-insensitive!
     Task<SlimUser?> FindByIdAsync(string userId, CancellationToken ct);
-    Task<SlimUser> CreateAsync(string email, string passwordHash, CancellationToken ct);
+    Task<SlimUser?> CreateAsync(string email, string passwordHash, CancellationToken ct); // null if the address is taken
     Task UpdateSecurityStateAsync(SlimUser user, CancellationToken ct);                // persist the security fields only
+    Task<bool> UpdateEmailAsync(SlimUser user, string newEmail, CancellationToken ct); // false if the address is taken
     Task<IReadOnlyCollection<Claim>> GetClaimsAsync(SlimUser user, CancellationToken ct); // roles, tenant id, …
+
+    // sign-in bookkeeping – narrow, atomic statements (one UPDATE each)
+    Task<int> IncrementFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct);  // returns the new count
+    Task SetLockoutEndAsync(SlimUser user, DateTimeOffset? lockoutEndUtc, CancellationToken ct);
+    Task ResetFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct);
+    Task UpdatePasswordHashAsync(SlimUser user, string currentHash, string newHash, CancellationToken ct); // only if unchanged
 }
 ```
+
+The narrow methods exist because sign-in requests are slow (password hashing) and run in parallel: they must never
+write back a whole, possibly outdated `SlimUser` – that could undo a password change that happened in the meantime.
 
 `SlimUser` is a plain transfer object with the security fields only (`Id`, `Email`, `PasswordHash`, `SecurityStamp`,
 `IsActive`, `EmailConfirmed`, `FailedLoginAttempts`, `LockoutEndUtc`, `TwoFactorEnabled`). Your own user entity stays

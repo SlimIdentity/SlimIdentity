@@ -76,8 +76,10 @@ public sealed class LegacyMd5MigrationValidator(
                 System.Text.Encoding.ASCII.GetBytes(legacy), System.Text.Encoding.ASCII.GetBytes(user.PasswordHash[4..])))
             return false;
 
-        user.PasswordHash = hasher.HashPassword(user, providedPassword); // upgrade to PBKDF2
-        await store.UpdateSecurityStateAsync(user, ct);
+        // upgrade to PBKDF2 – conditional, so a password change in the meantime is never undone
+        var upgraded = hasher.HashPassword(user, providedPassword);
+        await store.UpdatePasswordHashAsync(user, user.PasswordHash, upgraded, ct);
+        user.PasswordHash = upgraded;
         return true;
     }
 }

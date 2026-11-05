@@ -28,6 +28,12 @@ First public release (1.0.0) in preparation.
   `GET /password-policy` so front ends can show and live-check the active rules.
 - Metrics on the meter `SlimIdentity` (System.Diagnostics.Metrics, OpenTelemetry-ready) and source-generated logs with
   stable event ids.
+- Race and replay hardening: sign-in challenges (`preAuthToken`) complete at most one sign-in
+  (`ISlimTwoFactorStore.TryMarkChallengeUsedAsync`); atomic, narrow sign-in bookkeeping in `ISlimUserStore`
+  (`IncrementFailedLoginAttemptsAsync`, `SetLockoutEndAsync`, `ResetFailedLoginAttemptsAsync`,
+  `UpdatePasswordHashAsync`) so parallel failures are all counted and never undo a password change; `CreateAsync`
+  returns `null` for a taken address (uniform answer for concurrent registrations); CSRF check for the 2FA step of a
+  cookie sign-in.
 - Native AOT and trimming compatibility.
 - Samples for EF Core, Dapper, MailKit, SendGrid, outbox delivery, LDAP, client certificates (mTLS), Data Protection
   key ring persistence, Have I Been Pwned, admin endpoints and a TypeScript client (incl. QR code for TOTP setup).

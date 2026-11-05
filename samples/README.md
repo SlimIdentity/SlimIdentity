@@ -22,19 +22,26 @@ keeps the core package free of EF Core, Dapper, SMTP & co. CI compiles them agai
 ## Rules for your own stores
 
 - `FindByEmailAsync` must search **case-insensitively** (e.g. a normalized column with a unique index).
+- `CreateAsync` returns `null` if the address is already taken (unique index on the normalized address,
+  `ON CONFLICT DO NOTHING` / catch the unique violation) – concurrent registrations then get the uniform answer.
 - `UpdateSecurityStateAsync` persists only the security fields of `SlimUser`
   (PasswordHash, SecurityStamp, EmailConfirmed, FailedLoginAttempts, LockoutEndUtc, TwoFactorEnabled).
+- The sign-in bookkeeping methods touch **only their own columns**, in a single statement:
+  `IncrementFailedLoginAttemptsAsync` (`SET failed = failed + 1 … RETURNING failed`), `SetLockoutEndAsync`,
+  `ResetFailedLoginAttemptsAsync` and `UpdatePasswordHashAsync` (`… WHERE password_hash = @currentHash`). Never
+  implement them by writing back the whole user – a concurrent password change could be undone.
 - `UpdateEmailAsync` changes the address and its normalized column and returns `false` if it is already taken – let
   the unique constraint decide instead of checking first.
 - `ValidateAndConsumeRefreshTokenAsync` / `ValidateAndConsumeRecoveryCodeAsync` must delete **atomically**
   (`DELETE … RETURNING` or `ExecuteDeleteAsync() == 1`), otherwise parallel replays are possible.
-- `TryMarkCodeUsedAsync` must be an **atomic compare-and-set**
-  (`UPDATE … SET last = @v WHERE id = @id AND (last IS NULL OR last < @v)` and return whether a row changed).
+- `TryMarkCodeUsedAsync` and `TryMarkChallengeUsedAsync` must be **atomic compare-and-sets** on two **separate**
+  columns (`UPDATE … SET last = @v WHERE id = @id AND (last IS NULL OR last < @v)` and return whether a row changed).
 - TOTP secrets arrive encrypted – store the string as is; do not decrypt or re-encode it.
 - `IsActive = false` **plus** `ISlimAuthManager.SignOutEverywhereAsync(user)` ends all sessions of a user immediately.
 - `ISlimSessionStore`: `FindAsync` must not return revoked sessions (deleting the row is enough); clean up expired rows
   regularly (`DELETE … WHERE expires_utc < now()`). `UserAgent` / `IpAddress` are personal data – only store them if
   your device list needs them.
-- Invited users are created with an empty `passwordHash` (`CreateAsync(email, "")`) before calling `CreateInvitationAsync`.
+- Invited users are created with an empty `passwordHash` (`CreateAsync(email, "")`) before calling
+  `CreateInvitationAsync`; a `null` result means the address is already registered.
 - Custom claims from `GetClaimsAsync`: `ClaimTypes.Role` is normalized to `role`; reserved claims
   (`sub`, `email`, `slim_stamp`, `amr`, `act`, `sid`, `auth_time`) are ignored.

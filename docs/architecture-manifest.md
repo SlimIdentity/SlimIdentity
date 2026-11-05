@@ -50,11 +50,11 @@ No profile or business data – that stays in the host's own user model.
 
 | Interface | Required | Enables |
 | :--- | :--- | :--- |
-| `ISlimUserStore` | yes | everything (find, create, persist security state, change e-mail, host claims) |
+| `ISlimUserStore` | yes | everything (find, create, persist security state, atomic sign-in bookkeeping, change e-mail, host claims) |
 | `ISlimEmailSender` | yes | verification, reset, 2FA codes, e-mail change; optional "account exists", lockout and "address changed" notices |
 | `ISlimRefreshTokenStore` | – | `/refresh`, refresh tokens (hashes only, atomic consumption) |
 | `ISlimSessionStore` | – | server-side sessions, per-device logout, `/sessions` |
-| `ISlimTwoFactorStore` | – | `/login/2fa`, `/2fa/*` (encrypted TOTP secrets, recovery-code hashes, replay protection) |
+| `ISlimTwoFactorStore` | – | `/login/2fa`, `/2fa/*` (encrypted TOTP secrets, recovery-code hashes, replay protection, single-use challenges) |
 | `ISlimExternalLoginStore` | – | OAuth/OIDC login and account linking (also used for client certificates) |
 | `ISlimApiKeyStore` | – | `X-API-Key` authentication (key hashes only) |
 | `ISlimCustomPasswordValidator` | – | LDAP / legacy password verification |
@@ -143,6 +143,9 @@ Deliberately not part of the package (extra dependency, highly deployment specif
 | TOTP secrets are encrypted by the library, not by the store | "Hardened" must not depend on every store author remembering it; the key ring has to be protected anyway. |
 | Recovery codes: 80 bits + per-user salted SHA-256 instead of a keyed HMAC | At 80 bits an offline search is infeasible; a separate HMAC key would add a secret to manage (and lose) without real gain. |
 | Replay protection via one "last used" value per user | RFC 6238 §5.2; a single atomic compare-and-set covers TOTP steps and e-mail codes. |
+| Single-use challenges via a second "last used" value | Code times and challenge times cannot share one counter (a code from the current step may predate a new challenge); a second compare-and-set needs no token table. Of two open challenges only the newer one can still complete. |
+| Narrow store methods for sign-in bookkeeping | Sign-ins are slow (hashing) and parallel; writing back the whole user could undo a concurrent password change, and read-modify-write would lose failed attempts. One small statement each is easy to implement atomically in any database. |
+| `CreateAsync` returns `null` for a taken address | The unique index decides, not a prior lookup – concurrent registrations get the uniform answer instead of an error. |
 | Metrics via `System.Diagnostics.Metrics` | Zero dependency, OpenTelemetry-ready, no cost when nobody listens. |
 | "Remember this device" is stateless and off by default | Signed token bound to the security stamp: no table, revoked by every security event; "forget all" rotates the stamp (other sessions end, too). |
 | QR codes are rendered by the front end | No image dependency; the front end controls size and styling. |

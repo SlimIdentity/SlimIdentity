@@ -38,12 +38,46 @@ public sealed class InMemoryUserStore : ISlimUserStore
     public Task<SlimUser?> FindByIdAsync(string userId, CancellationToken ct) =>
         Task.FromResult(_users.TryGetValue(userId, out var u) ? Clone(u) : null);
 
-    public Task<SlimUser> CreateAsync(string email, string passwordHash, CancellationToken ct)
+    public Task<SlimUser?> CreateAsync(string email, string passwordHash, CancellationToken ct)
     {
-        var user = new SlimUser { Id = Guid.NewGuid().ToString(), Email = email, PasswordHash = passwordHash };
-        _users[user.Id] = user;
-        _roles[user.Id] = [];
-        return Task.FromResult(Clone(user));
+        lock (_users)
+        {
+            // "unique index": null if the address is taken (e.g. by a concurrent registration)
+            if (_users.Values.Any(u => string.Equals(u.Email, email, StringComparison.OrdinalIgnoreCase)))
+                return Task.FromResult<SlimUser?>(null);
+            var user = new SlimUser { Id = Guid.NewGuid().ToString(), Email = email, PasswordHash = passwordHash };
+            _users[user.Id] = user;
+            _roles[user.Id] = [];
+            return Task.FromResult<SlimUser?>(Clone(user));
+        }
+    }
+
+    // sign-in bookkeeping: narrow, atomic updates (never write back a whole, possibly outdated user)
+    public Task<int> IncrementFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct)
+    {
+        var stored = _users[user.Id];
+        lock (stored) return Task.FromResult(++stored.FailedLoginAttempts);
+    }
+
+    public Task SetLockoutEndAsync(SlimUser user, DateTimeOffset? lockoutEndUtc, CancellationToken ct)
+    {
+        var stored = _users[user.Id];
+        lock (stored) stored.LockoutEndUtc = lockoutEndUtc;
+        return Task.CompletedTask;
+    }
+
+    public Task ResetFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct)
+    {
+        var stored = _users[user.Id];
+        lock (stored) { stored.FailedLoginAttempts = 0; stored.LockoutEndUtc = null; }
+        return Task.CompletedTask;
+    }
+
+    public Task UpdatePasswordHashAsync(SlimUser user, string currentHash, string newHash, CancellationToken ct)
+    {
+        var stored = _users[user.Id];
+        lock (stored) if (stored.PasswordHash == currentHash) stored.PasswordHash = newHash;
+        return Task.CompletedTask;
     }
 
     // persists the security fields only (contract of ISlimUserStore)
@@ -111,6 +145,17 @@ public sealed class InMemoryTwoFactorStore : ISlimTwoFactorStore
     private readonly ConcurrentDictionary<string, string> _secrets = new();   // encrypted by SlimIdentity
     private readonly ConcurrentDictionary<string, HashSet<string>> _recovery = new();
     private readonly ConcurrentDictionary<string, long> _lastCodeUse = new();
+    private readonly ConcurrentDictionary<string, long> _lastChallengeUse = new();
+
+    public Task<bool> TryMarkChallengeUsedAsync(SlimUser user, long issuedAt, CancellationToken ct)
+    {
+        lock (_lastChallengeUse)
+        {
+            if (_lastChallengeUse.TryGetValue(user.Id, out var last) && last >= issuedAt) return Task.FromResult(false);
+            _lastChallengeUse[user.Id] = issuedAt;
+            return Task.FromResult(true);
+        }
+    }
 
     public Task<string?> GetTotpSecretAsync(SlimUser user, CancellationToken ct) =>
         Task.FromResult(_secrets.TryGetValue(user.Id, out var s) && s.Length > 0 ? s : null);

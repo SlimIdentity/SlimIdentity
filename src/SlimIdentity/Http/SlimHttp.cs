@@ -24,6 +24,17 @@ internal sealed class SlimCsrfEndpointFilter(IOptions<SlimIdentityOptions> optio
             return await next(context);
         }
 
+        return Validate(request, o, logger) ?? await next(context);
+    }
+
+    /// <summary>
+    /// Header and <c>Origin</c> check. Also called by handlers that learn about cookie mode only from a signed token in
+    /// the body (e.g. <c>/login/2fa</c>), which the filter cannot see. Returns <c>null</c> if the request passes.
+    /// </summary>
+    internal static IResult? Validate(HttpRequest request, SlimIdentityOptions o, ILogger logger)
+    {
+        if (!o.Csrf.Enabled) return null;
+
         if (!request.Headers.ContainsKey(o.Csrf.HeaderName))
             return SlimResults.Status("csrf_validation_failed", $"Missing anti-forgery header '{o.Csrf.HeaderName}'.", StatusCodes.Status403Forbidden);
 
@@ -44,7 +55,7 @@ internal sealed class SlimCsrfEndpointFilter(IOptions<SlimIdentityOptions> optio
             return SlimResults.Status("csrf_validation_failed", "Origin not allowed.", StatusCodes.Status403Forbidden);
         }
 
-        return await next(context);
+        return null;
     }
 
     private static bool IsCookieContext(HttpRequest request, SlimIdentityOptions o)

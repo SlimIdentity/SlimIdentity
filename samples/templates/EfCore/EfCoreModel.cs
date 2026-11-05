@@ -22,6 +22,7 @@ public class AppUser
     public bool TwoFactorEnabled { get; set; }
     public string? TotpSecret { get; set; }            // encrypted by SlimIdentity
     public long? LastTwoFactorCodeAt { get; set; }     // replay protection (unix milliseconds)
+    public long? LastTwoFactorChallengeAt { get; set; } // single-use sign-in challenge (unix milliseconds)
 
     // --- your business data – SlimIdentity never sees it
     public string? DisplayName { get; set; }

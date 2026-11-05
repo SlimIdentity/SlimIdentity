@@ -14,6 +14,7 @@ CREATE TABLE users (
     two_factor_enabled    boolean      NOT NULL DEFAULT false,
     totp_secret           text         NULL,   -- ISlimTwoFactorStore; already encrypted by SlimIdentity
     last_2fa_code_at      bigint       NULL,   -- ISlimTwoFactorStore replay protection (unix milliseconds)
+    last_2fa_challenge_at bigint       NULL,   -- ISlimTwoFactorStore single-use sign-in challenge (unix milliseconds)
     -- business columns belong to you:
     display_name          text         NULL
 );
