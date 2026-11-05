@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <!--
+    Compile check for the copy-paste samples (they are not part of the solution).
+    CI builds this project so the samples never drift from the library API:
+      dotnet build samples/SamplesCheck
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <OutputType>Library</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\**\*.cs" Exclude="..\SamplesCheck\**;..\**\bin\**;..\**\obj\**" />
+    <ProjectReference Include="..\..\src\SlimIdentity\SlimIdentity.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.*" />
+    <PackageReference Include="Dapper" Version="2.*" />
+    <PackageReference Include="Npgsql" Version="10.*" />
+    <PackageReference Include="MailKit" Version="4.*" />
+    <PackageReference Include="SendGrid" Version="9.*" />
+    <PackageReference Include="System.DirectoryServices.Protocols" Version="10.0.*" />
+  </ItemGroup>
+</Project>

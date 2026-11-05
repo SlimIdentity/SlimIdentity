@@ -1,115 +1,139 @@
 # SlimIdentity
 
-Pragmatische, datenbankagnostische Authentifizierungs- und Security-Fassade für ASP.NET Core (.NET 10).
-Gehärtete JSON-Endpoints für SPAs und Mobile-Apps – ohne Identity-Tabellen, ohne Generics, ohne Basisklassen.
-Die Spezifikation steht im [Architektur-Manifest v1.2](docs/architecture-manifest.md)
-(inkl. Änderungen gegenüber dem Entwurf v1.1 und mTLS-Leitfaden).
+[![CI](https://github.com/timmkautz/slimidentity/actions/workflows/ci.yml/badge.svg)](https://github.com/timmkautz/slimidentity/actions/workflows/ci.yml)
+[![NuGet](https://img.shields.io/nuget/vpre/SlimIdentity.svg)](https://www.nuget.org/packages/SlimIdentity)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/timmkautz/slimidentity/blob/main/LICENSE)
+
+**Hardened authentication endpoints for ASP.NET Core – without Identity tables, generics or base classes.**
+
+SlimIdentity gives SPAs (Blazor, React, Vue, …) and mobile apps a complete, best-practice login API in a few lines,
+while your project keeps full control over its database, ORM and user model. It sits between hand-written login
+endpoints (easy to get wrong) and `Microsoft.AspNetCore.Identity` / `MapIdentityApi` (a fixed table schema).
+
+> **Status: preview (0.x).** The API may still change and the code has not been independently audited yet.
+> Please report security issues privately – see [SECURITY.md](https://github.com/timmkautz/slimidentity/blob/main/SECURITY.md).
+
+## Features
+
+- **Bring your own database** – implement one small interface (`ISlimUserStore`); no EF Core, Dapper or driver dependency.
+- **Cookies or JWT** per request (`?useCookies=true`): HttpOnly/Secure/SameSite cookies with CSRF protection, or
+  access + refresh tokens with rotation, reuse detection and an absolute session lifetime.
+- **Server-side sessions** (optional): real per-device logout, "your devices" list, sign out everywhere.
+- **Brute-force protection**: per-IP rate limiting plus progressive account lockout; uniform answers and timing
+  against account enumeration.
+- **2FA**: TOTP (authenticator apps), e-mail codes, recovery codes.
+- **External login**: any ASP.NET Core OAuth/OIDC handler (Google, Microsoft Entra ID, Keycloak, …) with safe account linking.
+- **Workflows**: registration, e-mail verification, password reset/change, invitations – stateless, single-use links.
+- **Admin tooling**: impersonation (RFC 8693 `act` claim), step-up "sudo" mode, API keys for machine-to-machine access.
+- **Framework native**: uses the built-in cookie/JWT handlers, `PasswordHasher`, Data Protection and rate limiter;
+  `[Authorize]` and policies just work. Full OpenAPI metadata for client generation.
+- **Fail-fast configuration**: options from code and/or `appsettings.json`, validated at startup.
 
 ## Quickstart
+
+```bash
+dotnet add package SlimIdentity --prerelease
+```
 
 ```csharp
 builder.Services.AddSlimIdentity(builder.Configuration.GetSection("SlimIdentity"), o =>
     {
-        o.Tokens.JwtSecret = Environment.GetEnvironmentVariable("JWT_SECRET")!;
+        o.Tokens.JwtSecret = builder.Configuration["Jwt:Secret"]!; // >= 32 bytes
     })
-    .AddUserStore<MyUserStore>()              // Pflicht
-    .AddEmailSender<MyEmailSender>()          // Pflicht (oder .AddNullEmailSender())
-    .AddRefreshTokenStore<MyTokenStore>()     // optional → /refresh
-    .AddSessionStore<MySessionStore>()        // optional → /logout pro Gerät, /sessions
-    .AddTwoFactorStore<MyTotpStore>()         // optional → /login/2fa, /2fa/*
-    .AddExternalLoginStore<MyOAuthStore>()    // optional → /login/{provider}
-    .AddApiKeyStore<MyApiKeyStore>()          // optional → X-API-Key Handler
-    .AddCustomPasswordValidator<MyLdap>();    // optional → LDAP / Legacy
+    .AddUserStore<MyUserStore>()              // required: your database
+    .AddEmailSender<MyEmailSender>()          // required (or .AddNullEmailSender() for development)
+    .AddRefreshTokenStore<MyTokenStore>()     // optional → /auth/refresh
+    .AddSessionStore<MySessionStore>()        // optional → per-device logout, /auth/sessions
+    .AddTwoFactorStore<MyTotpStore>()         // optional → /auth/login/2fa, /auth/2fa/*
+    .AddExternalLoginStore<MyOAuthStore>()    // optional → /auth/login/{provider}
+    .AddApiKeyStore<MyApiKeyStore>()          // optional → X-API-Key authentication
+    .AddCustomPasswordValidator<MyLdap>();    // optional → LDAP / legacy hashes
 
 var app = builder.Build();
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
-app.MapSlimIdentityApi();
+app.MapSlimIdentityApi();   // /auth/login, /auth/refresh, /auth/me, …
 ```
 
-Demo starten: `dotnet run --project tests/SlimIdentityDemo` und `SlimIdentityDemo.http` verwenden
-(Admin: `admin@demo.local` / `Admin123!`). OpenAPI: `/openapi/v1.json`.
+Ready-to-copy store implementations for **EF Core** and **Dapper**, mail senders (**MailKit**, **SendGrid**, outbox),
+LDAP, admin endpoints and a **TypeScript client** are in [`samples/`](https://github.com/timmkautz/slimidentity/tree/main/samples).
 
-## Endpoints (Prefix `/auth`)
+Try it locally: `dotnet run --project tests/SlimIdentityDemo` and use `SlimIdentityDemo.http`
+(admin: `admin@demo.local` / `Admin123!`, OpenAPI at `/openapi/v1.json`).
 
-| Route | Methode | Aktiv wenn |
+## Endpoints (prefix `/auth`)
+
+| Route | Method | Available when |
 | :--- | :--- | :--- |
-| `/login` | POST | immer – `?useCookies=true` für Cookie-Modus |
+| `/login` | POST | always – `?useCookies=true` for cookie mode |
 | `/login/2fa` | POST | `ISlimTwoFactorStore` |
-| `/login/{provider}` (+ `/callback`) | GET | `ISlimExternalLoginStore` + Remote-Handler (Google, OIDC, …) |
-| `/login/external/exchange` | POST | `ISlimExternalLoginStore` + JWT erlaubt |
-| `/logout` | POST | `Endpoints.EnableLogout` – aktuelle Session |
-| `/logout-all` | POST | `Endpoints.EnableLogout` (authentifiziert) – alle Geräte |
-| `/refresh` | POST | `ISlimRefreshTokenStore` + JWT erlaubt |
-| `/sessions`, `/sessions/{id}` | GET/DELETE | `ISlimSessionStore` (authentifiziert) |
+| `/login/{provider}` (+ `/callback`) | GET | `ISlimExternalLoginStore` + a remote handler (Google, OIDC, …) |
+| `/login/external/exchange` | POST | `ISlimExternalLoginStore` + JWT enabled |
+| `/logout` | POST | `Endpoints.EnableLogout` – current session |
+| `/logout-all` | POST | `Endpoints.EnableLogout` (authenticated) – all devices |
+| `/refresh` | POST | `ISlimRefreshTokenStore` + JWT enabled |
+| `/sessions`, `/sessions/{id}` | GET / DELETE | `ISlimSessionStore` (authenticated) |
 | `/register` | POST | `Endpoints.EnableRegistration` |
-| `/invitation/info`, `/invitation/accept` | POST | `Endpoints.EnableInvitations` |
 | `/verify-email`, `/resend-verification` | POST | `Endpoints.EnableEmailVerification` |
 | `/forgot-password`, `/reset-password` | POST | `Endpoints.EnablePasswordReset` |
-| `/change-password` | POST | `Endpoints.EnableChangePassword` (authentifiziert) |
-| `/me` | GET | `Endpoints.EnableMe` (authentifiziert) |
-| `/2fa`, `/2fa/setup`, `/2fa/enable`, `/2fa/enable-email`, `/2fa/disable`, `/2fa/recovery-codes` | GET/POST | `ISlimTwoFactorStore` (authentifiziert) |
+| `/invitation/info`, `/invitation/accept` | POST | `Endpoints.EnableInvitations` |
+| `/change-password` | POST | `Endpoints.EnableChangePassword` (authenticated) |
+| `/me` | GET | `Endpoints.EnableMe` (authenticated) |
+| `/2fa`, `/2fa/setup`, `/2fa/enable`, `/2fa/enable-email`, `/2fa/disable`, `/2fa/recovery-codes` | GET / POST | `ISlimTwoFactorStore` (authenticated) |
 
-## Verhalten, das man kennen sollte
+## Things worth knowing
 
-- **Claims** sind in Cookie und JWT identisch und kurz: `sub`, `email`, `role`, `amr`, `auth_time`, `sid`, `act`, `sudo_until`, `slim_stamp`.
-  `User.GetSlimUserId()`, `GetImpersonatorId()`, `IsInSudoMode()` helfen beim Auslesen.
-- **Authentication-Schemes:** `SlimIdentity` (Policy-Scheme, Default) leitet je nach Request an
-  `SlimIdentity.Bearer`, `SlimIdentity.ApiKey` oder `SlimIdentity.Cookie` weiter. Abschaltbar über
-  `Endpoints.ConfigureDefaultAuthenticationScheme = false`.
-- **CSRF (Cookie-Modus):** Zustandsändernde Requests brauchen den Header `X-CSRF` (beliebiger Wert);
-  ein vorhandener `Origin` muss die API selbst oder in `Csrf.AllowedOrigins` sein. Eigene Endpoints: `.RequireSlimCsrf()`.
-- **Security-Stamp:** Bearer-Requests werden bei jedem Request geprüft, Cookies alle
-  `Cookies.SecurityStampValidationInterval` (Default 1 min, `0` = jeder Request).
-- **Lockout (progressiv):** Alle `Lockout.MaxFailedAttempts` Fehlversuche wird gesperrt – 1 min, 2, 4, 8 … bis
-  `Lockout.MaxDuration` (1 h). Zurückgesetzt wird nur durch einen erfolgreichen Login. Optional
-  `SendLockoutNotificationEmailAsync` bei der ersten Sperre einer Serie.
-  Bei aktivem 2FA wird der Zähler erst nach dem zweiten Faktor zurückgesetzt.
-- **Login-Antworten:** Default einheitlich 401 `invalid_credentials` für falsches Passwort, inaktives und gesperrtes
-  Konto (keine Enumeration). `SignIn.RevealAccountState = true` liefert 403 `account_disabled` bzw. 423 mit `lockoutEndUtc`.
-- **Refresh-Tokens** sind DataProtector-Payloads, an den Security-Stamp gebunden; der Store sieht nur den SHA-256-Hash.
-  Einmal verwendbar; ein wiederverwendetes Token gilt als gestohlen (`Tokens.RevokeSessionsOnRefreshTokenReuse`):
-  mit Session-Store wird die Session widerrufen, sonst rotiert der Stamp (alle Geräte abgemeldet).
-  Gleitend `Tokens.RefreshTokenLifetime` (7 Tage), absolut `Tokens.RefreshTokenAbsoluteLifetime` (30 Tage ab Login).
-  `/refresh` hat ein eigenes, großzügiges Rate-Limit (`RateLimit.RefreshPermitLimit`, 60/min).
-  Clients müssen parallele Refreshes bündeln (siehe `samples/Frontend`), sonst löst der zweite die Reuse-Erkennung aus.
-- **Sessions:** Ohne `ISlimSessionStore` sind Sessions zustandslos – `/logout` löscht nur Cookie bzw. Refresh-Token,
-  ein kopiertes Cookie bleibt bis zum Ablauf gültig; `/logout-all` beendet trotzdem alles (Stamp-Rotation).
-  Mit Session-Store bekommt jede Anmeldung eine `sid`, die bei jeder Prüfung (Bearer: jeder Request,
-  Cookie: alle `SecurityStampValidationInterval`) gegen den Store geht. `ISlimAuthManager.SignOutEverywhereAsync(user)` für Banns.
-- **Einladungen:** User ohne Passwort anlegen (`CreateAsync(email, "")`), `ISlimAuthManager.CreateInvitationAsync(user)`
-  liefert Link + Ablauf (`Links.InvitationUrl`, Default 7 Tage), Versand macht der Host. Die SPA nutzt
-  `/invitation/info` und `/invitation/accept`. Einmalig (Stamp-Bindung), überlebt Neustarts.
-- **External Login:** Fehler kommen als Redirect auf die `returnUrl` mit `?slim_error=<code>` (`account_conflict` = 409-Fall).
-  Bearer-Clients erhalten `?code=…` und tauschen ihn über `/login/external/exchange`. Ist 2FA aktiv, kommt
-  `?slim_status=requires_two_factor&preAuthToken=…`.
-- **DataProtection:** In Multi-Instance-Deployments Key-Ring persistieren (`PersistKeysTo…`), sonst sind
-  Cookies, Reset-Links und Refresh-Tokens instanzgebunden.
-- **Rate-Limiter:** Partitioniert nach `RemoteIpAddress` – hinter Reverse-Proxies `UseForwardedHeaders()` vorschalten.
-- **Mails ohne Timing-Leck:** Verifizierungs-, Reset- und „Konto existiert bereits“-Mails gehen über eine
-  In-Memory-Queue an einen Hintergrund-Service (`Email.SendInBackground`, Default `true`). Die Antwortzeit von
-  `/register`, `/forgot-password` und `/resend-verification` hängt damit nicht vom Mailserver ab.
-  Fehler beim Versand werden geloggt. Beim regulären Herunterfahren wird die Queue innerhalb von
-  `HostOptions.ShutdownTimeout` geleert; nur ein Absturz verliert Mails (garantierte Zustellung:
-  `samples/Email/OutboxEmailSender.cs` + `SendInBackground = false`). 2FA-Codes werden weiterhin direkt verschickt.
-- **`/register` mit existierender Adresse:** gleiche Antwort wie bei neuen Konten, der echte Postfachinhaber erhält
-  `SendAccountExistsEmailAsync` (Default-Interface-Methode – ohne Implementierung wird keine Mail verschickt).
-- **Impersonation:** Der `act`-Claim enthält ID **und Security-Stamp** des Admins. Wird der Admin deaktiviert oder
-  rotiert sein Stamp, sind alle von ihm gestarteten Impersonation-Sessions sofort ungültig.
-  Zurück zum Admin nur über `ISlimAuthManager.EndImpersonationAsync()` (prüft Stamp und `IsActive` erneut).
+- **Claims** are identical and short in cookies and JWTs: `sub`, `email`, `role`, `amr`, `auth_time`, `sid`, `act`,
+  `sudo_until`, `slim_stamp`. Helpers: `User.GetSlimUserId()`, `GetImpersonatorId()`, `IsInSudoMode()`.
+- **Authentication schemes:** the policy scheme `SlimIdentity` (default) forwards to `SlimIdentity.Bearer`,
+  `SlimIdentity.ApiKey` or `SlimIdentity.Cookie`. Disable with `Endpoints.ConfigureDefaultAuthenticationScheme = false`.
+- **CSRF (cookie mode):** state-changing requests need the header `X-CSRF` (any value); a present `Origin` must be
+  the API itself or listed in `Csrf.AllowedOrigins`. Protect your own endpoints with `.RequireSlimCsrf()`.
+- **Security stamp:** bearer requests are re-validated on every request, cookies every
+  `Cookies.SecurityStampValidationInterval` (default 1 min, `0` = every request). Rotating the stamp ends all sessions.
+- **Login answers:** by default wrong password, unknown, inactive and locked accounts all get the same
+  `401 invalid_credentials` (and the same hashing time). `SignIn.RevealAccountState = true` returns
+  `403 account_disabled` / `423` with `lockoutEndUtc` instead.
+- **Progressive lockout:** every `Lockout.MaxFailedAttempts` failures lock the account – 1 min, then 2, 4, 8 … up to
+  `Lockout.MaxDuration` (1 h). Only a successful sign-in resets the counter. Optional notification mail on the first
+  lockout of a series. With 2FA the counter is reset only after the second factor.
+- **Refresh tokens** are Data Protection payloads bound to the security stamp; the store only sees a SHA-256 hash.
+  Single use; a reused token is treated as stolen (`Tokens.RevokeSessionsOnRefreshTokenReuse`): with a session store
+  that session is revoked, otherwise the stamp rotates (all devices signed out). Sliding lifetime
+  `Tokens.RefreshTokenLifetime` (7 days), absolute `Tokens.RefreshTokenAbsoluteLifetime` (30 days from sign-in).
+  `/refresh` has its own, generous rate limit (`RateLimit.RefreshPermitLimit`, 60/min).
+  Clients must not refresh the same token in parallel (see the TypeScript sample) – the second call would look like a replay.
+- **Sessions:** without `ISlimSessionStore` sessions are stateless – `/logout` only deletes the cookie / consumes the
+  refresh token, a copied cookie stays valid until it expires, but `/logout-all` still ends everything.
+  With a session store every sign-in gets a `sid` that is checked on every validation. Use
+  `ISlimAuthManager.SignOutEverywhereAsync(user)` when banning users.
+- **Invitations:** create the user without a password (`CreateAsync(email, "")`), call
+  `ISlimAuthManager.CreateInvitationAsync(user)` and send the returned link yourself (`Links.InvitationUrl`, default
+  validity 7 days). The SPA calls `/invitation/info` and `/invitation/accept`. Single use, survives restarts.
+- **External login:** errors redirect to the `returnUrl` with `?slim_error=<code>` (`account_conflict` for an
+  unverified e-mail that already has an account). Bearer clients receive `?code=…` and exchange it at
+  `/login/external/exchange`; with 2FA they receive `?slim_status=requires_two_factor&preAuthToken=…`.
+- **Mails without timing leaks:** verification, reset, "account exists" and lockout mails are sent by a background
+  queue (`Email.SendInBackground`, default `true`), so response times do not depend on the mail server. The queue is
+  drained on a regular shutdown (`HostOptions.ShutdownTimeout`); only a crash loses mails. For guaranteed delivery
+  use an outbox (`samples/Email/OutboxEmailSender.cs`) with `SendInBackground = false`. 2FA codes are sent directly.
+- **Impersonation:** the `act` claim contains the admin's id **and security stamp** – banning the admin or rotating
+  their stamp ends all impersonation sessions immediately. Return via `ISlimAuthManager.EndImpersonationAsync()`.
+- **Data Protection:** persist the key ring (`PersistKeysTo…`) in multi-instance or container deployments, otherwise
+  cookies, links and refresh tokens are tied to one instance and lost on restart.
 
-## Betrieb hinter einem Reverse-Proxy (TLS-Terminierung)
+## Running behind a reverse proxy (TLS termination)
 
-Das Cookie bekommt immer das `Secure`-Flag (`SecurePolicy = Always`) und funktioniert daher auch, wenn intern
-HTTP gesprochen wird. Alles andere braucht die echten Werte aus `X-Forwarded-*`:
+The auth cookie always gets the `Secure` flag, so it works even if the proxy talks plain HTTP to the app.
+Everything else needs the real values from `X-Forwarded-*`:
 
-| Ohne `UseForwardedHeaders()` | Folge |
+| Without `UseForwardedHeaders()` | Effect |
 | :--- | :--- |
-| `Request.Scheme` = `http` | CSRF-Origin-Check schlägt fehl (403 `csrf_validation_failed` bei jedem Cookie-POST) |
-| OAuth-`redirect_uri` = `http://…` | Identity Provider lehnt den Login ab |
-| `UseHttpsRedirection()` | Redirect-Schleife bzw. 307 bei POSTs |
-| `RemoteIpAddress` = Proxy-IP | Alle Nutzer teilen sich **einen** Rate-Limit-Bucket |
+| `Request.Scheme` is `http` | CSRF origin check fails (`403 csrf_validation_failed` on every cookie POST) |
+| OAuth `redirect_uri` is `http://…` | The identity provider rejects the login |
+| `UseHttpsRedirection()` | Redirect loop, or `307` for POSTs |
+| `RemoteIpAddress` is the proxy | All users share **one** rate-limit bucket |
 
 ```csharp
 builder.Services.Configure<ForwardedHeadersOptions>(o =>
@@ -121,18 +145,28 @@ builder.Services.Configure<ForwardedHeadersOptions>(o =>
 app.UseForwardedHeaders();   // before UseHttpsRedirection, UseRateLimiter, UseAuthentication
 ```
 
-- Default vertraut nur Loopback. In Docker/Kubernetes werden die Header sonst **stillschweigend ignoriert**.
-- `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true` aktiviert For + Proto, vertraut aber **jedem** Absender –
-  nur verwenden, wenn die App ausschließlich über den Proxy erreichbar ist.
-- Der Proxy muss den `Host` weiterreichen (nginx: `proxy_set_header Host $host;`) oder `X-Forwarded-Host` setzen.
-- Die Demo liest `ReverseProxy:KnownProxies`, `ReverseProxy:KnownNetworks` und `ReverseProxy:AllowedHosts` aus der Konfiguration.
-- Alternative nur für die CSRF-Prüfung: öffentliche Adresse in `Csrf.AllowedOrigins` eintragen.
-- DataProtection-Key-Ring persistieren, sonst sind nach jedem Container-Neustart alle Cookies/Tokens ungültig.
+- By default only loopback proxies are trusted – in Docker/Kubernetes the headers are otherwise **silently ignored**.
+- `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true` enables For + Proto but trusts **every** sender – only use it if the app
+  is reachable exclusively through the proxy.
+- The proxy must pass the `Host` header (nginx: `proxy_set_header Host $host;`) or set `X-Forwarded-Host`.
+- Alternative for the CSRF check only: add the public origin to `Csrf.AllowedOrigins`.
 
-## Bekannte Grenzen (bewusst stateless)
+## Known limitations
 
-- TOTP-Codes und E-Mail-Codes sind innerhalb ihres Zeitfensters nicht gegen Replay geschützt
-  (das `preAuthToken` ist bis zu `Tokens.PreAuthTokenLifetime` wiederverwendbar).
-- `/register` legt bei neuen Adressen einen Datensatz an (`CreateAsync`) – diese eine Datenbank-Schreiboperation
-  kann die Antwortzeit gegenüber existierenden Adressen noch leicht verändern. Der Mailversand spielt keine Rolle mehr.
-- mTLS-Client-Zertifikate sind nicht im Kern – Leitfaden in [Manifest, Abschnitt 9](docs/architecture-manifest.md#9-mtls--client-zertifikate-dokumentiert-nicht-im-kern).
+- TOTP and e-mail codes are not protected against replay within their time window (the `preAuthToken` can be reused
+  until `Tokens.PreAuthTokenLifetime`); failed codes count towards the lockout.
+- `/register` writes a row for new addresses (`CreateAsync`); this single database write can still make the response
+  slightly slower than for existing addresses.
+- Rate limiting is partitioned by client IP only.
+- mTLS client certificates are not built in – see the
+  [guide in the architecture document](https://github.com/timmkautz/slimidentity/blob/main/docs/architecture-manifest.md#9-mtls--client-certificates-documented-not-built-in).
+
+## Documentation
+
+- [Architecture & design specification](https://github.com/timmkautz/slimidentity/blob/main/docs/architecture-manifest.md)
+- [Samples](https://github.com/timmkautz/slimidentity/tree/main/samples)
+- [Security policy](https://github.com/timmkautz/slimidentity/blob/main/SECURITY.md)
+
+## License
+
+[MIT](https://github.com/timmkautz/slimidentity/blob/main/LICENSE) © Timm Kautz

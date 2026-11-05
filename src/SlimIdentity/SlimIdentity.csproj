@@ -7,19 +7,48 @@
     <RootNamespace>SlimIdentity</RootNamespace>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
 
-    <!-- NuGet -->
+  <!-- NuGet package -->
+  <PropertyGroup>
     <IsPackable>true</IsPackable>
     <PackageId>SlimIdentity</PackageId>
-    <Version>0.1.0</Version>
-    <Description>Pragmatic, database-agnostic authentication and security facade for ASP.NET Core (cookies, JWT, refresh tokens, 2FA, OIDC, API keys) without Identity tables.</Description>
-    <PackageTags>aspnetcore;authentication;identity;jwt;cookies;2fa;totp;oidc</PackageTags>
+    <Authors>Timm Kautz</Authors>
+    <Copyright>Copyright (c) 2026 Timm Kautz</Copyright>
+    <Description>Pragmatic, database-agnostic authentication facade for ASP.NET Core: hardened JSON endpoints for SPAs and mobile apps (cookies or JWT, refresh-token rotation, server-side sessions, 2FA/TOTP, OAuth/OIDC, invitations, API keys) on top of the framework's own handlers – without Identity tables, generics or base classes. You keep your database and your user model.</Description>
+    <PackageTags>aspnetcore;authentication;identity;security;jwt;cookies;refresh-token;2fa;totp;oidc;spa;minimal-api</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/timmkautz/slimidentity</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/timmkautz/slimidentity</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageReleaseNotes>See https://github.com/timmkautz/slimidentity/releases</PackageReleaseNotes>
+
+    <!-- debugging into the package: SourceLink (built into the SDK) + symbol package -->
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+
+    <!-- validates package layout now; add PackageValidationBaselineVersion after the first release -->
+    <EnablePackageValidation>true</EnablePackageValidation>
+
+    <!-- version from git tags (v1.2.3); untagged builds become 0.1.0-alpha.0.N -->
+    <MinVerTagPrefix>v</MinVerTagPrefix>
+    <MinVerMinimumMajorMinor>0.1</MinVerMinimumMajorMinor>
   </PropertyGroup>
 
   <ItemGroup>
     <!-- Library (no Web SDK): pulls in ASP.NET Core incl. Microsoft.Extensions.Identity.Core, DataProtection, RateLimiting, Cookies. -->
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.9" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.14" />
+    <PackageReference Include="MinVer" Version="8.0.0" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <InternalsVisibleTo Include="SlimIdentity.Tests" />
   </ItemGroup>
 
   <ItemGroup>

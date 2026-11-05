@@ -1,27 +1,28 @@
-# SlimIdentity – Copy-Paste-Vorlagen
+# SlimIdentity – copy-paste samples
 
-Diese Dateien sind **keine** NuGet-Abhängigkeiten und werden nicht mitgebaut. Sie werden in das eigene
-Projekt kopiert und angepasst – so bleibt das Kernpaket frei von EF Core, Dapper, SMTP & Co.
+These files are **not** NuGet dependencies and are not part of the solution. Copy them into your project and adapt
+them – this keeps the core package free of EF Core, Dapper, SMTP & co.
+CI compiles them against the current library (`dotnet build samples/SamplesCheck`) so they never drift from the API.
 
-| Ordner | Inhalt | Pakete im Host |
+| Folder | Content | Packages in your host |
 | :--- | :--- | :--- |
-| `EfCore/` | `AppDbContext` + alle Stores (User, Refresh, 2FA, External Login, API-Key, Sessions) | `Microsoft.EntityFrameworkCore` + Provider |
+| `EfCore/` | `AppDbContext` + all stores (user, refresh, 2FA, external login, API key, sessions) | `Microsoft.EntityFrameworkCore` + provider |
 | `Dapper/` | `schema.sql` (PostgreSQL), `DapperUserStore`, `DapperRefreshTokenStore` | `Dapper`, `Npgsql` |
-| `Email/` | `MailKitEmailSender`, `SendGridEmailSender`, `LoggingEmailSender`, `OutboxEmailSender` + `OutboxMailWorker` (garantierte Zustellung) | `MailKit` bzw. `SendGrid`, EF Core |
-| `Enterprise/` | `LdapPasswordValidator`, Legacy-Hash-Migration, Admin-Endpoints (Impersonation, Sudo, API-Keys, Einladungen, Bann) | `System.DirectoryServices.Protocols` |
-| `Frontend/` | `slimIdentityClient.ts` – Cookie-Flow (inkl. `X-CSRF`, Geräteliste, Einladung) und Bearer-Flow mit Refresh-Rotation | – |
+| `Email/` | `MailKitEmailSender`, `SendGridEmailSender`, `LoggingEmailSender`, `OutboxEmailSender` + `OutboxMailWorker` (guaranteed delivery) | `MailKit` or `SendGrid`, EF Core |
+| `Enterprise/` | `LdapPasswordValidator`, legacy hash migration, admin endpoints (impersonation, sudo, API keys, invitations, ban) | `System.DirectoryServices.Protocols` |
+| `Frontend/` | `slimIdentityClient.ts` – cookie flow (incl. `X-CSRF`, device list, invitations) and bearer flow with refresh rotation | – |
 
-## Wichtige Regeln für eigene Stores
+## Rules for your own stores
 
-- `FindByEmailAsync` muss **case-insensitiv** suchen (z. B. über eine normalisierte Spalte mit Unique-Index).
-- `UpdateSecurityStateAsync` persistiert ausschließlich die Security-Felder des `SlimUser`
+- `FindByEmailAsync` must search **case-insensitively** (e.g. a normalized column with a unique index).
+- `UpdateSecurityStateAsync` persists only the security fields of `SlimUser`
   (PasswordHash, SecurityStamp, EmailConfirmed, FailedLoginAttempts, LockoutEndUtc, TwoFactorEnabled).
-- `ValidateAndConsumeRefreshTokenAsync` / `ValidateAndConsumeRecoveryCodeAsync` müssen **atomar** löschen
-  (`DELETE … RETURNING` bzw. `ExecuteDeleteAsync() == 1`), sonst sind parallele Replays möglich.
-- `IsActive = false` **plus** `ISlimAuthManager.SignOutEverywhereAsync(user)` beendet alle Sessions eines Users sofort.
-- `ISlimSessionStore`: `FindAsync` liefert widerrufene Sessions nicht mehr (Löschen genügt); abgelaufene Zeilen
-  regelmäßig aufräumen (`DELETE … WHERE expires_utc < now()`). `UserAgent`/`IpAddress` sind personenbezogen –
-  nur speichern, wenn die Geräteliste sie braucht.
-- Eingeladene User werden mit leerem `passwordHash` angelegt (`CreateAsync(email, "")`); erst dann `CreateInvitationAsync`.
-- Eigene Claims aus `GetClaimsAsync`: `ClaimTypes.Role` wird automatisch zu `role` normalisiert,
-  reservierte Claims (`sub`, `email`, `slim_stamp`, `amr`, `act`) werden ignoriert.
+- `ValidateAndConsumeRefreshTokenAsync` / `ValidateAndConsumeRecoveryCodeAsync` must delete **atomically**
+  (`DELETE … RETURNING` or `ExecuteDeleteAsync() == 1`), otherwise parallel replays are possible.
+- `IsActive = false` **plus** `ISlimAuthManager.SignOutEverywhereAsync(user)` ends all sessions of a user immediately.
+- `ISlimSessionStore`: `FindAsync` must not return revoked sessions (deleting the row is enough); clean up expired rows
+  regularly (`DELETE … WHERE expires_utc < now()`). `UserAgent` / `IpAddress` are personal data – only store them if
+  your device list needs them.
+- Invited users are created with an empty `passwordHash` (`CreateAsync(email, "")`) before calling `CreateInvitationAsync`.
+- Custom claims from `GetClaimsAsync`: `ClaimTypes.Role` is normalized to `role`; reserved claims
+  (`sub`, `email`, `slim_stamp`, `amr`, `act`, `sid`, `auth_time`) are ignored.

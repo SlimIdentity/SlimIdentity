@@ -184,7 +184,7 @@ internal sealed class SlimLoginHandlers(
             return SlimResults.BadRequest("invalid_request", "refreshToken is required.");
 
         // signature + expiry of the token itself (DataProtector) – forged or expired tokens never reach the store
-        if (!workflow.TryUnprotect<SlimRefreshPayload>(SlimWorkflowTokens.RefreshTokenPurpose, request.RefreshToken, out var payload))
+        if (!workflow.TryUnprotect<SlimRefreshPayload>(SlimWorkflowTokens.RefreshTokenPurpose, request.RefreshToken, out var payload, out var tokenExpiresAt))
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
 
         // consume first: a token can be used at most once
@@ -196,7 +196,10 @@ internal sealed class SlimLoginHandlers(
         {
             // A genuine, unexpired token whose stamp is still current but that is no longer in the store has been
             // used before (or was logged out): RFC 9700 says treat it as stolen and revoke the token family.
-            if (stampValid && O.Tokens.RevokeSessionsOnRefreshTokenReuse)
+            // Tokens at the very end of their lifetime are excluded – the store may already have expired them
+            // (clock drift between app and database), which is not a replay.
+            var clearlyUnexpired = tokenExpiresAt - time.GetUtcNow() > O.Tokens.ClockSkew;
+            if (stampValid && clearlyUnexpired && O.Tokens.RevokeSessionsOnRefreshTokenReuse)
                 await HandleRefreshTokenReuseAsync(user!, payload, ct);
             else
                 logger.LogInformation("SlimIdentity: unknown refresh token for user {UserId}.", payload.Uid);
