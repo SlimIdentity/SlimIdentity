@@ -5,11 +5,11 @@ Projekt kopiert und angepasst – so bleibt das Kernpaket frei von EF Core, Dapp
 
 | Ordner | Inhalt | Pakete im Host |
 | :--- | :--- | :--- |
-| `EfCore/` | `AppDbContext` + alle Stores (User, Refresh, 2FA, External Login, API-Key) | `Microsoft.EntityFrameworkCore` + Provider |
+| `EfCore/` | `AppDbContext` + alle Stores (User, Refresh, 2FA, External Login, API-Key, Sessions) | `Microsoft.EntityFrameworkCore` + Provider |
 | `Dapper/` | `schema.sql` (PostgreSQL), `DapperUserStore`, `DapperRefreshTokenStore` | `Dapper`, `Npgsql` |
-| `Email/` | `MailKitEmailSender`, `SendGridEmailSender`, `LoggingEmailSender` | `MailKit` bzw. `SendGrid` |
-| `Enterprise/` | `LdapPasswordValidator`, Legacy-Hash-Migration, Admin-Endpoints (Impersonation, Sudo, API-Keys, Invite-Registrierung) | `System.DirectoryServices.Protocols` |
-| `Frontend/` | `slimIdentityClient.ts` – Cookie-Flow (inkl. `X-CSRF`) und Bearer-Flow mit Refresh-Rotation | – |
+| `Email/` | `MailKitEmailSender`, `SendGridEmailSender`, `LoggingEmailSender`, `OutboxEmailSender` + `OutboxMailWorker` (garantierte Zustellung) | `MailKit` bzw. `SendGrid`, EF Core |
+| `Enterprise/` | `LdapPasswordValidator`, Legacy-Hash-Migration, Admin-Endpoints (Impersonation, Sudo, API-Keys, Einladungen, Bann) | `System.DirectoryServices.Protocols` |
+| `Frontend/` | `slimIdentityClient.ts` – Cookie-Flow (inkl. `X-CSRF`, Geräteliste, Einladung) und Bearer-Flow mit Refresh-Rotation | – |
 
 ## Wichtige Regeln für eigene Stores
 
@@ -18,6 +18,10 @@ Projekt kopiert und angepasst – so bleibt das Kernpaket frei von EF Core, Dapp
   (PasswordHash, SecurityStamp, EmailConfirmed, FailedLoginAttempts, LockoutEndUtc, TwoFactorEnabled).
 - `ValidateAndConsumeRefreshTokenAsync` / `ValidateAndConsumeRecoveryCodeAsync` müssen **atomar** löschen
   (`DELETE … RETURNING` bzw. `ExecuteDeleteAsync() == 1`), sonst sind parallele Replays möglich.
-- `IsActive = false` **plus** neuer `SecurityStamp` beendet alle Sessions eines Users sofort.
+- `IsActive = false` **plus** `ISlimAuthManager.SignOutEverywhereAsync(user)` beendet alle Sessions eines Users sofort.
+- `ISlimSessionStore`: `FindAsync` liefert widerrufene Sessions nicht mehr (Löschen genügt); abgelaufene Zeilen
+  regelmäßig aufräumen (`DELETE … WHERE expires_utc < now()`). `UserAgent`/`IpAddress` sind personenbezogen –
+  nur speichern, wenn die Geräteliste sie braucht.
+- Eingeladene User werden mit leerem `passwordHash` angelegt (`CreateAsync(email, "")`); erst dann `CreateInvitationAsync`.
 - Eigene Claims aus `GetClaimsAsync`: `ClaimTypes.Role` wird automatisch zu `role` normalisiert,
   reservierte Claims (`sub`, `email`, `slim_stamp`, `amr`, `act`) werden ignoriert.

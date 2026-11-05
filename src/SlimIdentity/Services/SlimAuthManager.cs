@@ -22,16 +22,21 @@ internal sealed class SlimAuthManager(
     internal const string MethodExternal = "ext";
     internal const string MethodImpersonation = "impersonation";
 
+    private const int MaxUserAgentLength = 256;
+
     private static readonly HashSet<string> ReservedClaims = new(StringComparer.Ordinal)
     {
         SlimClaimTypes.UserId, SlimClaimTypes.Email, SlimClaimTypes.SecurityStamp, SlimClaimTypes.Actor,
-        SlimClaimTypes.AuthenticationMethod, ClaimTypes.NameIdentifier, ClaimTypes.Email,
+        SlimClaimTypes.AuthenticationMethod, SlimClaimTypes.SessionId, SlimClaimTypes.AuthTime,
+        ClaimTypes.NameIdentifier, ClaimTypes.Email,
         JwtRegisteredClaimNames.Iss, JwtRegisteredClaimNames.Aud, JwtRegisteredClaimNames.Exp,
         JwtRegisteredClaimNames.Nbf, JwtRegisteredClaimNames.Iat, JwtRegisteredClaimNames.Jti,
     };
 
     private HttpContext Http => httpContextAccessor.HttpContext
         ?? throw new InvalidOperationException("SlimIdentity: ISlimAuthManager requires an active HttpContext.");
+
+    private ISlimSessionStore? Sessions => services.GetService<ISlimSessionStore>();
 
     // ------------------------------------------------------------------ public API
 
@@ -68,6 +73,9 @@ internal sealed class SlimAuthManager(
         if (actor is null) return SlimAuthResult.Failed("not_impersonating");
 
         var useCookies = current.IsSlimCookieSession();
+        if (current.FindFirst(SlimClaimTypes.SessionId)?.Value is { } sid && Sessions is { } sessions)
+            await sessions.RevokeAsync(sid, ct);
+
         var impersonator = await store.FindByIdAsync(actor.UserId, ct);
         if (impersonator is not { IsActive: true } || !SlimHashing.FixedTimeEquals(impersonator.SecurityStamp, actor.SecurityStamp))
         {
@@ -85,7 +93,7 @@ internal sealed class SlimAuthManager(
     public async Task<SlimAuthResult> ElevateSessionAsync(SlimUser user, IEnumerable<Claim> additionalClaims, bool useCookies, CancellationToken ct = default)
     {
         var current = Http.User;
-        var impersonator = SlimClaims.ParseActorClaim(current.FindFirst(SlimClaimTypes.Actor)?.Value) is { } a
+        var actor = SlimClaims.ParseActorClaim(current.FindFirst(SlimClaimTypes.Actor)?.Value) is { } a
             ? SlimClaims.SerializeActor(a.ToDictionary())
             : null;
         var amr = current.FindFirst(SlimClaimTypes.AuthenticationMethod)?.Value ?? MethodPassword;
@@ -97,16 +105,62 @@ internal sealed class SlimAuthManager(
             persistent = existing.Properties?.IsPersistent ?? false;
         }
 
-        return await SignInCoreAsync(user, useCookies, persistent, amr, additionalClaims, impersonator, issueRefreshToken: false, ct);
+        return await SignInCoreAsync(user, useCookies, persistent, amr, additionalClaims, actor, issueRefreshToken: false, ct,
+            sessionId: CurrentSessionId(current), authTime: CurrentAuthTime(current));
     }
 
     public async Task SignOutAsync(string? refreshToken = null, CancellationToken ct = default)
     {
-        if (!string.IsNullOrWhiteSpace(refreshToken) && services.GetService<ISlimRefreshTokenStore>() is { } refreshStore)
-            await refreshStore.ValidateAndConsumeRefreshTokenAsync(SlimHashing.Sha256Hex(refreshToken), ct);
+        var sessions = Sessions;
+        var sessionIds = new HashSet<string>(StringComparer.Ordinal);
+
+        // the caller's own session (cookie or bearer), even on an anonymous endpoint
+        var principal = Http.User.Identity?.IsAuthenticated == true
+            ? Http.User
+            : (await Http.AuthenticateAsync(SlimIdentityDefaults.AuthenticationScheme)).Principal;
+        if (principal is not null && CurrentSessionId(principal) is { } own) sessionIds.Add(own);
+
+        if (!string.IsNullOrWhiteSpace(refreshToken))
+        {
+            if (services.GetService<ISlimRefreshTokenStore>() is { } refreshStore)
+                await refreshStore.ValidateAndConsumeRefreshTokenAsync(SlimHashing.Sha256Hex(refreshToken), ct);
+            if (workflow.TryUnprotect<SlimRefreshPayload>(SlimWorkflowTokens.RefreshTokenPurpose, refreshToken, out var payload) && payload.Sid is { } sid)
+                sessionIds.Add(sid);
+        }
+
+        if (sessions is not null)
+            foreach (var sid in sessionIds)
+                await sessions.RevokeAsync(sid, ct);
 
         if (options.Value.Endpoints.AllowCookieAuth)
             await Http.SignOutAsync(SlimIdentityDefaults.CookieScheme);
+    }
+
+    public async Task SignOutEverywhereAsync(SlimUser user, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+        user.SecurityStamp = SlimUser.NewSecurityStamp();
+        await store.UpdateSecurityStateAsync(user, ct);
+        await RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
+        logger.LogInformation("SlimIdentity: all sessions of user {UserId} revoked.", user.Id);
+    }
+
+    public Task<SlimInvitation> CreateInvitationAsync(SlimUser user, TimeSpan? lifetime = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+        if (string.IsNullOrEmpty(user.Id) || string.IsNullOrEmpty(user.Email))
+            throw new ArgumentException("SlimIdentity: the invited user must already exist (Id and Email set).", nameof(user));
+        if (!string.IsNullOrEmpty(user.PasswordHash))
+            throw new InvalidOperationException("SlimIdentity: the user already has a password – send a password reset instead of an invitation.");
+
+        var o = options.Value;
+        var validity = lifetime ?? o.Tokens.InvitationTokenLifetime;
+        if (validity <= TimeSpan.Zero || validity > TimeSpan.FromDays(30))
+            throw new ArgumentOutOfRangeException(nameof(lifetime), "SlimIdentity: invitation lifetime must be between 0 and 30 days.");
+
+        var token = workflow.Protect(SlimWorkflowTokens.InvitationPurpose,
+            new SlimInvitationPayload(user.Id, user.Email, user.SecurityStamp), validity);
+        return Task.FromResult(new SlimInvitation(token, SlimWorkflowTokens.BuildLink(o.Links.InvitationUrl, token), time.GetUtcNow() + validity));
     }
 
     // ------------------------------------------------------------------ internal API
@@ -119,18 +173,32 @@ internal sealed class SlimAuthManager(
         IEnumerable<Claim>? additionalClaims,
         string? actorJson,
         bool issueRefreshToken,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? sessionId = null,
+        DateTimeOffset? authTime = null)
     {
         if (!user.IsActive) return SlimAuthResult.Failed("account_inactive");
 
         var o = options.Value;
         var now = time.GetUtcNow();
-        var claims = await BuildClaimsAsync(user, authMethod, additionalClaims, actorJson, ct);
+        var authStart = authTime ?? now;
+        var sessions = Sessions;
+        var newSession = sessions is not null && sessionId is null;
+        if (newSession) sessionId = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(16));
+        if (sessions is null) sessionId = null;
+
+        var claims = await BuildClaimsAsync(user, authMethod, additionalClaims, actorJson, sessionId, authStart, ct);
 
         if (useCookies)
         {
             if (!o.Endpoints.AllowCookieAuth)
                 throw new InvalidOperationException("SlimIdentity: cookie authentication is disabled (Endpoints.AllowCookieAuth).");
+
+            // a new cookie replaces the one of this browser – its old server-side session is gone with it
+            if (newSession && Http.User.IsSlimCookieSession() && CurrentSessionId(Http.User) is { } replaced)
+                await sessions!.RevokeAsync(replaced, ct);
+
+            await TrackSessionAsync(sessions, newSession, sessionId, user.Id, "cookie", authMethod, actorJson, now, now + o.Cookies.ExpireTimeSpan, ct);
 
             var principal = new ClaimsPrincipal(new ClaimsIdentity(
                 claims, SlimIdentityDefaults.CookieScheme, SlimClaimTypes.Email, SlimClaimTypes.Role));
@@ -139,25 +207,31 @@ internal sealed class SlimAuthManager(
             props.Items[SlimSecurityStampValidator.ValidatedAtKey] = now.ToString("O", CultureInfo.InvariantCulture);
 
             await Http.SignInAsync(SlimIdentityDefaults.CookieScheme, principal, props);
-            return new SlimAuthResult { Succeeded = true, UsedCookies = true, Principal = principal };
+            return new SlimAuthResult { Succeeded = true, UsedCookies = true, Principal = principal, SessionId = sessionId };
         }
 
         if (!o.Endpoints.AllowJwtAuth)
             throw new InvalidOperationException("SlimIdentity: JWT authentication is disabled (Endpoints.AllowJwtAuth).");
 
-        var (accessToken, accessExpires) = jwt.CreateAccessToken(claims);
-
         string? refreshToken = null;
         DateTimeOffset? refreshExpires = null;
         if (issueRefreshToken && services.GetService<ISlimRefreshTokenStore>() is { } refreshStore)
         {
-            refreshExpires = now + o.Tokens.RefreshTokenLifetime;
+            // sliding lifetime, capped by the absolute lifetime of the whole chain
+            var absoluteEnd = authStart + o.Tokens.RefreshTokenAbsoluteLifetime;
+            if (absoluteEnd <= now) return SlimAuthResult.Failed("session_expired");
+
+            refreshExpires = Min(now + o.Tokens.RefreshTokenLifetime, absoluteEnd);
             refreshToken = workflow.Protect(
                 SlimWorkflowTokens.RefreshTokenPurpose,
-                new SlimRefreshPayload(user.Id, user.SecurityStamp, authMethod, Convert.ToHexString(RandomNumberGenerator.GetBytes(16))),
-                o.Tokens.RefreshTokenLifetime);
+                new SlimRefreshPayload(user.Id, user.SecurityStamp, authMethod, Convert.ToHexString(RandomNumberGenerator.GetBytes(16)),
+                    authStart.ToUnixTimeSeconds(), sessionId),
+                refreshExpires.Value - now);
             await refreshStore.StoreRefreshTokenAsync(user.Id, SlimHashing.Sha256Hex(refreshToken), refreshExpires.Value, ct);
         }
+
+        var (accessToken, accessExpires) = jwt.CreateAccessToken(claims);
+        await TrackSessionAsync(sessions, newSession, sessionId, user.Id, "bearer", authMethod, actorJson, now, refreshExpires ?? accessExpires, ct);
 
         return new SlimAuthResult
         {
@@ -167,6 +241,7 @@ internal sealed class SlimAuthManager(
             AccessTokenExpiresAt = accessExpires,
             RefreshToken = refreshToken,
             RefreshTokenExpiresAt = refreshExpires,
+            SessionId = sessionId,
             Principal = new ClaimsPrincipal(new ClaimsIdentity(
                 claims, SlimIdentityDefaults.BearerScheme, SlimClaimTypes.Email, SlimClaimTypes.Role)),
         };
@@ -174,25 +249,66 @@ internal sealed class SlimAuthManager(
 
     /// <summary>
     /// Re-issues the session of the current request for <paramref name="user"/> (after stamp rotation),
-    /// so the calling device stays signed in while all others are logged out.
+    /// so the calling device stays signed in (same server-side session) while all others are logged out.
     /// </summary>
     internal async Task<SlimAuthResult> RefreshCurrentSessionAsync(SlimUser user, CancellationToken ct)
     {
         var current = Http.User;
         var amr = current.FindFirst(SlimClaimTypes.AuthenticationMethod)?.Value ?? MethodPassword;
+        var sid = CurrentSessionId(current);
+        var authTime = CurrentAuthTime(current);
 
         if (current.IsSlimCookieSession())
         {
             var existing = await Http.AuthenticateAsync(SlimIdentityDefaults.CookieScheme);
             var persistent = existing.Properties?.IsPersistent ?? false;
-            return await SignInCoreAsync(user, true, persistent, amr, null, null, issueRefreshToken: false, ct);
+            return await SignInCoreAsync(user, true, persistent, amr, null, null, issueRefreshToken: false, ct, sid, authTime);
         }
 
-        return await SignInCoreAsync(user, false, false, amr, null, null, issueRefreshToken: true, ct);
+        return await SignInCoreAsync(user, false, false, amr, null, null, issueRefreshToken: true, ct, sid, authTime);
     }
 
-    private async Task<List<Claim>> BuildClaimsAsync(
-        SlimUser user, string authMethod, IEnumerable<Claim>? additionalClaims, string? actorJson, CancellationToken ct)
+    /// <summary>Revokes server-side sessions after a security-stamp rotation (no-op without <see cref="ISlimSessionStore"/>).</summary>
+    internal async Task RevokeSessionsAsync(string userId, string? exceptSessionId, CancellationToken ct)
+    {
+        if (Sessions is { } sessions) await sessions.RevokeAllAsync(userId, exceptSessionId, ct);
+    }
+
+    internal static string? CurrentSessionId(ClaimsPrincipal principal) => principal.FindFirst(SlimClaimTypes.SessionId)?.Value;
+
+    private static DateTimeOffset? CurrentAuthTime(ClaimsPrincipal principal) =>
+        long.TryParse(principal.FindFirst(SlimClaimTypes.AuthTime)?.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var unix)
+            ? DateTimeOffset.FromUnixTimeSeconds(unix)
+            : null;
+
+    private async Task TrackSessionAsync(ISlimSessionStore? sessions, bool isNew, string? sessionId, string userId, string mode,
+        string authMethod, string? actorJson, DateTimeOffset now, DateTimeOffset expires, CancellationToken ct)
+    {
+        if (sessions is null || sessionId is null) return;
+        if (!isNew)
+        {
+            await sessions.TouchAsync(sessionId, now, expires, ct);
+            return;
+        }
+
+        var userAgent = Http.Request.Headers.UserAgent.ToString();
+        await sessions.CreateAsync(new SlimSession
+        {
+            Id = sessionId,
+            UserId = userId,
+            Mode = mode,
+            AuthenticationMethod = authMethod,
+            ImpersonatorId = SlimClaims.ParseActor(actorJson),
+            CreatedUtc = now,
+            LastSeenUtc = now,
+            ExpiresUtc = expires,
+            UserAgent = userAgent.Length > MaxUserAgentLength ? userAgent[..MaxUserAgentLength] : NullIfEmpty(userAgent),
+            IpAddress = Http.Connection.RemoteIpAddress?.ToString(),
+        }, ct);
+    }
+
+    private async Task<List<Claim>> BuildClaimsAsync(SlimUser user, string authMethod, IEnumerable<Claim>? additionalClaims,
+        string? actorJson, string? sessionId, DateTimeOffset authTime, CancellationToken ct)
     {
         var claims = new List<Claim>
         {
@@ -200,7 +316,9 @@ internal sealed class SlimAuthManager(
             new(SlimClaimTypes.Email, user.Email),
             new(SlimClaimTypes.SecurityStamp, user.SecurityStamp),
             new(SlimClaimTypes.AuthenticationMethod, authMethod),
+            new(SlimClaimTypes.AuthTime, authTime.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture), ClaimValueTypes.Integer64),
         };
+        if (sessionId is not null) claims.Add(new Claim(SlimClaimTypes.SessionId, sessionId));
 
         foreach (var claim in await store.GetClaimsAsync(user, ct))
             AddNormalized(claims, claim);
@@ -227,4 +345,7 @@ internal sealed class SlimAuthManager(
         if (type == SlimClaimTypes.SudoUntil) target.RemoveAll(c => c.Type == SlimClaimTypes.SudoUntil);
         target.Add(new Claim(type, claim.Value, claim.ValueType));
     }
+
+    private static DateTimeOffset Min(DateTimeOffset a, DateTimeOffset b) => a < b ? a : b;
+    private static string? NullIfEmpty(string s) => s.Length == 0 ? null : s;
 }

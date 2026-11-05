@@ -48,6 +48,8 @@ public sealed class SlimEndpointOptions
     public bool EnableChangePassword { get; set; } = true;
     public bool EnableLogout { get; set; } = true;
     public bool EnableMe { get; set; } = true;
+    /// <summary><c>/invitation/info</c> and <c>/invitation/accept</c> (links are created by the host via <c>ISlimAuthManager.CreateInvitationAsync</c>).</summary>
+    public bool EnableInvitations { get; set; } = true;
 
     public bool AllowCookieAuth { get; set; } = true;
     public bool AllowJwtAuth { get; set; } = true;
@@ -66,20 +68,42 @@ public sealed class SlimSignInOptions
 {
     /// <summary>Rejects logins (403 <c>email_not_confirmed</c>) until the e-mail is verified.</summary>
     public bool RequireConfirmedEmail { get; set; }
+
+    /// <summary>
+    /// <c>false</c> (default, OWASP): <c>/login</c> answers inactive and locked accounts exactly like a wrong password
+    /// (401 <c>invalid_credentials</c>, same hashing time), so the response reveals neither existence nor state.
+    /// <c>true</c>: inactive accounts get 403 <c>account_disabled</c>, locked accounts 423 with <c>lockoutEndUtc</c>.
+    /// </summary>
+    public bool RevealAccountState { get; set; }
 }
 
+/// <summary>
+/// Progressive lockout (NIST SP 800-63B: throttle rather than lock hard): every <see cref="MaxFailedAttempts"/>
+/// consecutive failures lock the account, starting with <see cref="Duration"/> and doubling each time up to
+/// <see cref="MaxDuration"/>. The counter is only reset by a successful sign-in.
+/// </summary>
 public sealed class SlimLockoutOptions
 {
     public bool Enabled { get; set; } = true;
     public int MaxFailedAttempts { get; set; } = 5;
-    public TimeSpan Duration { get; set; } = TimeSpan.FromMinutes(15);
+    /// <summary>Duration of the first lockout.</summary>
+    public TimeSpan Duration { get; set; } = TimeSpan.FromMinutes(1);
+    /// <summary>Upper bound for the doubling. Set equal to <see cref="Duration"/> for a constant lockout.</summary>
+    public TimeSpan MaxDuration { get; set; } = TimeSpan.FromHours(1);
 }
 
 public sealed class SlimRateLimitOptions
 {
-    /// <summary>Requests per IP and window on sensitive endpoints (login, 2fa, register, reset, refresh, …).</summary>
+    /// <summary>Requests per IP and window on sensitive endpoints (login, 2fa, register, reset, invitation, …).</summary>
     public int PermitLimit { get; set; } = 10;
     public TimeSpan Window { get; set; } = TimeSpan.FromMinutes(1);
+
+    /// <summary>
+    /// Separate bucket for <c>/refresh</c>. Refresh tokens cannot be guessed (theft is handled by rotation + reuse
+    /// detection), so this is only a load guard and deliberately generous.
+    /// </summary>
+    public int RefreshPermitLimit { get; set; } = 60;
+    public TimeSpan RefreshWindow { get; set; } = TimeSpan.FromMinutes(1);
 }
 
 public sealed class SlimPasswordOptions
@@ -100,7 +124,15 @@ public sealed class SlimTokenOptions
     public string Issuer { get; set; } = "SlimIdentity";
     public string Audience { get; set; } = "SlimIdentityClient";
     public TimeSpan AccessTokenLifetime { get; set; } = TimeSpan.FromMinutes(15);
+    /// <summary>Sliding lifetime: every rotation issues a token valid for this long (capped by the absolute lifetime).</summary>
     public TimeSpan RefreshTokenLifetime { get; set; } = TimeSpan.FromDays(7);
+    /// <summary>Hard upper bound of a refresh-token chain, counted from the original sign-in. Then the user must sign in again.</summary>
+    public TimeSpan RefreshTokenAbsoluteLifetime { get; set; } = TimeSpan.FromDays(30);
+    /// <summary>
+    /// RFC 9700 reuse detection: an already consumed refresh token is treated as stolen. With <c>ISlimSessionStore</c> the
+    /// affected session is revoked, otherwise the security stamp is rotated (all sessions of the user end).
+    /// </summary>
+    public bool RevokeSessionsOnRefreshTokenReuse { get; set; } = true;
     public TimeSpan ClockSkew { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>Checks <c>slim_stamp</c> and <c>IsActive</c> against the store on every bearer request.</summary>
@@ -109,6 +141,8 @@ public sealed class SlimTokenOptions
     public TimeSpan EmailVerificationTokenLifetime { get; set; } = TimeSpan.FromHours(24);
     public TimeSpan PasswordResetTokenLifetime { get; set; } = TimeSpan.FromHours(1);
     public TimeSpan PreAuthTokenLifetime { get; set; } = TimeSpan.FromMinutes(5);
+    /// <summary>Default validity of invitation / "complete your registration" links.</summary>
+    public TimeSpan InvitationTokenLifetime { get; set; } = TimeSpan.FromDays(7);
 }
 
 public sealed class SlimCookieOptions
@@ -158,6 +192,8 @@ public sealed class SlimLinkOptions
     public string? EmailVerificationUrl { get; set; }
     /// <summary>e.g. <c>https://app.domain.de/reset-password?token={token}</c>. Null = raw token is mailed.</summary>
     public string? PasswordResetUrl { get; set; }
+    /// <summary>e.g. <c>https://app.domain.de/accept-invitation?token={token}</c>. Null = only the raw token is returned.</summary>
+    public string? InvitationUrl { get; set; }
 }
 
 public sealed class SlimCsrfOptions

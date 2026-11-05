@@ -130,6 +130,42 @@ public sealed class InMemoryExternalLoginStore(ISlimUserStore users) : ISlimExte
     }
 }
 
+public sealed class InMemorySessionStore : ISlimSessionStore
+{
+    private readonly ConcurrentDictionary<string, SlimSession> _sessions = new();
+
+    public Task CreateAsync(SlimSession session, CancellationToken ct)
+    {
+        _sessions[session.Id] = session;
+        return Task.CompletedTask;
+    }
+
+    public Task<SlimSession?> FindAsync(string sessionId, CancellationToken ct) =>
+        Task.FromResult(_sessions.TryGetValue(sessionId, out var s) ? s : null);
+
+    public Task<IReadOnlyCollection<SlimSession>> ListAsync(string userId, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyCollection<SlimSession>>(_sessions.Values.Where(s => s.UserId == userId).ToList());
+
+    public Task TouchAsync(string sessionId, DateTimeOffset lastSeenUtc, DateTimeOffset expiresUtc, CancellationToken ct)
+    {
+        if (_sessions.TryGetValue(sessionId, out var s)) { s.LastSeenUtc = lastSeenUtc; s.ExpiresUtc = expiresUtc; }
+        return Task.CompletedTask;
+    }
+
+    public Task RevokeAsync(string sessionId, CancellationToken ct)
+    {
+        _sessions.TryRemove(sessionId, out _);
+        return Task.CompletedTask;
+    }
+
+    public Task RevokeAllAsync(string userId, string? exceptSessionId, CancellationToken ct)
+    {
+        foreach (var s in _sessions.Values.Where(s => s.UserId == userId && s.Id != exceptSessionId).ToList())
+            _sessions.TryRemove(s.Id, out _);
+        return Task.CompletedTask;
+    }
+}
+
 /// <summary>One demo key: <c>X-API-Key: demo-key-123</c>.</summary>
 public sealed class InMemoryApiKeyStore : ISlimApiKeyStore
 {
@@ -155,6 +191,9 @@ public sealed class ConsoleEmailSender : ISlimEmailSender
 
     public Task SendAccountExistsEmailAsync(string email, CancellationToken ct) =>
         Write("You already have an account", email, "Someone tried to register with your address. Forgot your password? Use /auth/forgot-password.");
+
+    public Task SendLockoutNotificationEmailAsync(string email, DateTimeOffset lockoutEndUtc, CancellationToken ct) =>
+        Write("Your account was temporarily locked", email, $"Too many failed sign-ins. Locked until {lockoutEndUtc:u}. Not you? Change your password.");
 
     private static Task Write(string subject, string to, string body)
     {

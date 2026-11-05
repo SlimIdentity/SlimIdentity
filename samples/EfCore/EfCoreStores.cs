@@ -8,6 +8,7 @@
 //       .AddTwoFactorStore<EfCoreTwoFactorStore>()
 //       .AddExternalLoginStore<EfCoreExternalLoginStore>()
 //       .AddApiKeyStore<EfCoreApiKeyStore>()
+//       .AddSessionStore<EfCoreSessionStore>()
 //       .AddEmailSender<MailKitEmailSender>();
 
 using System.Security.Claims;
@@ -154,6 +155,53 @@ public sealed class EfCoreExternalLoginStore(AppDbContext db, ISlimUserStore use
         db.ExternalLogins.Add(new ExternalLogin { Provider = provider, ProviderKey = providerKey, UserId = Guid.Parse(userId) });
         await db.SaveChangesAsync(ct);
     }
+}
+
+/// <summary>Server-side sessions (per-device logout, "your devices" list). Clean up expired rows periodically.</summary>
+public sealed class EfCoreSessionStore(AppDbContext db) : ISlimSessionStore
+{
+    public async Task CreateAsync(SlimSession session, CancellationToken ct)
+    {
+        db.Sessions.Add(new UserSession
+        {
+            Id = session.Id, UserId = Guid.Parse(session.UserId), Mode = session.Mode,
+            AuthenticationMethod = session.AuthenticationMethod, ImpersonatorId = session.ImpersonatorId,
+            CreatedUtc = session.CreatedUtc, LastSeenUtc = session.LastSeenUtc, ExpiresUtc = session.ExpiresUtc,
+            UserAgent = session.UserAgent,
+            IpAddress = session.IpAddress, // personal data – drop it here if you do not need it
+        });
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task<SlimSession?> FindAsync(string sessionId, CancellationToken ct) =>
+        await db.Sessions.AsNoTracking().Where(s => s.Id == sessionId).Select(ToSlim).FirstOrDefaultAsync(ct);
+
+    public async Task<IReadOnlyCollection<SlimSession>> ListAsync(string userId, CancellationToken ct)
+    {
+        var id = Guid.Parse(userId);
+        return await db.Sessions.AsNoTracking().Where(s => s.UserId == id).Select(ToSlim).ToListAsync(ct);
+    }
+
+    public Task TouchAsync(string sessionId, DateTimeOffset lastSeenUtc, DateTimeOffset expiresUtc, CancellationToken ct) =>
+        db.Sessions.Where(s => s.Id == sessionId).ExecuteUpdateAsync(s => s
+            .SetProperty(x => x.LastSeenUtc, lastSeenUtc)
+            .SetProperty(x => x.ExpiresUtc, expiresUtc), ct);
+
+    public Task RevokeAsync(string sessionId, CancellationToken ct) =>
+        db.Sessions.Where(s => s.Id == sessionId).ExecuteDeleteAsync(ct);
+
+    public Task RevokeAllAsync(string userId, string? exceptSessionId, CancellationToken ct)
+    {
+        var id = Guid.Parse(userId);
+        return db.Sessions.Where(s => s.UserId == id && s.Id != exceptSessionId).ExecuteDeleteAsync(ct);
+    }
+
+    private static readonly System.Linq.Expressions.Expression<Func<UserSession, SlimSession>> ToSlim = s => new SlimSession
+    {
+        Id = s.Id, UserId = s.UserId.ToString(), Mode = s.Mode, AuthenticationMethod = s.AuthenticationMethod,
+        ImpersonatorId = s.ImpersonatorId, CreatedUtc = s.CreatedUtc, LastSeenUtc = s.LastSeenUtc,
+        ExpiresUtc = s.ExpiresUtc, UserAgent = s.UserAgent, IpAddress = s.IpAddress,
+    };
 }
 
 public sealed class EfCoreApiKeyStore(AppDbContext db, TimeProvider time) : ISlimApiKeyStore

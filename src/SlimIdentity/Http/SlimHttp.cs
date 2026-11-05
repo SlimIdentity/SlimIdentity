@@ -70,7 +70,14 @@ internal sealed class SlimCsrfEndpointFilter(IOptions<SlimIdentityOptions> optio
 }
 
 /// <summary>Layer 1 brute-force protection: fixed window per client IP, 429 + Retry-After.</summary>
-internal sealed class SlimBruteForceRateLimiterPolicy(IOptions<SlimIdentityOptions> options) : IRateLimiterPolicy<string>
+internal sealed class SlimBruteForceRateLimiterPolicy(IOptions<SlimIdentityOptions> options)
+    : SlimIpRateLimiterPolicy(() => (options.Value.RateLimit.PermitLimit, options.Value.RateLimit.Window));
+
+/// <summary>Load guard for <c>/refresh</c>: own, more generous bucket per client IP.</summary>
+internal sealed class SlimRefreshRateLimiterPolicy(IOptions<SlimIdentityOptions> options)
+    : SlimIpRateLimiterPolicy(() => (options.Value.RateLimit.RefreshPermitLimit, options.Value.RateLimit.RefreshWindow));
+
+internal abstract class SlimIpRateLimiterPolicy(Func<(int PermitLimit, TimeSpan Window)> limits) : IRateLimiterPolicy<string>
 {
     public Func<OnRejectedContext, CancellationToken, ValueTask>? OnRejected { get; } = static (context, _) =>
     {
@@ -82,12 +89,12 @@ internal sealed class SlimBruteForceRateLimiterPolicy(IOptions<SlimIdentityOptio
 
     public RateLimitPartition<string> GetPartition(HttpContext httpContext)
     {
-        var o = options.Value.RateLimit;
+        var (permitLimit, window) = limits();
         var key = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
         return RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
         {
-            PermitLimit = o.PermitLimit,
-            Window = o.Window,
+            PermitLimit = permitLimit,
+            Window = window,
             QueueLimit = 0,
             AutoReplenishment = true,
         });

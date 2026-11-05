@@ -22,6 +22,19 @@ export interface LoginChallenge {
   twoFactorMethod?: "totp" | "email";
 }
 
+export interface SessionInfo {
+  id: string;
+  mode: "cookie" | "bearer";
+  authenticationMethod: string;
+  isCurrent: boolean;
+  isImpersonation: boolean;
+  createdUtc: string;
+  lastSeenUtc: string;
+  expiresUtc: string;
+  userAgent?: string;
+  ipAddress?: string;
+}
+
 export type LoginResult =
   | { kind: "ok"; auth: AuthResponse }
   | { kind: "two_factor"; preAuthToken: string; method: "totp" | "email" }
@@ -64,6 +77,35 @@ export const cookieAuth = {
 
   async logout() {
     await cookieFetch("/auth/logout?useCookies=true", { method: "POST", body: "{}" });
+  },
+
+  /** "Sign out on all devices" */
+  async logoutAll() {
+    await cookieFetch("/auth/logout-all", { method: "POST", body: "{}" });
+  },
+
+  /** Active devices (requires ISlimSessionStore on the server). */
+  async sessions(): Promise<SessionInfo[]> {
+    const r = await cookieFetch("/auth/sessions");
+    return r.ok ? r.json() : [];
+  },
+
+  async revokeSession(id: string) {
+    await cookieFetch(`/auth/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
+  },
+
+  /** Invitation page: /accept-invitation?token=... → show e-mail, ask for a password, then accept. */
+  async invitationInfo(token: string): Promise<{ email: string; expiresAt: string } | null> {
+    const r = await cookieFetch("/auth/invitation/info", { method: "POST", body: JSON.stringify({ token }) });
+    return r.ok ? r.json() : null;
+  },
+
+  async acceptInvitation(token: string, password: string): Promise<LoginResult> {
+    const r = await cookieFetch("/auth/invitation/accept?useCookies=true", {
+      method: "POST",
+      body: JSON.stringify({ token, password }),
+    });
+    return toLoginResult(r);
   },
 
   /** Social login is a full-page navigation, not fetch. */
@@ -173,6 +215,7 @@ async function toLoginResult(r: Response): Promise<LoginResult> {
   if (r.ok) return { kind: "ok", auth: body as AuthResponse };
   if (r.status === 401 && body.status === "requires_two_factor")
     return { kind: "two_factor", preAuthToken: body.preAuthToken, method: body.twoFactorMethod };
+  // only with SignIn.RevealAccountState = true – by default locked accounts answer like a wrong password
   if (r.status === 423) return { kind: "locked", until: body.lockoutEndUtc };
   return { kind: "error", status: body.status ?? `http_${r.status}` };
 }

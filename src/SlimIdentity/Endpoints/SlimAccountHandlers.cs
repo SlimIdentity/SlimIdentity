@@ -18,6 +18,7 @@ internal sealed class SlimAccountHandlers(
     IOptions<SlimIdentityOptions> options,
     TimeProvider time,
     IHttpContextAccessor httpContextAccessor,
+    IServiceProvider services,
     ILogger<SlimAccountHandlers> logger)
 {
     private SlimIdentityOptions O => options.Value;
@@ -135,9 +136,99 @@ internal sealed class SlimAccountHandlers(
         credentials.ApplyNewPassword(user, request.NewPassword); // rotates stamp → token single-use, all sessions revoked
         user.EmailConfirmed = true;                               // the mailbox has just been proven
         await store.UpdateSecurityStateAsync(user, ct);
+        await authManager.RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
 
         logger.LogInformation("SlimIdentity: password of user {UserId} reset.", user.Id);
         return SlimResults.Status("password_reset");
+    }
+
+    // ------------------------------------------------------------------ POST /invitation/info & /invitation/accept
+
+    public async Task<IResult> InvitationInfoAsync(SlimInvitationInfoRequest? request, CancellationToken ct)
+    {
+        var (user, _, expiresAt) = await LoadInvitationAsync(request?.Token, ct);
+        return user is null
+            ? SlimResults.InvalidToken()
+            : Results.Ok(new SlimInvitationInfoResponse(user.Email, expiresAt));
+    }
+
+    public async Task<IResult> AcceptInvitationAsync(SlimAcceptInvitationRequest? request, bool? useCookies, CancellationToken ct)
+    {
+        if (!SlimModes.TryResolve(O, useCookies, out var cookies, out var modeError)) return modeError!;
+
+        var (user, _, _) = await LoadInvitationAsync(request?.Token, ct);
+        if (user is null) return SlimResults.InvalidToken();
+
+        if (services.GetService<ISlimCustomPasswordValidator>() is not null)
+            return SlimResults.BadRequest("password_managed_externally",
+                "Passwords are validated externally (LDAP / custom validator); invitations cannot set one.");
+        if (passwordPolicy.Validate(request!.Password) is { } errors)
+            return SlimResults.Validation(errors);
+
+        credentials.ApplyNewPassword(user, request.Password); // rotates the stamp → the link is single-use
+        user.EmailConfirmed = true;                            // the invitation was delivered to this mailbox
+        await store.UpdateSecurityStateAsync(user, ct);
+        await authManager.RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
+        logger.LogInformation("SlimIdentity: invitation accepted by user {UserId}.", user.Id);
+
+        // 2FA users (pre-provisioned by the host) sign in normally to pass the second factor
+        if (user.TwoFactorEnabled)
+            return SlimResults.Status("invitation_accepted", "Password set. Please sign in.");
+
+        var result = await authManager.SignInCoreAsync(user, cookies, false, SlimAuthManager.MethodPassword, null, null, true, ct);
+        return result.Succeeded ? Results.Ok(result.ToResponse(time.GetUtcNow())) : SlimResults.InvalidToken();
+    }
+
+    private async Task<(SlimUser? User, SlimInvitationPayload? Payload, DateTimeOffset ExpiresAt)> LoadInvitationAsync(string? token, CancellationToken ct)
+    {
+        if (!workflow.TryUnprotect<SlimInvitationPayload>(SlimWorkflowTokens.InvitationPurpose, token, out var payload, out var expiresAt))
+            return (null, null, default);
+
+        var user = await store.FindByIdAsync(payload.Uid, ct);
+        if (user is null
+            || !user.IsActive
+            || !string.IsNullOrEmpty(user.PasswordHash) // already completed
+            || !string.Equals(user.Email, payload.Email, StringComparison.OrdinalIgnoreCase)
+            || !SlimHashing.FixedTimeEquals(user.SecurityStamp, payload.Stamp))
+            return (null, null, default);
+
+        return (user, payload, expiresAt);
+    }
+
+    // ------------------------------------------------------------------ GET /sessions & DELETE /sessions/{id}
+
+    public async Task<IResult> ListSessionsAsync(CancellationToken ct)
+    {
+        var (user, error) = await LoadCurrentUserAsync(forbidImpersonation: false, ct);
+        if (user is null) return error!;
+
+        var sessions = services.GetRequiredService<ISlimSessionStore>();
+        var current = SlimAuthManager.CurrentSessionId(Http.User);
+        var now = time.GetUtcNow();
+        var list = (await sessions.ListAsync(user.Id, ct))
+            .Where(s => s.ExpiresUtc > now && string.Equals(s.UserId, user.Id, StringComparison.Ordinal))
+            .OrderByDescending(s => s.LastSeenUtc)
+            .Select(s => new SlimSessionDto(s.Id, s.Mode, s.AuthenticationMethod, s.Id == current, s.ImpersonatorId is not null,
+                s.CreatedUtc, s.LastSeenUtc, s.ExpiresUtc, s.UserAgent, s.IpAddress))
+            .ToList();
+        return Results.Ok(list);
+    }
+
+    public async Task<IResult> RevokeSessionAsync(string sessionId, CancellationToken ct)
+    {
+        var (user, error) = await LoadCurrentUserAsync(forbidImpersonation: true, ct);
+        if (user is null) return error!;
+
+        var sessions = services.GetRequiredService<ISlimSessionStore>();
+        var session = await sessions.FindAsync(sessionId, ct);
+        if (session is null || !string.Equals(session.UserId, user.Id, StringComparison.Ordinal))
+            return SlimResults.Status("session_not_found", "The session does not exist.", StatusCodes.Status404NotFound);
+
+        await sessions.RevokeAsync(sessionId, ct);
+        if (sessionId == SlimAuthManager.CurrentSessionId(Http.User) && Http.User.IsSlimCookieSession())
+            await Http.SignOutAsync(SlimIdentityDefaults.CookieScheme);
+
+        return SlimResults.Status("session_revoked");
     }
 
     // ------------------------------------------------------------------ POST /change-password (authenticated)
@@ -165,6 +256,7 @@ internal sealed class SlimAccountHandlers(
 
         credentials.ApplyNewPassword(user, request.NewPassword); // rotates stamp → other devices are signed out
         await store.UpdateSecurityStateAsync(user, ct);
+        await authManager.RevokeSessionsAsync(user.Id, SlimAuthManager.CurrentSessionId(Http.User), ct);
 
         // keep the calling device signed in
         var session = await authManager.RefreshCurrentSessionAsync(user, ct);
@@ -211,6 +303,5 @@ internal sealed class SlimAccountHandlers(
         return user is { IsActive: true } ? (user, null) : (null, Results.Unauthorized());
     }
 
-    private static string BuildLink(string? template, string token) =>
-        template is null ? token : template.Replace("{token}", Uri.EscapeDataString(token), StringComparison.Ordinal);
+    private static string BuildLink(string? template, string token) => SlimWorkflowTokens.BuildLink(template, token);
 }

@@ -33,6 +33,9 @@ internal sealed class SlimLoginHandlers(
         if (request is null || string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrEmpty(request.Password))
             return SlimResults.BadRequest("invalid_request", "E-mail and password are required.");
 
+        // Oversized passwords are never hashed (DoS) – identical answer for known and unknown accounts.
+        if (request.Password.Length > O.Password.MaximumLength) return SlimResults.InvalidCredentials();
+
         var user = await store.FindByEmailAsync(request.Email.Trim(), ct);
         if (user is null)
         {
@@ -40,17 +43,28 @@ internal sealed class SlimLoginHandlers(
             return SlimResults.InvalidCredentials();
         }
 
-        // Fast blocker: no hashing for disabled accounts
-        if (!user.IsActive) return SlimResults.InvalidCredentials();
-
+        // Inactive / locked accounts: by default indistinguishable from a wrong password (same answer, same hashing time).
+        // Attempts during a lockout are neither verified nor counted.
+        var reveal = O.SignIn.RevealAccountState;
         var now = time.GetUtcNow();
-        if (user.IsLockedOut(now)) return SlimResults.Locked(Http, user.LockoutEndUtc!.Value, now);
+        if (!user.IsActive)
+        {
+            if (reveal) return SlimResults.Status("account_disabled", "The account is disabled.", StatusCodes.Status403Forbidden);
+            credentials.BurnDummyHash(request.Password);
+            return SlimResults.InvalidCredentials();
+        }
+        if (user.IsLockedOut(now))
+        {
+            if (reveal) return SlimResults.Locked(Http, user.LockoutEndUtc!.Value, now);
+            credentials.BurnDummyHash(request.Password);
+            return SlimResults.InvalidCredentials();
+        }
 
         var check = await credentials.VerifyPasswordAsync(user, request.Password, ct);
         if (check == SlimPasswordCheck.Failed)
         {
             var locked = await credentials.RegisterFailureAsync(user, ct);
-            return locked ? SlimResults.Locked(Http, user.LockoutEndUtc!.Value, now) : SlimResults.InvalidCredentials();
+            return locked && reveal ? SlimResults.Locked(Http, user.LockoutEndUtc!.Value, now) : SlimResults.InvalidCredentials();
         }
 
         // With 2FA the lockout counter is only reset after the second factor – otherwise a known
@@ -169,31 +183,80 @@ internal sealed class SlimLoginHandlers(
         if (request is null || string.IsNullOrWhiteSpace(request.RefreshToken))
             return SlimResults.BadRequest("invalid_request", "refreshToken is required.");
 
+        // signature + expiry of the token itself (DataProtector) – forged or expired tokens never reach the store
         if (!workflow.TryUnprotect<SlimRefreshPayload>(SlimWorkflowTokens.RefreshTokenPurpose, request.RefreshToken, out var payload))
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
 
-        // consume first: a stolen token can be used at most once, a replayed one fails
+        // consume first: a token can be used at most once
         var owner = await refreshStore.ValidateAndConsumeRefreshTokenAsync(SlimHashing.Sha256Hex(request.RefreshToken), ct);
-        if (owner is null || !string.Equals(owner, payload!.Uid, StringComparison.Ordinal))
+        var user = await store.FindByIdAsync(payload.Uid, ct);
+        var stampValid = user is not null && SlimHashing.FixedTimeEquals(user.SecurityStamp, payload.Stamp);
+
+        if (owner is null)
         {
-            logger.LogWarning("SlimIdentity: unknown or reused refresh token for user {UserId}.", payload?.Uid);
+            // A genuine, unexpired token whose stamp is still current but that is no longer in the store has been
+            // used before (or was logged out): RFC 9700 says treat it as stolen and revoke the token family.
+            if (stampValid && O.Tokens.RevokeSessionsOnRefreshTokenReuse)
+                await HandleRefreshTokenReuseAsync(user!, payload, ct);
+            else
+                logger.LogInformation("SlimIdentity: unknown refresh token for user {UserId}.", payload.Uid);
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
         }
 
-        var user = await store.FindByIdAsync(owner, ct);
-        if (user is null || !user.IsActive || !SlimHashing.FixedTimeEquals(user.SecurityStamp, payload.Stamp))
+        if (!string.Equals(owner, payload.Uid, StringComparison.Ordinal) || user is null || !user.IsActive || !stampValid)
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
 
-        var result = await authManager.SignInCoreAsync(user, false, false, payload.Amr, null, null, true, ct);
+        // server-side session revoked (logout on that device, "sign out other devices", …)?
+        if (payload.Sid is not null && services.GetService<ISlimSessionStore>() is { } sessions)
+        {
+            var session = await sessions.FindAsync(payload.Sid, ct);
+            if (session is null || session.ExpiresUtc <= time.GetUtcNow())
+                return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
+        }
+
+        var result = await authManager.SignInCoreAsync(user, false, false, payload.Amr, null, null, true, ct,
+            sessionId: payload.Sid, authTime: DateTimeOffset.FromUnixTimeSeconds(payload.AuthTime));
+        if (!result.Succeeded && result.Error == "session_expired")
+            return SlimResults.Status("session_expired", "The session has reached its maximum lifetime. Please sign in again.", StatusCodes.Status401Unauthorized);
         return ToResult(result);
     }
 
-    // ------------------------------------------------------------------ POST /logout
+    private async Task HandleRefreshTokenReuseAsync(SlimUser user, SlimRefreshPayload payload, CancellationToken ct)
+    {
+        if (payload.Sid is not null && services.GetService<ISlimSessionStore>() is { } sessions)
+        {
+            // revoke the token family: the session and therefore every access / refresh token issued for it
+            await sessions.RevokeAsync(payload.Sid, ct);
+            logger.LogWarning("SlimIdentity: refresh token reuse for user {UserId} – session {SessionId} revoked.", user.Id, payload.Sid);
+            return;
+        }
+
+        // stateless: the family cannot be identified, so all sessions of the user end
+        await authManager.SignOutEverywhereAsync(user, ct);
+        logger.LogWarning("SlimIdentity: refresh token reuse for user {UserId} – security stamp rotated, all sessions revoked.", user.Id);
+    }
+
+    // ------------------------------------------------------------------ POST /logout & /logout-all
 
     public async Task<IResult> LogoutAsync(SlimLogoutRequest? request, CancellationToken ct)
     {
         await authManager.SignOutAsync(request?.RefreshToken, ct);
         return SlimResults.Status("logged_out");
+    }
+
+    public async Task<IResult> LogoutAllAsync(CancellationToken ct)
+    {
+        var userId = Http.User.GetSlimUserId();
+        if (userId is null) return Results.Unauthorized();
+        if (Http.User.IsImpersonating())
+            return SlimResults.Status("not_allowed_while_impersonating", "This action is not allowed during an impersonation session.", StatusCodes.Status403Forbidden);
+
+        var user = await store.FindByIdAsync(userId, ct);
+        if (user is null) return Results.Unauthorized();
+
+        await authManager.SignOutEverywhereAsync(user, ct);
+        if (O.Endpoints.AllowCookieAuth) await Http.SignOutAsync(SlimIdentityDefaults.CookieScheme);
+        return SlimResults.Status("logged_out_everywhere");
     }
 
     // ------------------------------------------------------------------ helpers

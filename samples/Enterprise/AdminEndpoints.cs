@@ -19,7 +19,13 @@ namespace MyApp.Enterprise;
 public static class AdminEndpoints
 {
     public sealed record SudoRequest(string Password);
-    public sealed record InviteRegistrationRequest(string InviteCode, string Email, string Password, string DisplayName);
+    public sealed record InviteRequest(string Email, string DisplayName);
+
+    /// <summary>Your own invitation mail (inviter name, company branding, …) – not part of ISlimEmailSender.</summary>
+    public interface IInvitationMailer
+    {
+        Task SendInvitationAsync(string email, string displayName, string? invitedBy, string link, DateTimeOffset expiresAt, CancellationToken ct);
+    }
 
     public static IEndpointRouteBuilder MapAdminEndpoints(this IEndpointRouteBuilder app)
     {
@@ -82,17 +88,32 @@ public static class AdminEndpoints
             })
             .RequireAuthorization(SlimIdentityDefaults.SudoPolicy);
 
-        // Custom registration with business fields (built-in /register disabled via Endpoints.EnableRegistration = false)
-        app.MapPost("/api/register-with-invite", async (InviteRegistrationRequest req,
-                ISlimUserStore store, IPasswordHasher<SlimUser> hasher, ISlimAuthManager auth, CancellationToken ct) =>
+        // Invite-only B2B (built-in /register disabled via Endpoints.EnableRegistration = false):
+        // the admin creates the account with business data but WITHOUT password and mails the link.
+        // The invitee opens it in the SPA, which calls POST /auth/invitation/info (shows the e-mail)
+        // and POST /auth/invitation/accept { token, password } (sets the password, confirms the mail, signs in).
+        admin.MapPost("/invitations", async (InviteRequest req, ClaimsPrincipal me,
+                ISlimUserStore store, ISlimAuthManager auth, IInvitationMailer mailer, CancellationToken ct) =>
             {
-                // TODO: validate invite code, password policy, create business profile (DisplayName, tenant …)
-                var hash = hasher.HashPassword(new SlimUser { Email = req.Email }, req.Password);
-                var user = await store.CreateAsync(req.Email, hash, ct);
-                var result = await auth.SignInAsync(user, useCookies: false, ct: ct);
-                return Results.Ok(result.ToResponse(DateTimeOffset.UtcNow));
-            })
-            .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy);
+                if (await store.FindByEmailAsync(req.Email, ct) is not null)
+                    return Results.Conflict(new { status = "already_exists" });
+
+                var user = await store.CreateAsync(req.Email, passwordHash: string.Empty, ct);
+                // TODO: business profile (DisplayName, tenant, roles …) for user.Id
+                var invitation = await auth.CreateInvitationAsync(user, TimeSpan.FromDays(14), ct); // needs Links.InvitationUrl
+                await mailer.SendInvitationAsync(req.Email, req.DisplayName, me.GetSlimEmail(), invitation.Link, invitation.ExpiresAt, ct);
+                return Results.Ok(new { status = "invited", user.Id, invitation.ExpiresAt });
+            });
+
+        // Ban: end every session on every device, then block the account in your own store
+        admin.MapPost("/users/{userId}/ban", async (string userId, ISlimUserStore store, ISlimAuthManager auth, CancellationToken ct) =>
+            {
+                var user = await store.FindByIdAsync(userId, ct);
+                if (user is null) return Results.NotFound();
+                await auth.SignOutEverywhereAsync(user, ct);
+                // TODO: set IsActive = false in your users table (not part of UpdateSecurityStateAsync)
+                return Results.Ok(new { status = "banned" });
+            });
 
         return app;
     }

@@ -12,6 +12,7 @@ internal enum SlimPasswordCheck { Failed, Success, SuccessRehashNeeded }
 internal sealed class SlimCredentialService(
     IPasswordHasher<SlimUser> hasher,
     ISlimUserStore store,
+    SlimEmailDispatcher mail,
     IOptions<SlimIdentityOptions> options,
     TimeProvider time,
     IServiceProvider services,
@@ -60,23 +61,44 @@ internal sealed class SlimCredentialService(
         }
     }
 
-    /// <summary>Counts a failed attempt. Returns true if the account is now locked.</summary>
+    /// <summary>
+    /// Counts a failed attempt. Every <c>MaxFailedAttempts</c> consecutive failures lock the account; the duration
+    /// doubles with each lockout (<c>Duration</c>, 2×, 4×, … up to <c>MaxDuration</c>). The counter is only reset by
+    /// a successful sign-in. Returns true if the account is now locked.
+    /// </summary>
     public async Task<bool> RegisterFailureAsync(SlimUser user, CancellationToken ct)
     {
         var lockout = options.Value.Lockout;
         if (!lockout.Enabled) return false;
 
-        user.FailedLoginAttempts++;
+        user.FailedLoginAttempts = user.FailedLoginAttempts == int.MaxValue ? int.MaxValue : user.FailedLoginAttempts + 1;
         var locked = false;
-        if (user.FailedLoginAttempts >= lockout.MaxFailedAttempts)
+        if (user.FailedLoginAttempts % lockout.MaxFailedAttempts == 0)
         {
-            user.LockoutEndUtc = time.GetUtcNow() + lockout.Duration;
-            user.FailedLoginAttempts = 0;
+            var lockoutNumber = user.FailedLoginAttempts / lockout.MaxFailedAttempts; // 1, 2, 3, …
+            var duration = LockoutDuration(lockout, lockoutNumber);
+            user.LockoutEndUtc = time.GetUtcNow() + duration;
             locked = true;
-            logger.LogWarning("SlimIdentity: user {UserId} locked out until {LockoutEnd}.", user.Id, user.LockoutEndUtc);
+            logger.LogWarning("SlimIdentity: user {UserId} locked out until {LockoutEnd} (lockout #{Number}).", user.Id, user.LockoutEndUtc, lockoutNumber);
+
+            // inform the owner once per attack (first lockout since the last successful sign-in)
+            if (lockoutNumber == 1)
+            {
+                var email = user.Email;
+                var end = user.LockoutEndUtc.Value;
+                await mail.SendAsync("lockout-notification", (s, c) => s.SendLockoutNotificationEmailAsync(email, end, c), ct);
+            }
         }
         await store.UpdateSecurityStateAsync(user, ct);
         return locked;
+    }
+
+    internal static TimeSpan LockoutDuration(SlimLockoutOptions lockout, int lockoutNumber)
+    {
+        // Duration * 2^(n-1), computed in ticks with an overflow-safe cap
+        var ticks = lockout.Duration.Ticks;
+        for (var i = 1; i < lockoutNumber && ticks < lockout.MaxDuration.Ticks; i++) ticks *= 2;
+        return TimeSpan.FromTicks(Math.Min(ticks, lockout.MaxDuration.Ticks));
     }
 
     /// <summary>

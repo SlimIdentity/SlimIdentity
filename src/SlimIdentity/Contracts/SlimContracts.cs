@@ -31,6 +31,10 @@ public sealed record SlimPasswordConfirmationRequest(string Password);
 
 public sealed record SlimExternalExchangeRequest(string Code);
 
+public sealed record SlimInvitationInfoRequest(string Token);
+
+public sealed record SlimAcceptInvitationRequest(string Token, string Password);
+
 // ---------------------------------------------------------------------------
 // Responses
 // ---------------------------------------------------------------------------
@@ -84,6 +88,28 @@ public sealed record SlimTwoFactorStatusResponse(bool Enabled, string? Method, b
 
 public sealed record SlimTwoFactorSetupResponse(string SharedKey, string AuthenticatorUri, string SetupToken);
 
+/// <summary>Who is invited (lets the "set your password" form show the address) and until when the link is valid.</summary>
+public sealed record SlimInvitationInfoResponse(string Email, DateTimeOffset ExpiresAt);
+
+/// <summary>An active session / device of the signed-in user.</summary>
+public sealed record SlimSessionDto(
+    string Id,
+    string Mode,
+    string AuthenticationMethod,
+    bool IsCurrent,
+    bool IsImpersonation,
+    DateTimeOffset CreatedUtc,
+    DateTimeOffset LastSeenUtc,
+    DateTimeOffset ExpiresUtc,
+    string? UserAgent,
+    string? IpAddress);
+
+/// <summary>Result of <see cref="ISlimAuthManager.CreateInvitationAsync"/>: send <see cref="Link"/> to the invited user.</summary>
+/// <param name="Token">Raw invitation token.</param>
+/// <param name="Link"><c>Links.InvitationUrl</c> with the token inserted, or the raw token if no template is configured.</param>
+/// <param name="ExpiresAt">End of validity.</param>
+public sealed record SlimInvitation(string Token, string Link, DateTimeOffset ExpiresAt);
+
 /// <summary>Recovery codes are shown exactly once. <see cref="Session"/> contains refreshed tokens in bearer mode.</summary>
 public sealed record SlimRecoveryCodesResponse(IReadOnlyList<string> RecoveryCodes, SlimAuthResponse? Session);
 
@@ -101,6 +127,8 @@ public sealed record SlimAuthResult
     public string? RefreshToken { get; init; }
     public DateTimeOffset? RefreshTokenExpiresAt { get; init; }
     public ClaimsPrincipal? Principal { get; init; }
+    /// <summary>Server-side session id (only with <c>ISlimSessionStore</c>).</summary>
+    public string? SessionId { get; init; }
     public string? Error { get; init; }
 
     internal static SlimAuthResult Failed(string error) => new() { Succeeded = false, Error = error };

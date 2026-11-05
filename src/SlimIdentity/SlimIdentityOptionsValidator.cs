@@ -29,6 +29,8 @@ internal sealed class SlimIdentityOptionsValidator : IValidateOptions<SlimIdenti
             if (string.IsNullOrWhiteSpace(t.Audience)) f.Add("Tokens.Audience is required.");
             if (t.AccessTokenLifetime <= TimeSpan.Zero) f.Add("Tokens.AccessTokenLifetime must be positive.");
             if (t.RefreshTokenLifetime <= TimeSpan.Zero) f.Add("Tokens.RefreshTokenLifetime must be positive.");
+            if (t.RefreshTokenAbsoluteLifetime < t.RefreshTokenLifetime)
+                f.Add("Tokens.RefreshTokenAbsoluteLifetime must be >= Tokens.RefreshTokenLifetime.");
             if (t.ClockSkew < TimeSpan.Zero || t.ClockSkew > TimeSpan.FromMinutes(5))
                 f.Add("Tokens.ClockSkew must be between 0 and 5 minutes.");
         }
@@ -37,12 +39,17 @@ internal sealed class SlimIdentityOptionsValidator : IValidateOptions<SlimIdenti
             f.Add("Tokens.PasswordResetTokenLifetime must be between 0 and 24 hours.");
         if (t.PreAuthTokenLifetime <= TimeSpan.Zero || t.PreAuthTokenLifetime > TimeSpan.FromMinutes(30))
             f.Add("Tokens.PreAuthTokenLifetime must be between 0 and 30 minutes.");
+        if (t.InvitationTokenLifetime <= TimeSpan.Zero || t.InvitationTokenLifetime > TimeSpan.FromDays(30))
+            f.Add("Tokens.InvitationTokenLifetime must be between 0 and 30 days.");
 
         // Lockout / rate limit
         if (o.Lockout.MaxFailedAttempts < 1) f.Add("Lockout.MaxFailedAttempts must be >= 1.");
         if (o.Lockout.Duration <= TimeSpan.Zero) f.Add("Lockout.Duration must be positive.");
+        if (o.Lockout.MaxDuration < o.Lockout.Duration) f.Add("Lockout.MaxDuration must be >= Lockout.Duration.");
         if (o.RateLimit.PermitLimit < 1) f.Add("RateLimit.PermitLimit must be >= 1.");
         if (o.RateLimit.Window <= TimeSpan.Zero) f.Add("RateLimit.Window must be positive.");
+        if (o.RateLimit.RefreshPermitLimit < 1) f.Add("RateLimit.RefreshPermitLimit must be >= 1.");
+        if (o.RateLimit.RefreshWindow <= TimeSpan.Zero) f.Add("RateLimit.RefreshWindow must be positive.");
 
         // Password
         var p = o.Password;
@@ -84,6 +91,8 @@ internal sealed class SlimIdentityOptionsValidator : IValidateOptions<SlimIdenti
             f.Add("Links.EmailVerificationUrl must contain the placeholder '{token}'.");
         if (o.Links.PasswordResetUrl is { } r && !r.Contains("{token}", StringComparison.Ordinal))
             f.Add("Links.PasswordResetUrl must contain the placeholder '{token}'.");
+        if (o.Links.InvitationUrl is { } i && !i.Contains("{token}", StringComparison.Ordinal))
+            f.Add("Links.InvitationUrl must contain the placeholder '{token}'.");
 
         return f.Count > 0
             ? ValidateOptionsResult.Fail(f.Select(x => "SlimIdentity: " + x))

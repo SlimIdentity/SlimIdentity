@@ -45,34 +45,59 @@ internal sealed class SlimEmailQueue(IOptions<SlimIdentityOptions> options)
     public ChannelReader<SlimEmailJob> Reader => _channel.Reader;
 }
 
-/// <summary>Background worker that hands queued mails to the host's <see cref="ISlimEmailSender"/> (one scope per mail).</summary>
+/// <summary>
+/// Background worker that hands queued mails to the host's <see cref="ISlimEmailSender"/> (one scope per mail).
+/// On shutdown it drains the queue within the host's shutdown timeout (<c>HostOptions.ShutdownTimeout</c>),
+/// so regular restarts and deployments lose no mail – only a crash does.
+/// </summary>
 internal sealed class SlimEmailBackgroundService(
     SlimEmailQueue queue,
     IServiceScopeFactory scopes,
     ILogger<SlimEmailBackgroundService> logger) : BackgroundService
 {
+    private CancellationToken _shutdownDeadline = CancellationToken.None;
+
+    public override Task StopAsync(CancellationToken cancellationToken)
+    {
+        _shutdownDeadline = cancellationToken; // fires when the host's shutdown timeout is exceeded
+        return base.StopAsync(cancellationToken);
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         try
         {
             await foreach (var job in queue.Reader.ReadAllAsync(stoppingToken))
-            {
-                try
-                {
-                    await using var scope = scopes.CreateAsyncScope();
-                    var sender = scope.ServiceProvider.GetRequiredService<ISlimEmailSender>();
-                    await job.Send(sender, stoppingToken);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException || !stoppingToken.IsCancellationRequested)
-                {
-                    logger.LogError(ex, "SlimIdentity: sending {Kind} mail failed.", job.Kind);
-                }
-            }
+                await SendAsync(job, CancellationToken.None);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
-            if (queue.Reader.Count > 0)
-                logger.LogWarning("SlimIdentity: shutting down with {Count} unsent mail(s) in the queue.", queue.Reader.Count);
+            // fall through to draining
+        }
+
+        var drained = 0;
+        while (!_shutdownDeadline.IsCancellationRequested && queue.Reader.TryRead(out var job))
+        {
+            await SendAsync(job, _shutdownDeadline);
+            drained++;
+        }
+
+        if (drained > 0) logger.LogInformation("SlimIdentity: sent {Count} queued mail(s) during shutdown.", drained);
+        if (queue.Reader.Count > 0)
+            logger.LogWarning("SlimIdentity: shutdown timeout reached with {Count} unsent mail(s) in the queue.", queue.Reader.Count);
+    }
+
+    private async Task SendAsync(SlimEmailJob job, CancellationToken ct)
+    {
+        try
+        {
+            await using var scope = scopes.CreateAsyncScope();
+            var sender = scope.ServiceProvider.GetRequiredService<ISlimEmailSender>();
+            await job.Send(sender, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "SlimIdentity: sending {Kind} mail failed.", job.Kind);
         }
     }
 }

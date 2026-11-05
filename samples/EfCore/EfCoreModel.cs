@@ -63,6 +63,32 @@ public class ApiKey
     public bool Revoked { get; set; }
 }
 
+public class UserSession
+{
+    public string Id { get; set; } = "";          // 32 hex chars, primary key
+    public Guid UserId { get; set; }
+    public string Mode { get; set; } = "";
+    public string AuthenticationMethod { get; set; } = "";
+    public string? ImpersonatorId { get; set; }
+    public DateTimeOffset CreatedUtc { get; set; }
+    public DateTimeOffset LastSeenUtc { get; set; }
+    public DateTimeOffset ExpiresUtc { get; set; }
+    public string? UserAgent { get; set; }
+    public string? IpAddress { get; set; }
+}
+
+/// <summary>Outbox row for guaranteed mail delivery (see samples/Email/OutboxEmailSender.cs).</summary>
+public class OutboxMail
+{
+    public long Id { get; set; }
+    public string Kind { get; set; } = "";         // verification, password-reset, …
+    public string To { get; set; } = "";
+    public string Payload { get; set; } = "";      // link / code
+    public DateTimeOffset CreatedUtc { get; set; }
+    public DateTimeOffset? SentUtc { get; set; }
+    public int Attempts { get; set; }
+}
+
 public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
 {
     public DbSet<AppUser> Users => Set<AppUser>();
@@ -71,6 +97,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<RecoveryCode> RecoveryCodes => Set<RecoveryCode>();
     public DbSet<ExternalLogin> ExternalLogins => Set<ExternalLogin>();
     public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
+    public DbSet<UserSession> Sessions => Set<UserSession>();
+    public DbSet<OutboxMail> OutboxMails => Set<OutboxMail>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -88,5 +116,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         b.Entity<RecoveryCode>().HasKey(x => new { x.UserId, x.CodeHash });
         b.Entity<ExternalLogin>(e => { e.HasKey(x => new { x.Provider, x.ProviderKey }); e.HasIndex(x => x.UserId); });
         b.Entity<ApiKey>().HasKey(x => x.KeyHash);
+        b.Entity<UserSession>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasMaxLength(32);
+            e.Property(x => x.UserAgent).HasMaxLength(256);
+            e.HasIndex(x => x.UserId);
+            e.HasIndex(x => x.ExpiresUtc); // cleanup job: DELETE WHERE ExpiresUtc < now
+        });
+        b.Entity<OutboxMail>(e => { e.HasKey(x => x.Id); e.HasIndex(x => x.SentUtc); });
     }
 }

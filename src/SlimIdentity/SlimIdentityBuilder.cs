@@ -41,6 +41,13 @@ public sealed class SlimIdentityBuilder
     public SlimIdentityBuilder AddRefreshTokenStore<TStore>(ServiceLifetime lifetime = ServiceLifetime.Scoped)
         where TStore : class, ISlimRefreshTokenStore => Register<ISlimRefreshTokenStore, TStore>(lifetime);
 
+    /// <summary>
+    /// Activates server-side sessions: real per-device <c>/logout</c>, <c>GET /sessions</c>, <c>DELETE /sessions/{id}</c>
+    /// and session-scoped refresh-token reuse detection.
+    /// </summary>
+    public SlimIdentityBuilder AddSessionStore<TStore>(ServiceLifetime lifetime = ServiceLifetime.Scoped)
+        where TStore : class, ISlimSessionStore => Register<ISlimSessionStore, TStore>(lifetime);
+
     /// <summary>Activates <c>/login/2fa</c> and <c>/2fa/*</c>.</summary>
     public SlimIdentityBuilder AddTwoFactorStore<TStore>(ServiceLifetime lifetime = ServiceLifetime.Scoped)
         where TStore : class, ISlimTwoFactorStore

@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.AspNetCore.Mvc;
 using SlimIdentity.Abstractions;
 using SlimIdentity.Contracts;
@@ -32,12 +33,25 @@ public static class SlimIdentityEndpointExtensions
             .WithTags(SlimIdentityDefaults.OpenApiTag)
             .AddEndpointFilter<RouteGroupBuilder, SlimCsrfEndpointFilter>();
 
+        // OpenAPI: every state-changing endpoint can answer 403 csrf_validation_failed in cookie mode
+        if (o.Csrf.Enabled) ((IEndpointConventionBuilder)group).Finally(AddCsrfResponseMetadata);
+
         MapLogin(group, o, Has<ISlimTwoFactorStore>(), Has<ISlimRefreshTokenStore>());
         MapAccount(group, o);
+        if (Has<ISlimSessionStore>()) MapSessions(group);
         if (Has<ISlimTwoFactorStore>()) MapTwoFactor(group);
         if (Has<ISlimExternalLoginStore>()) MapExternal(group, o);
 
         return group;
+    }
+
+    private static void AddCsrfResponseMetadata(EndpointBuilder endpoint)
+    {
+        var stateChanging = endpoint.Metadata.OfType<IHttpMethodMetadata>()
+            .Any(m => m.HttpMethods.Any(x => x is not ("GET" or "HEAD" or "OPTIONS")));
+        var has403 = endpoint.Metadata.OfType<IProducesResponseTypeMetadata>().Any(m => m.StatusCode == StatusCodes.Status403Forbidden);
+        if (stateChanging && !has403)
+            endpoint.Metadata.Add(new ProducesResponseTypeMetadata(StatusCodes.Status403Forbidden, typeof(SlimStatusResponse), ["application/json"]));
     }
 
     /// <summary>Applies the SlimIdentity CSRF check (custom header + Origin) to a host endpoint.</summary>
@@ -80,11 +94,11 @@ public static class SlimIdentityEndpointExtensions
             group.MapPost("/refresh", static ([FromBody] SlimRefreshRequest request,
                     [FromServices] SlimLoginHandlers h, CancellationToken ct) => h.RefreshAsync(request, ct))
                 .WithName("SlimIdentity_Refresh")
-                .WithSummary("Rotate a refresh token into a new JWT pair.")
+                .WithSummary("Rotate a refresh token into a new JWT pair (single use; reuse revokes the session).")
                 .Produces<SlimAuthResponse>()
                 .Produces<SlimStatusResponse>(StatusCodes.Status401Unauthorized)
                 .Produces(StatusCodes.Status429TooManyRequests)
-                .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
+                .RequireRateLimiting(SlimIdentityDefaults.RefreshPolicy)
                 .AllowAnonymous();
         }
 
@@ -93,9 +107,16 @@ public static class SlimIdentityEndpointExtensions
             group.MapPost("/logout", static ([FromBody] SlimLogoutRequest? request,
                     [FromServices] SlimLoginHandlers h, CancellationToken ct) => h.LogoutAsync(request, ct))
                 .WithName("SlimIdentity_Logout")
-                .WithSummary("Delete the auth cookie and/or consume the given refresh token.")
+                .WithSummary("End the current session: delete the cookie, consume the refresh token, revoke the server-side session.")
                 .Produces<SlimStatusResponse>()
                 .AllowAnonymous();
+
+            group.MapPost("/logout-all", static ([FromServices] SlimLoginHandlers h, CancellationToken ct) => h.LogoutAllAsync(ct))
+                .WithName("SlimIdentity_LogoutAll")
+                .WithSummary("Sign out on all devices (rotates the security stamp, revokes all sessions).")
+                .Produces<SlimStatusResponse>()
+                .Produces(StatusCodes.Status401Unauthorized)
+                .RequireAuthorization(SlimAuthorize);
         }
     }
 
@@ -159,6 +180,29 @@ public static class SlimIdentityEndpointExtensions
                 .AllowAnonymous();
         }
 
+        if (e.EnableInvitations)
+        {
+            group.MapPost("/invitation/info", static ([FromBody] SlimInvitationInfoRequest request,
+                    [FromServices] SlimAccountHandlers h, CancellationToken ct) => h.InvitationInfoAsync(request, ct))
+                .WithName("SlimIdentity_InvitationInfo")
+                .WithSummary("Check an invitation link and return the invited e-mail address (for the \"set your password\" form).")
+                .Produces<SlimInvitationInfoResponse>()
+                .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
+                .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
+                .AllowAnonymous();
+
+            group.MapPost("/invitation/accept", static ([FromBody] SlimAcceptInvitationRequest request, [FromQuery] bool? useCookies,
+                    [FromServices] SlimAccountHandlers h, CancellationToken ct) => h.AcceptInvitationAsync(request, useCookies, ct))
+                .WithName("SlimIdentity_AcceptInvitation")
+                .WithSummary("Accept an invitation: set the password, confirm the e-mail and sign in (cookie or JWT, see ?useCookies).")
+                .Produces<SlimAuthResponse>()
+                .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
+                .ProducesValidationProblem()
+                .Produces(StatusCodes.Status429TooManyRequests)
+                .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
+                .AllowAnonymous();
+        }
+
         if (e.EnableChangePassword)
         {
             group.MapPost("/change-password", static ([FromBody] SlimChangePasswordRequest request,
@@ -183,6 +227,27 @@ public static class SlimIdentityEndpointExtensions
                 .Produces(StatusCodes.Status401Unauthorized)
                 .RequireAuthorization(SlimAuthorize);
         }
+    }
+
+    // ------------------------------------------------------------------ sessions (ISlimSessionStore)
+
+    private static void MapSessions(RouteGroupBuilder root)
+    {
+        var group = root.MapGroup("/sessions").RequireAuthorization(SlimAuthorize);
+
+        group.MapGet("/", static ([FromServices] SlimAccountHandlers h, CancellationToken ct) => h.ListSessionsAsync(ct))
+            .WithName("SlimIdentity_Sessions")
+            .WithSummary("Active sessions (devices) of the signed-in user.")
+            .Produces<List<SlimSessionDto>>()
+            .Produces(StatusCodes.Status401Unauthorized);
+
+        group.MapDelete("/{sessionId}", static (string sessionId, [FromServices] SlimAccountHandlers h, CancellationToken ct) =>
+                h.RevokeSessionAsync(sessionId, ct))
+            .WithName("SlimIdentity_RevokeSession")
+            .WithSummary("Sign out one device. Revoking the current session also deletes the cookie.")
+            .Produces<SlimStatusResponse>()
+            .Produces<SlimStatusResponse>(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status401Unauthorized);
     }
 
     // ------------------------------------------------------------------ 2FA management

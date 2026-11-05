@@ -28,10 +28,26 @@ Content-Type: application/json
 { "refreshToken": "{{refreshToken}}" }
 
 ###
+# active devices (ISlimSessionStore)
+GET {{auth}}/sessions
+Authorization: Bearer {{accessToken}}
+
+###
+DELETE {{auth}}/sessions/<session id>
+Authorization: Bearer {{accessToken}}
+
+###
+# this device only (revokes the server-side session)
 POST {{auth}}/logout
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 { "refreshToken": "{{refreshToken}}" }
+
+###
+# all devices
+POST {{auth}}/logout-all
+Authorization: Bearer {{accessToken}}
 
 ### ---------------------------------------------------------------- Cookie flow (needs X-CSRF header)
 
@@ -82,6 +98,27 @@ Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
 { "currentPassword": "Admin123!", "newPassword": "Admin456!" }
+
+### ---------------------------------------------------------------- Invitations
+
+# @name invite
+POST {{host}}/api/admin/invite
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "email": "invited@demo.local" }
+
+###
+POST {{auth}}/invitation/info
+Content-Type: application/json
+
+{ "token": "{{invite.response.body.$.token}}" }
+
+###
+POST {{auth}}/invitation/accept
+Content-Type: application/json
+
+{ "token": "{{invite.response.body.$.token}}", "password": "Invited123!" }
 
 ### ---------------------------------------------------------------- 2FA (TOTP)
 

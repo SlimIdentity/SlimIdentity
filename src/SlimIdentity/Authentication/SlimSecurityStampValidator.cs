@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using SlimIdentity.Abstractions;
 using SlimIdentity.Security;
 
 namespace SlimIdentity.Authentication;
@@ -38,6 +39,14 @@ internal static class SlimSecurityStampValidator
         {
             context.Properties.Items[ValidatedAtKey] = now.ToString("O", CultureInfo.InvariantCulture);
             context.ShouldRenew = true;
+
+            // keep "last seen" of the server-side session current (at most once per interval)
+            if (context.Principal?.FindFirst(SlimClaimTypes.SessionId)?.Value is { } sid
+                && http.RequestServices.GetService<ISlimSessionStore>() is { } sessions)
+            {
+                var expires = options.Cookies.SlidingExpiration ? now + options.Cookies.ExpireTimeSpan : context.Properties.ExpiresUtc ?? now + options.Cookies.ExpireTimeSpan;
+                await sessions.TouchAsync(sid, now, expires, http.RequestAborted);
+            }
         }
     }
 
@@ -60,8 +69,18 @@ internal static class SlimSecurityStampValidator
         var user = await store.FindByIdAsync(userId, http.RequestAborted);
         if (user is not { IsActive: true } || !SlimHashing.FixedTimeEquals(user.SecurityStamp, stamp)) return false;
 
+        // Server-side session: must exist (not revoked) and not be expired.
+        if (principal!.FindFirst(SlimClaimTypes.SessionId)?.Value is { } sid
+            && http.RequestServices.GetService<ISlimSessionStore>() is { } sessions)
+        {
+            var session = await sessions.FindAsync(sid, http.RequestAborted);
+            var now = http.RequestServices.GetRequiredService<TimeProvider>().GetUtcNow();
+            if (session is null || session.ExpiresUtc <= now || !string.Equals(session.UserId, userId, StringComparison.Ordinal))
+                return false;
+        }
+
         // Impersonation: the impersonator must still be active with an unchanged stamp.
-        var actorClaim = principal!.FindFirst(SlimClaimTypes.Actor)?.Value;
+        var actorClaim = principal.FindFirst(SlimClaimTypes.Actor)?.Value;
         if (actorClaim is null) return true;
 
         var actor = SlimClaims.ParseActorClaim(actorClaim);

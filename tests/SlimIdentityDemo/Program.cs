@@ -35,13 +35,15 @@ var slim = builder.Services.AddSlimIdentity(
         options =>
         {
             options.Lockout.MaxFailedAttempts = 5;
-            options.Lockout.Duration = TimeSpan.FromMinutes(15);
+            options.Lockout.Duration = TimeSpan.FromMinutes(1);    // first lockout, doubles each time …
+            options.Lockout.MaxDuration = TimeSpan.FromHours(1);   // … up to this cap
             options.Cookies.SameSite = SameSiteMode.Strict;
             // options.Tokens.JwtSecret = Environment.GetEnvironmentVariable("JWT_SECRET")!; // production
         })
     .AddUserStore<InMemoryUserStore>(ServiceLifetime.Singleton)              // mandatory
     .AddEmailSender<ConsoleEmailSender>(ServiceLifetime.Singleton)           // mandatory
     .AddRefreshTokenStore<InMemoryRefreshTokenStore>(ServiceLifetime.Singleton)
+    .AddSessionStore<InMemorySessionStore>(ServiceLifetime.Singleton)            // per-device logout, /auth/sessions
     .AddTwoFactorStore<InMemoryTwoFactorStore>(ServiceLifetime.Singleton)
     .AddExternalLoginStore<InMemoryExternalLoginStore>(ServiceLifetime.Singleton)
     .AddApiKeyStore<InMemoryApiKeyStore>(ServiceLifetime.Singleton);
@@ -137,11 +139,26 @@ app.MapDelete("/api/danger-zone", (ClaimsPrincipal user) => new { message = "Sud
     .RequireAuthorization(SlimIdentityDefaults.SudoPolicy)
     .RequireSlimCsrf();
 
-// Admin ban: IsActive=false + stamp rotation → all sessions die immediately
-app.MapPost("/api/admin/users/{userId}/ban", (string userId, ISlimUserStore store) =>
+// Admin ban: end all sessions (stamp rotation + session store) and block further logins
+app.MapPost("/api/admin/users/{userId}/ban", async (string userId, ISlimUserStore store, ISlimAuthManager auth, CancellationToken ct) =>
     {
+        var user = await store.FindByIdAsync(userId, ct);
+        if (user is null) return Results.NotFound();
+        await auth.SignOutEverywhereAsync(user, ct);
         ((InMemoryUserStore)store).SetActive(userId, false);
         return Results.Ok(new { status = "banned" });
+    })
+    .RequireAuthorization(p => p.RequireRole("Admin"))
+    .RequireSlimCsrf();
+
+// Invitation: create the user without password (+ your own business data), then hand out the link.
+// In a real app the link is mailed – the demo returns it.
+app.MapPost("/api/admin/invite", async (InviteRequest request, ISlimUserStore store, ISlimAuthManager auth, CancellationToken ct) =>
+    {
+        if (await store.FindByEmailAsync(request.Email, ct) is not null) return Results.Conflict(new { status = "already_exists" });
+        var user = await store.CreateAsync(request.Email, passwordHash: string.Empty, ct);
+        var invitation = await auth.CreateInvitationAsync(user, ct: ct);
+        return Results.Ok(invitation);
     })
     .RequireAuthorization(p => p.RequireRole("Admin"))
     .RequireSlimCsrf();
@@ -153,3 +170,4 @@ app.MapGet("/api/admin/users", (ISlimUserStore store) =>
 app.Run();
 
 internal sealed record SudoRequest(string Password);
+internal sealed record InviteRequest(string Email);

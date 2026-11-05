@@ -58,7 +58,11 @@ public static class SlimIdentityServiceExtensions
         services.AddHostedService<SlimEmailBackgroundService>();
 
         // ---------------------------------------------------------------- layer 1: IP rate limiting
-        services.AddRateLimiter(o => o.AddPolicy<string, SlimBruteForceRateLimiterPolicy>(SlimIdentityDefaults.BruteForcePolicy));
+        services.AddRateLimiter(o =>
+        {
+            o.AddPolicy<string, SlimBruteForceRateLimiterPolicy>(SlimIdentityDefaults.BruteForcePolicy);
+            o.AddPolicy<string, SlimRefreshRateLimiterPolicy>(SlimIdentityDefaults.RefreshPolicy);
+        });
 
         // ---------------------------------------------------------------- authentication
         services.AddOptions<AuthenticationOptions>().Configure<IOptions<SlimIdentityOptions>>((auth, slim) =>

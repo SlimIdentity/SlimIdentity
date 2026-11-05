@@ -19,4 +19,10 @@ public interface ISlimEmailSender
     /// only the real owner of the mailbox learns about the attempt. Default: no mail.
     /// </summary>
     Task SendAccountExistsEmailAsync(string email, CancellationToken ct) => Task.CompletedTask;
+
+    /// <summary>
+    /// Optional: the account was locked after repeated failed sign-ins ("someone tried to sign in to your account").
+    /// Sent once per series (first lockout since the last successful sign-in). Default: no mail.
+    /// </summary>
+    Task SendLockoutNotificationEmailAsync(string email, DateTimeOffset lockoutEndUtc, CancellationToken ct) => Task.CompletedTask;
 }

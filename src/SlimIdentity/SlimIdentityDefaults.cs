@@ -12,6 +12,8 @@ public static class SlimIdentityDefaults
     public const string ExternalScheme = "SlimIdentity.External";
 
     public const string BruteForcePolicy = "SlimIdentity_BruteForce";
+    /// <summary>Separate, more generous limiter for <c>/refresh</c> (refresh tokens cannot be guessed).</summary>
+    public const string RefreshPolicy = "SlimIdentity_Refresh";
     public const string SudoPolicy = "SlimIdentity_Sudo";
 
     public const string ApiKeyHeaderName = "X-API-Key";
@@ -37,4 +39,8 @@ public static class SlimClaimTypes
     public const string AuthenticationMethod = "amr";
     /// <summary>Unix seconds until which sudo mode is active.</summary>
     public const string SudoUntil = "sudo_until";
+    /// <summary>Server-side session id (only with <c>ISlimSessionStore</c>).</summary>
+    public const string SessionId = "sid";
+    /// <summary>Unix seconds of the original sign-in (caps the refresh-token chain, see <c>Tokens.RefreshTokenAbsoluteLifetime</c>).</summary>
+    public const string AuthTime = "auth_time";
 }

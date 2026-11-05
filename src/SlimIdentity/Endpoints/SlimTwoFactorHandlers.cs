@@ -87,6 +87,7 @@ internal sealed class SlimTwoFactorHandlers(
         user.TwoFactorEnabled = false;
         user.SecurityStamp = SlimUser.NewSecurityStamp();
         await store.UpdateSecurityStateAsync(user, ct);
+        await authManager.RevokeSessionsAsync(user.Id, SlimAuthManager.CurrentSessionId(Http.User), ct);
         logger.LogInformation("SlimIdentity: 2FA disabled for user {UserId}.", user.Id);
 
         var session = await authManager.RefreshCurrentSessionAsync(user, ct);
@@ -115,6 +116,7 @@ internal sealed class SlimTwoFactorHandlers(
         user.TwoFactorEnabled = true;
         user.SecurityStamp = SlimUser.NewSecurityStamp(); // sign out all other sessions
         await store.UpdateSecurityStateAsync(user, ct);
+        await authManager.RevokeSessionsAsync(user.Id, SlimAuthManager.CurrentSessionId(Http.User), ct);
         logger.LogInformation("SlimIdentity: 2FA enabled for user {UserId}.", user.Id);
 
         var session = await authManager.RefreshCurrentSessionAsync(user, ct);

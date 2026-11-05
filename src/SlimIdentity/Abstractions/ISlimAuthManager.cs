@@ -33,6 +33,24 @@ public interface ISlimAuthManager
     /// </summary>
     Task<SlimAuthResult> ElevateSessionAsync(SlimUser user, IEnumerable<Claim> additionalClaims, bool useCookies, CancellationToken ct = default);
 
-    /// <summary>Removes the auth cookie and – if given – consumes the refresh token.</summary>
+    /// <summary>
+    /// Ends the current session: removes the auth cookie, consumes the refresh token (if given) and – with
+    /// <see cref="ISlimSessionStore"/> – revokes the server-side session so a copied cookie / token stops working too.
+    /// </summary>
     Task SignOutAsync(string? refreshToken = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Ends <b>all</b> sessions of <paramref name="user"/> on all devices: rotates and persists the security stamp
+    /// (invalidates every cookie, JWT and refresh token) and revokes all server-side sessions. Use it e.g. when banning
+    /// a user. Does not touch the cookie of the current request.
+    /// </summary>
+    Task SignOutEverywhereAsync(SlimUser user, CancellationToken ct = default);
+
+    /// <summary>
+    /// Creates an invitation / "complete your registration" link for an existing user <b>without</b> password
+    /// (create it first via <see cref="ISlimUserStore.CreateAsync"/> with an empty hash, plus your own business data).
+    /// The link is stateless, bound to the user's security stamp and therefore single-use. Sending it is up to the host.
+    /// Accepted via <c>POST /auth/invitation/accept</c>.
+    /// </summary>
+    Task<SlimInvitation> CreateInvitationAsync(SlimUser user, TimeSpan? lifetime = null, CancellationToken ct = default);
 }
