@@ -12,6 +12,7 @@ internal sealed class SlimCredentialService(
     IPasswordHasher<SlimUser> hasher,
     ISlimUserStore store,
     SlimEmailDispatcher mail,
+    SlimMetrics metrics,
     IOptions<SlimIdentityOptions> options,
     TimeProvider time,
     IServiceProvider services,
@@ -55,9 +56,26 @@ internal sealed class SlimCredentialService(
         }
         catch (FormatException ex)
         {
-            logger.LogWarning(ex, "SlimIdentity: stored password hash of user {UserId} is malformed.", user.Id);
+            Log.MalformedPasswordHash(logger, ex, user.Id);
             return SlimPasswordCheck.Failed;
         }
+    }
+
+    /// <summary>
+    /// Re-confirms the password of an authenticated user (2FA changes, e-mail change, …) with lockout bookkeeping.
+    /// Returns <c>null</c> on success, otherwise the error result (423 or 400 <c>invalid_password</c>).
+    /// </summary>
+    public async Task<IResult?> ConfirmPasswordAsync(SlimUser user, string? password, HttpContext http, CancellationToken ct)
+    {
+        var now = time.GetUtcNow();
+        if (user.IsLockedOut(now)) return Http.SlimResults.Locked(http, user.LockoutEndUtc!.Value, now);
+
+        if (await VerifyPasswordAsync(user, password, ct) != SlimPasswordCheck.Failed) return null;
+
+        var locked = await RegisterFailureAsync(user, ct);
+        return locked
+            ? Http.SlimResults.Locked(http, user.LockoutEndUtc!.Value, now)
+            : Http.SlimResults.BadRequest("invalid_password", "The password is incorrect.");
     }
 
     /// <summary>
@@ -78,7 +96,8 @@ internal sealed class SlimCredentialService(
             var duration = LockoutDuration(lockout, lockoutNumber);
             user.LockoutEndUtc = time.GetUtcNow() + duration;
             locked = true;
-            logger.LogWarning("SlimIdentity: user {UserId} locked out until {LockoutEnd} (lockout #{Number}).", user.Id, user.LockoutEndUtc, lockoutNumber);
+            Log.LockedOut(logger, user.Id, user.LockoutEndUtc, lockoutNumber);
+            metrics.Lockout();
 
             // inform the owner once per attack (first lockout since the last successful sign-in)
             if (lockoutNumber == 1)
@@ -116,7 +135,7 @@ internal sealed class SlimCredentialService(
         {
             user.PasswordHash = hasher.HashPassword(user, password);
             dirty = true;
-            logger.LogInformation("SlimIdentity: password hash of user {UserId} upgraded.", user.Id);
+            Log.PasswordRehashed(logger, user.Id);
         }
         if (dirty) await store.UpdateSecurityStateAsync(user, ct);
     }

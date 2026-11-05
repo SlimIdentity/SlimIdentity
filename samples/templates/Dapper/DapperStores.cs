@@ -73,6 +73,22 @@ public sealed class DapperUserStore(NpgsqlDataSource db) : ISlimUserStore
             """, user, cancellationToken: ct));
     }
 
+    public async Task<bool> UpdateEmailAsync(SlimUser user, string newEmail, CancellationToken ct)
+    {
+        await using var c = await db.OpenConnectionAsync(ct);
+        try
+        {
+            // the UNIQUE constraint on normalized_email decides – no check-then-act race
+            return await c.ExecuteAsync(new CommandDefinition(
+                "UPDATE users SET email = @newEmail, normalized_email = @normalized WHERE id = @id::uuid",
+                new { id = user.Id, newEmail, normalized = newEmail.ToUpperInvariant() }, cancellationToken: ct)) == 1;
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation)
+        {
+            return false;
+        }
+    }
+
     public async Task<IReadOnlyCollection<Claim>> GetClaimsAsync(SlimUser user, CancellationToken ct)
     {
         await using var c = await db.OpenConnectionAsync(ct);
@@ -176,12 +192,23 @@ public sealed class DapperTwoFactorStore(NpgsqlDataSource db) : ISlimTwoFactorSt
             "SELECT totp_secret FROM users WHERE id = @id::uuid", new { id = user.Id }, cancellationToken: ct));
     }
 
-    public async Task SetTotpSecretAsync(SlimUser user, string secret, CancellationToken ct)
+    // the value arrives already encrypted by SlimIdentity (Data Protection) – store it as is
+    public async Task SetTotpSecretAsync(SlimUser user, string protectedSecret, CancellationToken ct)
     {
         await using var c = await db.OpenConnectionAsync(ct);
         await c.ExecuteAsync(new CommandDefinition(
             "UPDATE users SET totp_secret = @secret WHERE id = @id::uuid",
-            new { id = user.Id, secret = string.IsNullOrEmpty(secret) ? null : secret }, cancellationToken: ct));
+            new { id = user.Id, secret = string.IsNullOrEmpty(protectedSecret) ? null : protectedSecret }, cancellationToken: ct));
+    }
+
+    // atomic compare-and-set: a 2FA code (time step) is accepted at most once
+    public async Task<bool> TryMarkCodeUsedAsync(SlimUser user, long usedAt, CancellationToken ct)
+    {
+        await using var c = await db.OpenConnectionAsync(ct);
+        return await c.ExecuteAsync(new CommandDefinition("""
+            UPDATE users SET last_2fa_code_at = @usedAt
+            WHERE id = @id::uuid AND (last_2fa_code_at IS NULL OR last_2fa_code_at < @usedAt)
+            """, new { id = user.Id, usedAt }, cancellationToken: ct)) == 1;
     }
 
     public async Task StoreRecoveryCodesAsync(SlimUser user, IEnumerable<string> hashedCodes, CancellationToken ct)

@@ -12,12 +12,15 @@
 - [SPA with cookies](guides/spa-cookies.md) – same-site and cross-subdomain setups, CSRF
 - [Mobile apps and bearer tokens](guides/mobile-bearer.md) – access/refresh tokens, rotation
 - [Sessions and logout](guides/sessions-and-logout.md) – server-side sessions, device list, sign out everywhere
-- [Two-factor authentication](guides/two-factor.md) – TOTP, e-mail codes, recovery codes
+- [Two-factor authentication](guides/two-factor.md) – TOTP with QR code, e-mail codes, recovery codes, replay protection
 - [External login (OAuth / OIDC)](guides/external-login.md) – Google, Entra ID, Keycloak, account linking
 - [Invitations](guides/invitations.md) – invite-only registration, "complete your registration"
 - [Admin features](guides/admin-features.md) – impersonation, sudo mode, bans, API keys
 - [LDAP and legacy passwords](guides/ldap-and-legacy-passwords.md)
+- [Client certificates (mTLS)](guides/client-certificates.md)
+- [Data Protection key ring](guides/data-protection.md) – required for production
 - [Running behind a reverse proxy](guides/reverse-proxy.md) – TLS termination, forwarded headers
+- [Observability](guides/observability.md) – metrics (OpenTelemetry) and log event ids
 - [Native AOT](guides/native-aot.md)
 - [Migrating from ASP.NET Core Identity](guides/migrating-from-aspnet-identity.md)
 

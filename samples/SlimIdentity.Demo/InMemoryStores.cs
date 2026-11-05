@@ -46,10 +46,28 @@ public sealed class InMemoryUserStore : ISlimUserStore
         return Task.FromResult(Clone(user));
     }
 
+    // persists the security fields only (contract of ISlimUserStore)
     public Task UpdateSecurityStateAsync(SlimUser user, CancellationToken ct)
     {
-        _users[user.Id] = Clone(user);
+        var stored = _users[user.Id];
+        stored.PasswordHash = user.PasswordHash;
+        stored.SecurityStamp = user.SecurityStamp;
+        stored.EmailConfirmed = user.EmailConfirmed;
+        stored.FailedLoginAttempts = user.FailedLoginAttempts;
+        stored.LockoutEndUtc = user.LockoutEndUtc;
+        stored.TwoFactorEnabled = user.TwoFactorEnabled;
         return Task.CompletedTask;
+    }
+
+    public Task<bool> UpdateEmailAsync(SlimUser user, string newEmail, CancellationToken ct)
+    {
+        lock (_users)
+        {
+            if (_users.Values.Any(u => u.Id != user.Id && string.Equals(u.Email, newEmail, StringComparison.OrdinalIgnoreCase)))
+                return Task.FromResult(false);
+            _users[user.Id].Email = newEmail;
+            return Task.FromResult(true);
+        }
     }
 
     public Task<IReadOnlyCollection<Claim>> GetClaimsAsync(SlimUser user, CancellationToken ct)
@@ -90,16 +108,27 @@ public sealed class InMemoryRefreshTokenStore(TimeProvider time) : ISlimRefreshT
 
 public sealed class InMemoryTwoFactorStore : ISlimTwoFactorStore
 {
-    private readonly ConcurrentDictionary<string, string> _secrets = new();
+    private readonly ConcurrentDictionary<string, string> _secrets = new();   // encrypted by SlimIdentity
     private readonly ConcurrentDictionary<string, HashSet<string>> _recovery = new();
+    private readonly ConcurrentDictionary<string, long> _lastCodeUse = new();
 
     public Task<string?> GetTotpSecretAsync(SlimUser user, CancellationToken ct) =>
         Task.FromResult(_secrets.TryGetValue(user.Id, out var s) && s.Length > 0 ? s : null);
 
-    public Task SetTotpSecretAsync(SlimUser user, string secret, CancellationToken ct)
+    public Task SetTotpSecretAsync(SlimUser user, string protectedSecret, CancellationToken ct)
     {
-        _secrets[user.Id] = secret;
+        _secrets[user.Id] = protectedSecret;
         return Task.CompletedTask;
+    }
+
+    public Task<bool> TryMarkCodeUsedAsync(SlimUser user, long usedAt, CancellationToken ct)
+    {
+        lock (_lastCodeUse)
+        {
+            if (_lastCodeUse.TryGetValue(user.Id, out var last) && last >= usedAt) return Task.FromResult(false);
+            _lastCodeUse[user.Id] = usedAt;
+            return Task.FromResult(true);
+        }
     }
 
     public Task StoreRecoveryCodesAsync(SlimUser user, IEnumerable<string> hashedCodes, CancellationToken ct)
@@ -187,6 +216,12 @@ public sealed class ConsoleEmailSender : ISlimEmailSender
 
     public Task SendTwoFactorCodeAsync(string email, string code, CancellationToken ct) =>
         Write("Your sign-in code", email, code);
+
+    public Task SendEmailChangeConfirmationAsync(string newEmail, string confirmationTokenOrLink, CancellationToken ct) =>
+        Write("Confirm your new e-mail address", newEmail, confirmationTokenOrLink);
+
+    public Task SendEmailChangedNotificationAsync(string oldEmail, string newEmail, CancellationToken ct) =>
+        Write("Your e-mail address was changed", oldEmail, $"The sign-in address of your account is now {newEmail}. Not you? Contact support.");
 
     public Task SendAccountExistsEmailAsync(string email, CancellationToken ct) =>
         Write("You already have an account", email, "Someone tried to register with your address. Forgot your password? Use /auth/forgot-password.");

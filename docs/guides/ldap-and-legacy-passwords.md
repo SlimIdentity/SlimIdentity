@@ -17,7 +17,7 @@ builder.Services.AddSlimIdentity(o =>
 ```
 
 The validator binds against the directory with the user's credentials (LDAPS); a complete implementation using
-`System.DirectoryServices.Protocols` is in [`samples/Enterprise/LdapPasswordValidator.cs`](../../samples/Enterprise/LdapPasswordValidator.cs).
+`System.DirectoryServices.Protocols` is in [`samples/templates/Enterprise/LdapPasswordValidator.cs`](../../samples/templates/Enterprise/LdapPasswordValidator.cs).
 Return `false` on infrastructure errors and log them – never allow anonymous binds (empty password).
 
 Invitations cannot set a password in this mode (`400 password_managed_externally`).

@@ -1,4 +1,5 @@
 using System.Net;
+using Microsoft.Extensions.DependencyInjection;
 using SlimIdentity.Security;
 using SlimIdentity.Tests.Infrastructure;
 
@@ -27,6 +28,7 @@ public sealed class TwoFactorTests
     {
         await using var app = await TestApp.StartAsync();
         var (sharedKey, _) = await EnableTotpAsync(app);
+        app.Time.Advance(TimeSpan.FromSeconds(30));   // next time step – the enable code is already used
         var client = app.CreateClient();
 
         var challenge = await client.PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized);
@@ -36,6 +38,60 @@ public sealed class TwoFactorTests
         await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = challenge.Str("preAuthToken"), code = "000000" }, HttpStatusCode.Unauthorized);
         var session = await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = challenge.Str("preAuthToken"), code = Code(app, sharedKey) });
         Assert.False(string.IsNullOrEmpty(session.Str("accessToken")));
+    }
+
+    [Fact]
+    public async Task A_totp_code_is_accepted_only_once()
+    {
+        await using var app = await TestApp.StartAsync();
+        var (sharedKey, _) = await EnableTotpAsync(app);
+        app.Time.Advance(TimeSpan.FromSeconds(30));
+        var code = Code(app, sharedKey);
+        var client = app.CreateClient();
+
+        async Task<string> PreAuth() =>
+            (await client.PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized)).Str("preAuthToken");
+
+        await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = await PreAuth(), code });
+        // an attacker who observed the code (phishing proxy, shoulder surfing) cannot reuse it
+        await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = await PreAuth(), code }, HttpStatusCode.Unauthorized);
+        // the enable code itself was consumed as well: a code from the previous step is rejected
+        await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = await PreAuth(),
+            code = SlimTotp.Compute(SlimBase32.Decode(sharedKey), app.Time.GetUtcNow().ToUnixTimeSeconds() / 30 - 1) }, HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task Email_codes_are_single_use()
+    {
+        await using var app = await TestApp.StartAsync();
+        var tokens = await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword);
+        var me = app.CreateClient();
+        me.BearerToken = tokens.AccessToken;
+        await me.PostJsonAsync("/auth/2fa/enable-email", new { password = TestApp.UserPassword });
+
+        var client = app.CreateClient();
+        var preAuth = (await client.PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized)).Str("preAuthToken");
+        var code = (await app.Mail.WaitForAsync("two-factor", TestApp.UserEmail)).Payload;
+
+        await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = preAuth, code });
+        await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = preAuth, code }, HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task Totp_secret_and_recovery_codes_are_never_stored_in_clear_text()
+    {
+        await using var app = await TestApp.StartAsync();
+        var (sharedKey, recoveryCodes) = await EnableTotpAsync(app);
+        var store = (TestTwoFactorStore)app.App.Services.GetRequiredService<ISlimTwoFactorStore>();
+        var userId = app.Users.Get(TestApp.UserEmail).Id;
+
+        var raw = store.RawSecret(userId)!;
+        Assert.DoesNotContain(sharedKey.Replace(" ", "").ToUpperInvariant(), raw.ToUpperInvariant());
+        Assert.True(raw.Length > 40);   // a Data Protection payload, not a 32-character Base32 secret
+
+        var hashes = store.RecoveryHashes(userId);
+        Assert.Equal(10, hashes.Count);
+        Assert.All(recoveryCodes, c => Assert.DoesNotContain(c.Replace("-", ""), string.Concat(hashes)));
     }
 
     [Fact]

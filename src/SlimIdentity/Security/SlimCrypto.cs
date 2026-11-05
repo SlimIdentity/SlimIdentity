@@ -75,8 +75,13 @@ internal static class SlimTotp
     public static string NormalizeCode(string? code) =>
         (code ?? string.Empty).Replace(" ", "", StringComparison.Ordinal).Replace("-", "", StringComparison.Ordinal).Trim();
 
-    public static bool Verify(string base32Secret, string? code, DateTimeOffset utcNow, int tolerance)
+    public static bool Verify(string base32Secret, string? code, DateTimeOffset utcNow, int tolerance) =>
+        TryVerify(base32Secret, code, utcNow, tolerance, out _);
+
+    /// <summary>Verifies the code and returns the matching time step (for replay protection).</summary>
+    public static bool TryVerify(string base32Secret, string? code, DateTimeOffset utcNow, int tolerance, out long matchedStep)
     {
+        matchedStep = 0;
         var normalized = NormalizeCode(code);
         if (normalized.Length != 6 || !normalized.All(char.IsAsciiDigit)) return false;
 
@@ -91,10 +96,17 @@ internal static class SlimTotp
         for (var i = -tolerance; i <= tolerance; i++)
         {
             // no early exit – constant work regardless of which window matches
-            match |= CryptographicOperations.FixedTimeEquals(Encoding.ASCII.GetBytes(Compute(key, step + i)), provided);
+            if (CryptographicOperations.FixedTimeEquals(Encoding.ASCII.GetBytes(Compute(key, step + i)), provided))
+            {
+                match = true;
+                matchedStep = step + i;
+            }
         }
         return match;
     }
+
+    /// <summary>Start of a time step in unix seconds (the unit of <c>ISlimTwoFactorStore.TryMarkCodeUsedAsync</c>).</summary>
+    public static long StepStart(long step) => step * StepSeconds;
 
     internal static string Compute(byte[] key, long counter)
     {
@@ -125,6 +137,11 @@ internal static class SlimTotp
     }
 }
 
+/// <summary>
+/// Recovery codes: 80 bit of entropy (16 Base32 characters, <c>xxxx-xxxx-xxxx-xxxx</c>). Stored as SHA-256 over a
+/// versioned domain prefix, the user id and the code – salted per user, so identical codes never share a hash and
+/// precomputed tables are useless. With 2^80 candidates per code an offline search is infeasible.
+/// </summary>
 internal static class SlimRecoveryCodes
 {
     public static IReadOnlyList<string> Generate(int count)
@@ -132,12 +149,15 @@ internal static class SlimRecoveryCodes
         var codes = new List<string>(count);
         for (var i = 0; i < count; i++)
         {
-            var raw = SlimBase32.Encode(RandomNumberGenerator.GetBytes(7)).ToLowerInvariant()[..10]; // 50 bit
-            codes.Add($"{raw[..5]}-{raw[5..]}");
+            var raw = SlimBase32.Encode(RandomNumberGenerator.GetBytes(10)).ToLowerInvariant(); // 80 bit = 16 chars
+            codes.Add($"{raw[..4]}-{raw[4..8]}-{raw[8..12]}-{raw[12..16]}");
         }
         return codes;
     }
 
-    public static string Hash(string code) =>
-        SlimHashing.Sha256Hex(code.Replace("-", "", StringComparison.Ordinal).Replace(" ", "", StringComparison.Ordinal).Trim().ToLowerInvariant());
+    public static string Hash(string userId, string code) =>
+        SlimHashing.Sha256Hex($"slimidentity.recovery.v1:{userId}:{Normalize(code)}");
+
+    private static string Normalize(string code) =>
+        code.Replace("-", "", StringComparison.Ordinal).Replace(" ", "", StringComparison.Ordinal).Trim().ToLowerInvariant();
 }

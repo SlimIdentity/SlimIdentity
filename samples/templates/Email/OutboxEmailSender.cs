@@ -9,7 +9,7 @@
 //   builder.Services.AddScoped<MailKitEmailSender>();   // the real transport (EmailSenders.cs)
 //   builder.Services.AddHostedService<OutboxMailWorker>();
 //
-// Entity: OutboxMail in samples/EfCore/EfCoreModel.cs. Packages: Microsoft.EntityFrameworkCore + provider.
+// Entity: OutboxMail in samples/templates/EfCore/EfCoreModel.cs. Packages: Microsoft.EntityFrameworkCore + provider.
 
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -26,6 +26,8 @@ public sealed class OutboxEmailSender(AppDbContext db, TimeProvider time) : ISli
     public Task SendVerificationEmailAsync(string email, string link, CancellationToken ct) => AddAsync("verification", email, link, ct);
     public Task SendPasswordResetEmailAsync(string email, string link, CancellationToken ct) => AddAsync("password-reset", email, link, ct);
     public Task SendTwoFactorCodeAsync(string email, string code, CancellationToken ct) => AddAsync("two-factor", email, code, ct);
+    public Task SendEmailChangeConfirmationAsync(string newEmail, string link, CancellationToken ct) => AddAsync("email-change", newEmail, link, ct);
+    public Task SendEmailChangedNotificationAsync(string oldEmail, string newEmail, CancellationToken ct) => AddAsync("email-changed", oldEmail, newEmail, ct);
     public Task SendAccountExistsEmailAsync(string email, CancellationToken ct) => AddAsync("account-exists", email, "", ct);
     public Task SendLockoutNotificationEmailAsync(string email, DateTimeOffset lockoutEndUtc, CancellationToken ct) =>
         AddAsync("lockout", email, lockoutEndUtc.ToString("O"), ct);
@@ -61,6 +63,8 @@ public sealed class OutboxMailWorker(IServiceScopeFactory scopes, TimeProvider t
                         "verification" => transport.SendVerificationEmailAsync(mail.To, mail.Payload, stoppingToken),
                         "password-reset" => transport.SendPasswordResetEmailAsync(mail.To, mail.Payload, stoppingToken),
                         "two-factor" => transport.SendTwoFactorCodeAsync(mail.To, mail.Payload, stoppingToken),
+                        "email-change" => transport.SendEmailChangeConfirmationAsync(mail.To, mail.Payload, stoppingToken),
+                        "email-changed" => transport.SendEmailChangedNotificationAsync(mail.To, mail.Payload, stoppingToken),
                         "account-exists" => transport.SendAccountExistsEmailAsync(mail.To, stoppingToken),
                         _ => Task.CompletedTask,
                     });

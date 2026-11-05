@@ -27,7 +27,7 @@ The solution contains:
 | `src/SlimIdentity` | the NuGet package |
 | `tests/SlimIdentity.Tests` | unit and integration tests (in-memory host, `FakeTimeProvider`) |
 | `samples/SlimIdentity.Demo` | runnable demo (`dotnet run --project samples/SlimIdentity.Demo`, see the `.http` file) |
-| `samples/SamplesCheck` | compiles the copy-paste templates in `samples/` against the current API |
+| `tests/SlimIdentity.SamplesCompileCheck` | compiles the copy-paste templates in `samples/` against the current API |
 
 Native AOT check (needs the platform's native toolchain, see the
 [.NET docs](https://learn.microsoft.com/dotnet/core/deploying/native-aot/#prerequisites)):

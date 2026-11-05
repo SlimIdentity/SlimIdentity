@@ -18,6 +18,9 @@ internal sealed class SlimExternalLoginHandlers(
     SlimLoginHandlers login,
     SlimAuthManager authManager,
     SlimWorkflowTokens workflow,
+    SlimMetrics metrics,
+    SlimLocalNonceRegistry nonces,
+    IServiceProvider services,
     IOptions<SlimIdentityOptions> options,
     TimeProvider time,
     IHttpContextAccessor httpContextAccessor,
@@ -88,7 +91,8 @@ internal sealed class SlimExternalLoginHandlers(
             {
                 if (!(O.ExternalLogin.AutoLinkVerifiedEmails && emailVerified))
                 {
-                    logger.LogWarning("SlimIdentity: {Provider} login for existing account {UserId} not linked (unverified e-mail or auto-link disabled).", provider, existing.Id);
+                    Log.ExternalLoginConflict(logger, provider, existing.Id);
+                    metrics.ExternalLogin(provider, "conflict");
                     return Redirect(returnUrl, "slim_error", "account_conflict"); // 409 semantics
                 }
                 await externalStore.LinkExternalLoginAsync(existing.Id, provider, providerKey, ct);
@@ -97,7 +101,8 @@ internal sealed class SlimExternalLoginHandlers(
                     existing.EmailConfirmed = true;
                     await store.UpdateSecurityStateAsync(existing, ct);
                 }
-                logger.LogInformation("SlimIdentity: linked {Provider} login to user {UserId}.", provider, existing.Id);
+                Log.ExternalLoginLinked(logger, provider, existing.Id);
+                metrics.ExternalLogin(provider, "linked");
                 user = existing;
             }
             else
@@ -111,14 +116,22 @@ internal sealed class SlimExternalLoginHandlers(
                     await store.UpdateSecurityStateAsync(user, ct);
                 }
                 await externalStore.LinkExternalLoginAsync(user.Id, provider, providerKey, ct);
-                logger.LogInformation("SlimIdentity: created user {UserId} from {Provider} login.", user.Id, provider);
+                Log.ExternalUserCreated(logger, user.Id, provider);
+                metrics.ExternalLogin(provider, "created");
             }
         }
 
         var now = time.GetUtcNow();
-        if (!user.IsActive) return Redirect(returnUrl, "slim_error", "account_disabled");
-        if (user.IsLockedOut(now)) return Redirect(returnUrl, "slim_error", "account_locked");
-        if (O.SignIn.RequireConfirmedEmail && !user.EmailConfirmed) return Redirect(returnUrl, "slim_error", "email_not_confirmed");
+        var rejection = !user.IsActive ? "account_disabled"
+            : user.IsLockedOut(now) ? "account_locked"
+            : O.SignIn.RequireConfirmedEmail && !user.EmailConfirmed ? "email_not_confirmed"
+            : null;
+        if (rejection is not null)
+        {
+            metrics.ExternalLogin(provider, "rejected");
+            return Redirect(returnUrl, "slim_error", rejection);
+        }
+        metrics.ExternalLogin(provider, "success");
 
         if (user.TwoFactorEnabled)
         {
@@ -140,8 +153,14 @@ internal sealed class SlimExternalLoginHandlers(
 
         // Bearer clients: never put tokens into URLs – hand out a short-lived one-time code instead.
         var code = workflow.Protect(SlimWorkflowTokens.ExternalExchangePurpose,
-            new SlimExchangePayload(user.Id, user.SecurityStamp, provider, Convert.ToHexString(RandomNumberGenerator.GetBytes(8))),
+            new SlimExchangePayload(user.Id, user.SecurityStamp, provider, Convert.ToHexString(RandomNumberGenerator.GetBytes(16))),
             O.ExternalLogin.ExchangeCodeLifetime);
+
+        // Single use: with a refresh-token store the code is registered there and consumed atomically (works across
+        // instances); otherwise the nonce is tracked in memory on exchange.
+        if (services.GetService<ISlimRefreshTokenStore>() is { } refreshStore)
+            await refreshStore.StoreRefreshTokenAsync(user.Id, ExchangeCodeHash(code), time.GetUtcNow() + O.ExternalLogin.ExchangeCodeLifetime, ct);
+
         return Redirect(returnUrl, "code", code);
     }
 
@@ -149,7 +168,14 @@ internal sealed class SlimExternalLoginHandlers(
 
     public async Task<IResult> ExchangeAsync(SlimExternalExchangeRequest? request, CancellationToken ct)
     {
-        if (!workflow.TryUnprotect<SlimExchangePayload>(SlimWorkflowTokens.ExternalExchangePurpose, request?.Code, out var payload))
+        if (!workflow.TryUnprotect<SlimExchangePayload>(SlimWorkflowTokens.ExternalExchangePurpose, request?.Code, out var payload, out var expiresAt))
+            return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
+
+        // consume first – a code that was already exchanged (leaked via history, logs or a referrer) is rejected
+        var consumed = services.GetService<ISlimRefreshTokenStore>() is { } refreshStore
+            ? string.Equals(await refreshStore.ValidateAndConsumeRefreshTokenAsync(ExchangeCodeHash(request!.Code), ct), payload.Uid, StringComparison.Ordinal)
+            : nonces.TryConsume(payload.Nonce, expiresAt);
+        if (!consumed)
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
 
         var user = await store.FindByIdAsync(payload.Uid, ct);
@@ -162,6 +188,9 @@ internal sealed class SlimExternalLoginHandlers(
     }
 
     // ------------------------------------------------------------------ helpers
+
+    // domain-separated, so an exchange code can never be confused with a refresh token in the shared store
+    private static string ExchangeCodeHash(string code) => SlimHashing.Sha256Hex($"slimidentity.exchange-code.v1:{code}");
 
     private async Task<AuthenticationScheme?> FindRemoteSchemeAsync(string provider)
     {

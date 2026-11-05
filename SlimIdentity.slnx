@@ -4,10 +4,10 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/SlimIdentity.Tests/SlimIdentity.Tests.csproj" />
+    <Project Path="tests/SlimIdentity.SamplesCompileCheck/SlimIdentity.SamplesCompileCheck.csproj" />
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/SlimIdentity.Demo/SlimIdentity.Demo.csproj" Id="03bef669-f850-4bd1-9275-4145b701eaa3" />
-    <Project Path="samples/SamplesCheck/SamplesCheck.csproj" />
   </Folder>
   <Folder Name="/Solution Items/">
     <File Path=".editorconfig" />

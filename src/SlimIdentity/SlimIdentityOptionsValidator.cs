@@ -94,6 +94,8 @@ internal sealed class SlimIdentityOptionsValidator : IValidateOptions<SlimIdenti
             f.Add("Links.PasswordResetUrl must contain the placeholder '{token}'.");
         if (o.Links.InvitationUrl is { } i && !i.Contains("{token}", StringComparison.Ordinal))
             f.Add("Links.InvitationUrl must contain the placeholder '{token}'.");
+        if (o.Links.EmailChangeUrl is { } ec && !ec.Contains("{token}", StringComparison.Ordinal))
+            f.Add("Links.EmailChangeUrl must contain the placeholder '{token}'.");
 
         return f.Count > 0
             ? ValidateOptionsResult.Fail(f.Select(x => "SlimIdentity: " + x))

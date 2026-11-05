@@ -25,7 +25,7 @@ const me = await (await api("/auth/me")).json();   // restore state after F5
 await api("/auth/logout", { method: "POST", body: "{}" });
 ```
 
-A complete client is in [`samples/Frontend/slimIdentityClient.ts`](../../samples/Frontend/slimIdentityClient.ts).
+A complete client is in [`samples/templates/Frontend/slimIdentityClient.ts`](../../samples/templates/Frontend/slimIdentityClient.ts).
 
 ## `app.example.com` → `api.example.com`
 

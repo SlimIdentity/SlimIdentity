@@ -218,6 +218,45 @@ public static class SlimIdentityEndpointExtensions
                 .RequireAuthorization(SlimAuthorize);
         }
 
+        if (e.EnableChangeEmail)
+        {
+            group.MapPost("/change-email", static ([FromBody] SlimChangeEmailRequest request,
+                    [FromServices] SlimAccountHandlers h, CancellationToken ct) => h.ChangeEmailAsync(request, ct))
+                .WithName("SlimIdentity_ChangeEmail")
+                .WithSummary("Request an e-mail change (password required). A confirmation link is sent to the new address. Always 200.")
+                .Produces<SlimStatusResponse>()
+                .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
+                .ProducesValidationProblem()
+                .Produces(StatusCodes.Status401Unauthorized)
+                .Produces<SlimLockedResponse>(StatusCodes.Status423Locked)
+                .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
+                .RequireAuthorization(SlimAuthorize);
+
+            group.MapPost("/confirm-email-change", static ([FromBody] SlimConfirmEmailChangeRequest request,
+                    [FromServices] SlimAccountHandlers h, CancellationToken ct) => h.ConfirmEmailChangeAsync(request, ct))
+                .WithName("SlimIdentity_ConfirmEmailChange")
+                .WithSummary("Confirm the e-mail change with the token from the mail; all sessions end.")
+                .Produces<SlimStatusResponse>()
+                .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
+                .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
+                .AllowAnonymous();
+        }
+
+        if (e.EnablePasswordPolicy)
+        {
+            group.MapGet("/password-policy", static ([FromServices] IOptions<SlimIdentityOptions> options,
+                    [FromServices] IEnumerable<ISlimPasswordRule> rules) =>
+                {
+                    var p = options.Value.Password;
+                    return Results.Ok(new SlimPasswordPolicyResponse(p.MinimumLength, p.MaximumLength, p.RequireDigit,
+                        p.RequireLowercase, p.RequireUppercase, p.RequireNonAlphanumeric, rules.Any()));
+                })
+                .WithName("SlimIdentity_PasswordPolicy")
+                .WithSummary("Rules for new passwords – for hints and live validation in the front end.")
+                .Produces<SlimPasswordPolicyResponse>()
+                .AllowAnonymous();
+        }
+
         if (e.EnableMe)
         {
             group.MapGet("/me", static ([FromServices] SlimAccountHandlers h) => h.Me())

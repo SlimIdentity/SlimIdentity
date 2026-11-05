@@ -59,6 +59,7 @@ public sealed class SlimIdentityBuilder
         where TStore : class, ISlimTwoFactorStore
     {
         Register<ISlimTwoFactorStore, TStore>(lifetime);
+        Services.TryAddScoped<SlimTwoFactorService>();
         Services.TryAddScoped<SlimTwoFactorHandlers>();
         return this;
     }
@@ -72,6 +73,7 @@ public sealed class SlimIdentityBuilder
     {
         Register<ISlimExternalLoginStore, TStore>(lifetime);
         Services.TryAddScoped<SlimExternalLoginHandlers>();
+        Services.TryAddSingleton<SlimLocalNonceRegistry>();
         Services.Configure<AuthenticationOptions>(o => o.DefaultSignInScheme ??= SlimIdentityDefaults.ExternalScheme);
         return this;
     }
@@ -92,6 +94,17 @@ public sealed class SlimIdentityBuilder
     /// <summary>Delegates the password check of <c>/login</c> to LDAP / AD / legacy validation.</summary>
     public SlimIdentityBuilder AddCustomPasswordValidator<[DynamicallyAccessedMembers(Ctors)] TValidator>(ServiceLifetime lifetime = ServiceLifetime.Scoped)
         where TValidator : class, ISlimCustomPasswordValidator => Register<ISlimCustomPasswordValidator, TValidator>(lifetime);
+
+    /// <summary>
+    /// Adds a rule for new passwords on top of <see cref="SlimPasswordOptions"/> (e.g. a breached-password check).
+    /// Can be called several times; all rules must pass.
+    /// </summary>
+    public SlimIdentityBuilder AddPasswordRule<[DynamicallyAccessedMembers(Ctors)] TRule>(ServiceLifetime lifetime = ServiceLifetime.Scoped)
+        where TRule : class, ISlimPasswordRule
+    {
+        Services.TryAddEnumerable(new ServiceDescriptor(typeof(ISlimPasswordRule), typeof(TRule), lifetime));
+        return this;
+    }
 
     // ---------------------------------------------------------------- tuning
 

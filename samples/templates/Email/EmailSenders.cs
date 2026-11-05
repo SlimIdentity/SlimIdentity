@@ -39,6 +39,17 @@ public sealed class MailKitEmailSender(IOptions<SmtpSettings> settings) : ISlimE
     public Task SendTwoFactorCodeAsync(string email, string code, CancellationToken ct) =>
         SendAsync(email, $"Your sign-in code: {code}", $"<p>Your code is <b>{code}</b>. It expires in a few minutes.</p>", ct);
 
+    public Task SendEmailChangeConfirmationAsync(string newEmail, string link, CancellationToken ct) =>
+        SendAsync(newEmail, "Confirm your new e-mail address",
+            $"<p>Please confirm that this address should be used for your account:</p><p><a href=\"{link}\">Confirm address</a></p>" +
+            "<p>If you did not request this, you can ignore this e-mail.</p>", ct);
+
+    // Optional (default: no mail) – sent to the old address after the change. Encode user input in HTML!
+    public Task SendEmailChangedNotificationAsync(string oldEmail, string newEmail, CancellationToken ct) =>
+        SendAsync(oldEmail, "Your e-mail address was changed",
+            $"<p>The sign-in address of your account was changed to <b>{System.Net.WebUtility.HtmlEncode(newEmail)}</b>.</p>" +
+            "<p>If this was not you, contact support immediately.</p>", ct);
+
     // Optional (default: no mail) – someone tried to register with an address that already has an account.
     public Task SendAccountExistsEmailAsync(string email, CancellationToken ct) =>
         SendAsync(email, "You already have an account",
@@ -76,6 +87,9 @@ public sealed class SendGridEmailSender(ISendGridClient client, ILogger<SendGrid
     public Task SendTwoFactorCodeAsync(string email, string code, CancellationToken ct) =>
         SendAsync(email, $"Your sign-in code: {code}", $"Your code is <b>{code}</b>.", ct);
 
+    public Task SendEmailChangeConfirmationAsync(string newEmail, string link, CancellationToken ct) =>
+        SendAsync(newEmail, "Confirm your new e-mail address", $"<a href=\"{link}\">Confirm address</a>", ct);
+
     private async Task SendAsync(string to, string subject, string html, CancellationToken ct)
     {
         var msg = MailHelper.CreateSingleEmail(From, new EmailAddress(to), subject, null, html);
@@ -96,4 +110,7 @@ public sealed class LoggingEmailSender(ILogger<LoggingEmailSender> logger) : ISl
 
     public Task SendTwoFactorCodeAsync(string email, string code, CancellationToken ct)
     { logger.LogInformation("2FA code for {Email}: {Code}", email, code); return Task.CompletedTask; }
+
+    public Task SendEmailChangeConfirmationAsync(string newEmail, string link, CancellationToken ct)
+    { logger.LogInformation("Confirm new address {Email}: {Link}", newEmail, link); return Task.CompletedTask; }
 }

@@ -20,6 +20,10 @@ public sealed class TestAppOptions
     public bool RefreshTokens { get; init; } = true;
     public bool TwoFactor { get; init; } = true;
     public Action<SlimIdentityOptions>? Configure { get; init; }
+    /// <summary>Additional capabilities (API keys, password rules, external providers, …).</summary>
+    public Action<SlimIdentityBuilder>? Builder { get; init; }
+    /// <summary>Additional host endpoints.</summary>
+    public Action<WebApplication>? Map { get; init; }
 }
 
 /// <summary>An in-memory host with SlimIdentity, test stores, a fake clock and a few host endpoints.</summary>
@@ -69,6 +73,7 @@ public sealed class TestApp : IAsyncDisposable
         if (options.RefreshTokens) slim.AddRefreshTokenStore<TestRefreshTokenStore>(ServiceLifetime.Singleton);
         if (options.Sessions) slim.AddSessionStore<TestSessionStore>(ServiceLifetime.Singleton);
         if (options.TwoFactor) slim.AddTwoFactorStore<TestTwoFactorStore>(ServiceLifetime.Singleton);
+        options.Builder?.Invoke(slim);
 
         var app = builder.Build();
         app.UseRateLimiter();
@@ -76,6 +81,7 @@ public sealed class TestApp : IAsyncDisposable
         app.UseAuthorization();
         app.MapSlimIdentityApi();
         MapHostEndpoints(app);
+        options.Map?.Invoke(app);
 
         var users = (TestUserStore)app.Services.GetRequiredService<ISlimUserStore>();
         users.Seed(AdminEmail, AdminPassword, "Admin");
@@ -180,9 +186,10 @@ public sealed class ApiClient(HttpClient http)
         return content.Length == 0 ? default : JsonDocument.Parse(content).RootElement.Clone();
     }
 
-    public async Task<HttpResponseMessage> SendAsync(HttpMethod method, string path, object? body)
+    public async Task<HttpResponseMessage> SendAsync(HttpMethod method, string path, object? body, IReadOnlyDictionary<string, string>? headers = null)
     {
         using var request = new HttpRequestMessage(method, new Uri(new Uri("https://localhost"), path));
+        foreach (var (name, value) in headers ?? new Dictionary<string, string>()) request.Headers.Add(name, value);
         if (body is not null) request.Content = JsonContent.Create(body, options: Json);
         if (BearerToken is not null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", BearerToken);
         if (SendCsrfHeader) request.Headers.Add("X-CSRF", "1");

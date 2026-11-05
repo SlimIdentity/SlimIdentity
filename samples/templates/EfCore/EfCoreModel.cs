@@ -20,7 +20,8 @@ public class AppUser
     public int FailedLoginAttempts { get; set; }
     public DateTimeOffset? LockoutEndUtc { get; set; }
     public bool TwoFactorEnabled { get; set; }
-    public string? TotpSecret { get; set; }
+    public string? TotpSecret { get; set; }            // encrypted by SlimIdentity
+    public long? LastTwoFactorCodeAt { get; set; }     // replay protection (unix seconds)
 
     // --- your business data – SlimIdentity never sees it
     public string? DisplayName { get; set; }
@@ -77,7 +78,7 @@ public class UserSession
     public string? IpAddress { get; set; }
 }
 
-/// <summary>Outbox row for guaranteed mail delivery (see samples/Email/OutboxEmailSender.cs).</summary>
+/// <summary>Outbox row for guaranteed mail delivery (see samples/templates/Email/OutboxEmailSender.cs).</summary>
 public class OutboxMail
 {
     public long Id { get; set; }

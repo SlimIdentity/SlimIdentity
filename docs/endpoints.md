@@ -51,6 +51,9 @@ Redirect results on `returnUrl`: cookie mode – cookie set, no parameters; bear
 | `POST /forgot-password` ⏱ | `email` | `200 reset_requested` (always) | – |
 | `POST /reset-password` ⏱ | `token`, `newPassword` | `200 password_reset` – all sessions end | `400 invalid_token`, `400` validation |
 | `POST /change-password` ⏱ 🔒 | `currentPassword`, `newPassword` | `200` new session for this device – others end | `400 invalid_password`, `400` validation, `403 not_allowed_while_impersonating`, `423 locked_out` |
+| `POST /change-email` ⏱ 🔒 | `newEmail`, `password` | `200 email_change_requested` (always – also for taken addresses); link goes to the new address | `400 email_unchanged`, `400 invalid_password`, `400` validation, `403` during impersonation, `423 locked_out` |
+| `POST /confirm-email-change` ⏱ | `token` | `200 email_changed` – address changed, confirmed, all sessions end, old address notified | `400 invalid_token`, `400 email_taken` |
+| `GET /password-policy` | – | `200` `minimumLength`, `maximumLength`, `requireDigit`, `requireLowercase`, `requireUppercase`, `requireNonAlphanumeric`, `hasAdditionalRules` – for hints and live validation in the front end | – |
 | `GET /me` 🔒 | – | `200` `id`, `email`, `isImpersonating`, `impersonatorId`, `authenticationMethod`, `sudoUntil`, `claims` | `401` |
 
 ## Invitations
@@ -81,6 +84,7 @@ Links are created by the host with `ISlimAuthManager.CreateInvitationAsync` – 
 | `POST /2fa/recovery-codes` ⏱ | `password` | `200` new `recoveryCodes` | `400 two_factor_disabled`, `400 invalid_password`, `423` |
 
 Enabling or disabling 2FA rotates the security stamp: all other devices are signed out, the calling device receives a
-new session.
+new session. Every TOTP time step and e-mail code is accepted only once (replay protection) – including the code used
+for `/2fa/enable`.
 
 🔒 = requires authentication (cookie, bearer or API key via the `SlimIdentity` policy scheme).

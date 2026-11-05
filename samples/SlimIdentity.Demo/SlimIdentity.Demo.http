@@ -69,6 +69,11 @@ X-CSRF: 1
 
 ### ---------------------------------------------------------------- Registration / mails (tokens are printed to the console)
 
+# rules for new passwords (anonymous) – for front-end hints
+GET {{auth}}/password-policy
+
+###
+
 POST {{auth}}/register
 Content-Type: application/json
 
@@ -119,6 +124,20 @@ POST {{auth}}/invitation/accept
 Content-Type: application/json
 
 { "token": "{{invite.response.body.$.token}}", "password": "Invited123!" }
+
+### ---------------------------------------------------------------- E-mail change (link is printed to the console)
+
+POST {{auth}}/change-email
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "newEmail": "admin-new@demo.local", "password": "Admin123!" }
+
+###
+POST {{auth}}/confirm-email-change
+Content-Type: application/json
+
+{ "token": "<token from console>" }
 
 ### ---------------------------------------------------------------- 2FA (TOTP)
 

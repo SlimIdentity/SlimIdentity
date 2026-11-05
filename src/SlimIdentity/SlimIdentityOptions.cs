@@ -49,10 +49,14 @@ public sealed class SlimEndpointOptions
     public bool EnablePasswordReset { get; set; } = true;
     /// <summary><c>/change-password</c>. Disable for LDAP-only setups – the password then lives in the directory.</summary>
     public bool EnableChangePassword { get; set; } = true;
+    /// <summary><c>/change-email</c> and <c>/confirm-email-change</c>. Disable if the login identifier is managed elsewhere (LDAP, SSO).</summary>
+    public bool EnableChangeEmail { get; set; } = true;
     /// <summary><c>/logout</c> and <c>/logout-all</c>.</summary>
     public bool EnableLogout { get; set; } = true;
     /// <summary><c>/me</c>.</summary>
     public bool EnableMe { get; set; } = true;
+    /// <summary><c>GET /password-policy</c> (anonymous): the password rules for front-end hints and validation.</summary>
+    public bool EnablePasswordPolicy { get; set; } = true;
     /// <summary><c>/invitation/info</c> and <c>/invitation/accept</c> (links are created by the host via <c>ISlimAuthManager.CreateInvitationAsync</c>).</summary>
     public bool EnableInvitations { get; set; } = true;
 
@@ -241,6 +245,8 @@ public sealed class SlimLinkOptions
     public string? PasswordResetUrl { get; set; }
     /// <summary>e.g. <c>https://app.example.com/accept-invitation?token={token}</c>.</summary>
     public string? InvitationUrl { get; set; }
+    /// <summary>e.g. <c>https://app.example.com/confirm-email-change?token={token}</c> (sent to the new address).</summary>
+    public string? EmailChangeUrl { get; set; }
 }
 
 /// <summary>CSRF protection for state-changing requests in cookie mode.</summary>

@@ -1,7 +1,7 @@
 # Admin features
 
 All of these are built with `ISlimAuthManager` in your own endpoints, protected by your own policies.
-A complete example is [`samples/Enterprise/AdminEndpoints.cs`](../../samples/Enterprise/AdminEndpoints.cs).
+A complete example is [`samples/templates/Enterprise/AdminEndpoints.cs`](../../samples/templates/Enterprise/AdminEndpoints.cs).
 
 ## Impersonation
 

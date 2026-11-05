@@ -25,6 +25,10 @@ mobile apps, while leaving databases, ORMs (EF Core, Dapper) and domain models e
 7. **Secure by default:** where security and convenience conflict, the secure value is the default and the convenient
    one an explicit opt-in (e.g. `SignIn.RevealAccountState`).
 8. **Native AOT compatible:** source-generated JSON, request delegates and configuration binding; CI publishes an AOT app.
+9. **Observable without dependencies:** metrics via `System.Diagnostics.Metrics`, logs with stable event ids – never
+   personal data in tags.
+10. **The host's database never holds usable secrets:** only hashes of tokens, keys and recovery codes, and TOTP
+    secrets encrypted with Data Protection.
 
 ## 3. Core data model (`SlimUser`)
 
@@ -46,14 +50,15 @@ No profile or business data – that stays in the host's own user model.
 
 | Interface | Required | Enables |
 | :--- | :--- | :--- |
-| `ISlimUserStore` | yes | everything (find, create, persist security state, host claims) |
-| `ISlimEmailSender` | yes | verification, reset, 2FA codes; optional "account exists" and lockout notices |
+| `ISlimUserStore` | yes | everything (find, create, persist security state, change e-mail, host claims) |
+| `ISlimEmailSender` | yes | verification, reset, 2FA codes, e-mail change; optional "account exists", lockout and "address changed" notices |
 | `ISlimRefreshTokenStore` | – | `/refresh`, refresh tokens (hashes only, atomic consumption) |
 | `ISlimSessionStore` | – | server-side sessions, per-device logout, `/sessions` |
-| `ISlimTwoFactorStore` | – | `/login/2fa`, `/2fa/*` (TOTP secrets, recovery-code hashes) |
-| `ISlimExternalLoginStore` | – | OAuth/OIDC login and account linking |
+| `ISlimTwoFactorStore` | – | `/login/2fa`, `/2fa/*` (encrypted TOTP secrets, recovery-code hashes, replay protection) |
+| `ISlimExternalLoginStore` | – | OAuth/OIDC login and account linking (also used for client certificates) |
 | `ISlimApiKeyStore` | – | `X-API-Key` authentication (key hashes only) |
 | `ISlimCustomPasswordValidator` | – | LDAP / legacy password verification |
+| `ISlimPasswordRule` (any number) | – | additional rules for new passwords (e.g. breached-password check) |
 
 `ISlimAuthManager` is the service for host endpoints: `SignInAsync`, `ImpersonateAsync` / `EndImpersonationAsync`,
 `ElevateSessionAsync` (sudo), `SignOutAsync`, `SignOutEverywhereAsync`, `CreateInvitationAsync`.
@@ -70,6 +75,8 @@ Summarized here; details and the threat model are in [security.md](security.md).
 6. Security-stamp and server-side-session validation of every bearer request and periodically of cookies.
 7. Impersonation bound to the impersonator's security state.
 8. Transparent password rehashing when the hash algorithm parameters change.
+9. 2FA hardening: TOTP secrets encrypted at rest, 80-bit recovery codes hashed per user, every code accepted once.
+10. E-mail change with password confirmation, confirmation by the new address and notification of the old one.
 
 ## 6. Public API surface
 Endpoints: see the [endpoint reference](endpoints.md). Options: see the [configuration reference](configuration.md).
@@ -92,16 +99,19 @@ app.MapSlimIdentityApi();
 
 ## 8. Repository layout
 ```
-src/SlimIdentity/               the package
-tests/SlimIdentity.Tests/       unit and integration tests (in-memory host, fake clock)
-samples/SlimIdentity.Demo/      runnable demo with in-memory stores (Native AOT) + .http file
-samples/SamplesCheck/           compiles the copy-paste templates below against the current API
-samples/{EfCore,Dapper,Email,Enterprise,Frontend}/   copy-paste templates (not shipped)
-docs/                           this document, references and guides
+src/SlimIdentity/                          the package
+tests/SlimIdentity.Tests/                  unit and integration tests (in-memory host, fake clock, fake OAuth provider)
+tests/SlimIdentity.SamplesCompileCheck/    compiles the copy-paste templates against the current API
+samples/SlimIdentity.Demo/                 runnable demo with in-memory stores (Native AOT) + .http file
+samples/templates/                         copy-paste templates (not shipped): EfCore, Dapper, Email, Enterprise,
+                                           Security, DataProtection, Frontend
+docs/                                      this document, references and guides
+assets/                                    package icon
 ```
 
 ## 9. mTLS / client certificates (documented, not built in)
-Deliberately not part of the package (extra dependency, highly deployment specific). With the existing building blocks:
+Deliberately not part of the package (extra dependency, highly deployment specific). A complete template is in
+`samples/templates/Enterprise/CertificateAuthentication.cs` ([guide](guides/client-certificates.md)). The building blocks:
 
 1. **Package:** `Microsoft.AspNetCore.Authentication.Certificate` in the host.
 2. **Transport:** Kestrel with `ClientCertificateMode.RequireCertificate` (or `AllowCertificate` for selected routes),
@@ -128,5 +138,10 @@ Deliberately not part of the package (extra dependency, highly deployment specif
 | Background mail queue | Mail server latency would otherwise reveal whether an account exists. |
 | Invitation links are stateless and stamp-bound | Single use without a token table; survive restarts. |
 | Impersonation carries the admin's stamp | A banned admin must not keep or return through a running impersonation. |
-| mTLS is documented, not built in | Extra dependency, strongly deployment specific. |
+| mTLS is a template, not built in | Extra dependency, strongly deployment specific; the template covers the common cases. |
 | One root namespace for host-facing types | Fewer `using` directives; wire DTOs separated in `SlimIdentity.Contracts`. |
+| TOTP secrets are encrypted by the library, not by the store | "Hardened" must not depend on every store author remembering it; the key ring has to be protected anyway. |
+| Recovery codes: 80 bits + per-user salted SHA-256 instead of a keyed HMAC | At 80 bits an offline search is infeasible; a separate HMAC key would add a secret to manage (and lose) without real gain. |
+| Replay protection via one "last used" value per user | RFC 6238 §5.2; a single atomic compare-and-set covers TOTP steps and e-mail codes. |
+| Metrics via `System.Diagnostics.Metrics` | Zero dependency, OpenTelemetry-ready, no cost when nobody listens. |
+| QR codes are rendered by the front end | No image dependency; the front end controls size and styling. |

@@ -36,7 +36,8 @@ After the provider round trip SlimIdentity redirects to `returnUrl`:
 | 2FA enabled | `returnUrl?slim_status=requires_two_factor&preAuthToken=…&method=…` → continue with `/auth/login/2fa` |
 | Error | `returnUrl?slim_error=<code>` |
 
-Tokens never appear in URLs; the exchange code is single-purpose and valid for 1 minute.
+Tokens never appear in URLs; the exchange code is valid for 1 minute and works exactly once (registered in
+`ISlimRefreshTokenStore`, or in memory when no refresh-token store is registered – then per instance only).
 
 ## Account matching
 

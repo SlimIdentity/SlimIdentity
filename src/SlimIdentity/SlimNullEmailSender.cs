@@ -28,6 +28,20 @@ public sealed class SlimNullEmailSender(ILogger<SlimNullEmailSender> logger) : I
     }
 
     /// <inheritdoc />
+    public Task SendEmailChangeConfirmationAsync(string newEmail, string confirmationTokenOrLink, CancellationToken ct)
+    {
+        logger.LogWarning("[SlimIdentity:NullEmailSender] E-mail change confirmation for {Email}: {Link}", newEmail, confirmationTokenOrLink);
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public Task SendEmailChangedNotificationAsync(string oldEmail, string newEmail, CancellationToken ct)
+    {
+        logger.LogWarning("[SlimIdentity:NullEmailSender] Address {OldEmail} was changed to {NewEmail}", oldEmail, newEmail);
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
     public Task SendAccountExistsEmailAsync(string email, CancellationToken ct)
     {
         logger.LogWarning("[SlimIdentity:NullEmailSender] Registration attempt for existing account {Email}", email);

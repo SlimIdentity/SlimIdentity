@@ -48,7 +48,7 @@ public static class SlimIdentityServiceExtensions
         // ---------------------------------------------------------------- internal services
         services.TryAddSingleton<SlimWorkflowTokens>();
         services.TryAddSingleton<SlimJwtTokenFactory>();
-        services.TryAddSingleton<SlimPasswordPolicy>();
+        services.TryAddScoped<SlimPasswordPolicy>();   // scoped: password rules may be scoped
         services.TryAddScoped<SlimCredentialService>();
         services.TryAddScoped<SlimAuthManager>();
         services.TryAddScoped<ISlimAuthManager>(sp => sp.GetRequiredService<SlimAuthManager>());
@@ -59,6 +59,10 @@ public static class SlimIdentityServiceExtensions
         services.TryAddSingleton<SlimEmailQueue>();
         services.TryAddScoped<SlimEmailDispatcher>();
         services.AddHostedService<SlimEmailBackgroundService>();
+
+        // ---------------------------------------------------------------- observability (System.Diagnostics.Metrics)
+        services.AddMetrics();
+        services.TryAddSingleton<SlimMetrics>();
 
         // ---------------------------------------------------------------- layer 1: IP rate limiting
         services.AddRateLimiter(o =>
@@ -153,7 +157,8 @@ public static class SlimIdentityServiceExtensions
         services.AddAuthorizationBuilder()
             .AddPolicy(SlimIdentityDefaults.SudoPolicy, policy => policy
                 .RequireAuthenticatedUser()
-                .RequireAssertion(ctx => ctx.User.IsInSudoMode()));
+                .RequireAssertion(ctx => ctx.User.IsInSudoMode(
+                    (ctx.Resource as HttpContext)?.RequestServices.GetService<TimeProvider>())));
 
         return new SlimIdentityBuilder(services, authentication);
     }

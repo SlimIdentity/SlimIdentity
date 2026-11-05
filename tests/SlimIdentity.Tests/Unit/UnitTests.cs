@@ -42,12 +42,17 @@ public sealed class TotpTests
     }
 
     [Fact]
-    public void Recovery_codes_are_unique_and_hash_independent_of_formatting()
+    public void Recovery_codes_have_80_bits_and_hash_independent_of_formatting()
     {
         var codes = SlimRecoveryCodes.Generate(10);
         Assert.Equal(10, codes.Distinct().Count());
-        Assert.Equal(SlimRecoveryCodes.Hash(codes[0]), SlimRecoveryCodes.Hash(" " + codes[0].ToUpperInvariant().Replace("-", "") + " "));
+        Assert.All(codes, c => Assert.Matches("^[a-z2-7]{4}-[a-z2-7]{4}-[a-z2-7]{4}-[a-z2-7]{4}$", c));   // 16 × 5 bit
+        Assert.Equal(SlimRecoveryCodes.Hash("u1", codes[0]), SlimRecoveryCodes.Hash("u1", " " + codes[0].ToUpperInvariant().Replace("-", "") + " "));
     }
+
+    [Fact]
+    public void Recovery_code_hashes_are_salted_per_user() =>
+        Assert.NotEqual(SlimRecoveryCodes.Hash("user-1", "abcd-efgh-ijkl-mnop"), SlimRecoveryCodes.Hash("user-2", "abcd-efgh-ijkl-mnop"));
 }
 
 public sealed class LockoutDurationTests

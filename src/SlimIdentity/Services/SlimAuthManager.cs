@@ -11,6 +11,7 @@ internal sealed class SlimAuthManager(
     ISlimUserStore store,
     SlimJwtTokenFactory jwt,
     SlimWorkflowTokens workflow,
+    SlimMetrics metrics,
     IOptions<SlimIdentityOptions> options,
     TimeProvider time,
     IServiceProvider services,
@@ -61,7 +62,8 @@ internal sealed class SlimAuthManager(
         var currentAmr = httpContextAccessor.HttpContext?.User.FindFirst(SlimClaimTypes.AuthenticationMethod)?.Value;
         var actor = SlimClaims.SerializeActor(SlimClaims.CreateActor(impersonator.Id, impersonator.SecurityStamp, currentAmr));
 
-        logger.LogWarning("SlimIdentity: user {Impersonator} impersonates {Target}.", impersonator.Id, targetUser.Id);
+        Log.ImpersonationStarted(logger, impersonator.Id, targetUser.Id);
+        metrics.Impersonation("started");
         return await SignInCoreAsync(targetUser, useCookies, isPersistent: false, MethodImpersonation, null, actor, issueRefreshToken: false, ct);
     }
 
@@ -79,12 +81,13 @@ internal sealed class SlimAuthManager(
         if (impersonator is not { IsActive: true } || !SlimHashing.FixedTimeEquals(impersonator.SecurityStamp, actor.SecurityStamp))
         {
             // The impersonator was banned or signed out everywhere in the meantime: no way back, end the session.
-            logger.LogWarning("SlimIdentity: return to impersonator {Impersonator} denied (inactive or security stamp changed).", actor.UserId);
+            Log.ImpersonationReturnDenied(logger, actor.UserId);
             if (useCookies) await Http.SignOutAsync(SlimIdentityDefaults.CookieScheme);
             return SlimAuthResult.Failed("impersonator_invalid");
         }
 
-        logger.LogWarning("SlimIdentity: user {Impersonator} ended the impersonation of {Target}.", impersonator.Id, current.GetSlimUserId());
+        Log.ImpersonationEnded(logger, impersonator.Id, current.GetSlimUserId());
+        metrics.Impersonation("ended");
         return await SignInCoreAsync(impersonator, useCookies, isPersistent: false, actor.AuthenticationMethod ?? MethodPassword,
             null, null, issueRefreshToken: true, ct);
     }
@@ -133,6 +136,7 @@ internal sealed class SlimAuthManager(
 
         if (options.Value.Endpoints.AllowCookieAuth)
             await Http.SignOutAsync(SlimIdentityDefaults.CookieScheme);
+        metrics.SignOut("session");
     }
 
     public async Task SignOutEverywhereAsync(SlimUser user, CancellationToken ct = default)
@@ -141,7 +145,8 @@ internal sealed class SlimAuthManager(
         user.SecurityStamp = SlimUser.NewSecurityStamp();
         await store.UpdateSecurityStateAsync(user, ct);
         await RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
-        logger.LogInformation("SlimIdentity: all sessions of user {UserId} revoked.", user.Id);
+        Log.AllSessionsRevoked(logger, user.Id);
+        metrics.SignOut("everywhere");
     }
 
     public Task<SlimInvitation> CreateInvitationAsync(SlimUser user, TimeSpan? lifetime = null, CancellationToken ct = default)
@@ -159,6 +164,7 @@ internal sealed class SlimAuthManager(
 
         var token = workflow.Protect(SlimWorkflowTokens.InvitationPurpose,
             new SlimInvitationPayload(user.Id, user.Email, user.SecurityStamp), validity);
+        metrics.Invitation("created");
         return Task.FromResult(new SlimInvitation(token, SlimWorkflowTokens.BuildLink(o.Links.InvitationUrl, token), time.GetUtcNow() + validity));
     }
 

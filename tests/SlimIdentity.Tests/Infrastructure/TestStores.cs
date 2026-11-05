@@ -49,6 +49,17 @@ public sealed class TestUserStore : ISlimUserStore
         return Task.CompletedTask;
     }
 
+    public Task<bool> UpdateEmailAsync(SlimUser user, string newEmail, CancellationToken ct)
+    {
+        lock (_users)
+        {
+            if (_users.Values.Any(u => u.Id != user.Id && string.Equals(u.Email, newEmail, StringComparison.OrdinalIgnoreCase)))
+                return Task.FromResult(false);
+            _users[user.Id].Email = newEmail;
+            return Task.FromResult(true);
+        }
+    }
+
     public Task<IReadOnlyCollection<Claim>> GetClaimsAsync(SlimUser user, CancellationToken ct) =>
         Task.FromResult<IReadOnlyCollection<Claim>>(
             (_roles.TryGetValue(user.Id, out var roles) ? roles : []).Select(r => new Claim(ClaimTypes.Role, r)).ToList());
@@ -109,11 +120,28 @@ public sealed class TestTwoFactorStore : ISlimTwoFactorStore
 {
     private readonly ConcurrentDictionary<string, string> _secrets = new();
     private readonly ConcurrentDictionary<string, HashSet<string>> _recovery = new();
+    private readonly ConcurrentDictionary<string, long> _lastCodeUse = new();
+
+    /// <summary>The value exactly as persisted (tests verify it is encrypted).</summary>
+    public string? RawSecret(string userId) => _secrets.TryGetValue(userId, out var s) ? s : null;
+
+    /// <summary>The persisted recovery-code hashes.</summary>
+    public IReadOnlyCollection<string> RecoveryHashes(string userId) => _recovery.TryGetValue(userId, out var c) ? c.ToArray() : [];
 
     public Task<string?> GetTotpSecretAsync(SlimUser user, CancellationToken ct) =>
         Task.FromResult(_secrets.TryGetValue(user.Id, out var s) && s.Length > 0 ? s : null);
 
-    public Task SetTotpSecretAsync(SlimUser user, string secret, CancellationToken ct) { _secrets[user.Id] = secret; return Task.CompletedTask; }
+    public Task SetTotpSecretAsync(SlimUser user, string protectedSecret, CancellationToken ct) { _secrets[user.Id] = protectedSecret; return Task.CompletedTask; }
+
+    public Task<bool> TryMarkCodeUsedAsync(SlimUser user, long usedAt, CancellationToken ct)
+    {
+        lock (_lastCodeUse)
+        {
+            if (_lastCodeUse.TryGetValue(user.Id, out var last) && last >= usedAt) return Task.FromResult(false);
+            _lastCodeUse[user.Id] = usedAt;
+            return Task.FromResult(true);
+        }
+    }
 
     public Task StoreRecoveryCodesAsync(SlimUser user, IEnumerable<string> hashedCodes, CancellationToken ct)
     {
@@ -140,6 +168,8 @@ public sealed class CapturingEmailSender : ISlimEmailSender
     public Task SendVerificationEmailAsync(string email, string link, CancellationToken ct) => Add("verification", email, link);
     public Task SendPasswordResetEmailAsync(string email, string link, CancellationToken ct) => Add("password-reset", email, link);
     public Task SendTwoFactorCodeAsync(string email, string code, CancellationToken ct) => Add("two-factor", email, code);
+    public Task SendEmailChangeConfirmationAsync(string newEmail, string link, CancellationToken ct) => Add("email-change", newEmail, link);
+    public Task SendEmailChangedNotificationAsync(string oldEmail, string newEmail, CancellationToken ct) => Add("email-changed", oldEmail, newEmail);
     public Task SendAccountExistsEmailAsync(string email, CancellationToken ct) => Add("account-exists", email, "");
     public Task SendLockoutNotificationEmailAsync(string email, DateTimeOffset lockoutEndUtc, CancellationToken ct) =>
         Add("lockout", email, lockoutEndUtc.ToString("O"));

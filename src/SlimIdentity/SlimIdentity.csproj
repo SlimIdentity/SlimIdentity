@@ -24,6 +24,7 @@
     <RepositoryUrl>https://github.com/timmkautz/slimidentity</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
     <PackageReleaseNotes>See https://github.com/timmkautz/slimidentity/blob/main/CHANGELOG.md</PackageReleaseNotes>
 
     <!-- debugging into the package: SourceLink (built into the SDK) + symbol package -->
@@ -50,6 +51,7 @@
 
   <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\assets\icon.png" Pack="true" PackagePath="\" />
     <InternalsVisibleTo Include="SlimIdentity.Tests" />
   </ItemGroup>
 

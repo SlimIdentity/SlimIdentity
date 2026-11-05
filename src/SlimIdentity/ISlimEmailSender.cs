@@ -18,6 +18,18 @@ public interface ISlimEmailSender
     Task SendTwoFactorCodeAsync(string email, string code, CancellationToken ct);
 
     /// <summary>
+    /// Confirmation link for a requested e-mail change, sent to the <b>new</b> address
+    /// (<c>/change-email</c>, link template <c>Links.EmailChangeUrl</c>). The address changes only when the link is confirmed.
+    /// </summary>
+    Task SendEmailChangeConfirmationAsync(string newEmail, string confirmationTokenOrLink, CancellationToken ct);
+
+    /// <summary>
+    /// Optional: informs the <b>old</b> address after the e-mail change was confirmed ("your address was changed –
+    /// not you? contact support"). Default: no mail.
+    /// </summary>
+    Task SendEmailChangedNotificationAsync(string oldEmail, string newEmail, CancellationToken ct) => Task.CompletedTask;
+
+    /// <summary>
     /// Optional: sent when someone tries to <c>/register</c> with an address that already has an account
     /// ("you already have an account – forgot your password?"). The caller always gets the same answer;
     /// only the real owner of the mailbox learns about the attempt. Default: no mail.

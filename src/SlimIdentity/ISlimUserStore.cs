@@ -25,6 +25,13 @@ public interface ISlimUserStore
     Task UpdateSecurityStateAsync(SlimUser user, CancellationToken ct);
 
     /// <summary>
+    /// Changes the login e-mail address (after the new address was confirmed via <c>/confirm-email-change</c>), including
+    /// any normalized lookup column. Return <c>false</c> if the address is already taken by another account
+    /// (e.g. unique-index violation) – nothing must be changed then.
+    /// </summary>
+    Task<bool> UpdateEmailAsync(SlimUser user, string newEmail, CancellationToken ct);
+
+    /// <summary>
     /// Host-specific claims (roles, permissions, tenant_id, …) that are added before the cookie / JWT is signed.
     /// <c>ClaimTypes.Role</c> is normalized to <c>role</c>; reserved SlimIdentity claims are ignored.
     /// </summary>

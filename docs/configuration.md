@@ -26,9 +26,11 @@ naming the option. In JSON, `TimeSpan` values use the `d.hh:mm:ss` format (`"00:
 | `EnableEmailVerification` | `true` | `/verify-email`, `/resend-verification`, verification mail after registration. |
 | `EnablePasswordReset` | `true` | `/forgot-password`, `/reset-password`. |
 | `EnableChangePassword` | `true` | `/change-password`. Disable for LDAP-only setups. |
+| `EnableChangeEmail` | `true` | `/change-email`, `/confirm-email-change`. Disable if the login identifier is managed elsewhere (LDAP, SSO). |
 | `EnableLogout` | `true` | `/logout`, `/logout-all`. |
 | `EnableMe` | `true` | `/me`. |
 | `EnableInvitations` | `true` | `/invitation/info`, `/invitation/accept`. |
+| `EnablePasswordPolicy` | `true` | `GET /password-policy` (anonymous) – exposes the `Password` options to the front end. |
 | `AllowCookieAuth` | `true` | Allows cookie sessions. |
 | `AllowJwtAuth` | `true` | Allows JWTs (requires `Tokens.JwtSecret`). |
 | `DefaultUseCookies` | `false` | Mode when the request has no `?useCookies=`. |
@@ -72,6 +74,16 @@ The client is identified by IP address. Behind a reverse proxy you need `UseForw
 | `MaximumLength` | `256` | Longer passwords are never hashed (DoS protection). |
 | `RequireDigit` / `RequireLowercase` / `RequireUppercase` | `true` | Character classes. |
 | `RequireNonAlphanumeric` | `false` | Special character. |
+
+Additional rules (e.g. a breached-password check) are added with `.AddPasswordRule<T>()` – see
+[`samples/templates/Security/PwnedPasswordRule.cs`](../samples/templates/Security/PwnedPasswordRule.cs).
+
+Front ends read the active rules from `GET /auth/password-policy`, so hints ("at least 16 characters") and live
+validation never drift from the server. Custom rules cannot be evaluated in the browser – the response only reports
+`hasAdditionalRules`; their errors come back on submit. A strength meter (e.g. `zxcvbn-ts`) is a front-end concern.
+
+Current guidance (NIST SP 800-63B) favours **length over composition**: e.g. `MinimumLength: 12`–`16`, the `Require*`
+flags off, plus a breached-password rule.
 
 ## `Tokens`
 
@@ -132,6 +144,7 @@ Templates must contain `{token}`. Without a template the raw token is passed to 
 | `EmailVerificationUrl` | `https://app.example.com/verify-email?token={token}` |
 | `PasswordResetUrl` | `https://app.example.com/reset-password?token={token}` |
 | `InvitationUrl` | `https://app.example.com/accept-invitation?token={token}` |
+| `EmailChangeUrl` | `https://app.example.com/confirm-email-change?token={token}` (sent to the new address) |
 
 ## `Csrf`
 
@@ -160,7 +173,13 @@ Templates must contain `{token}`. Without a template the raw token is passed to 
 | `AddExternalLoginStore<T>()` | `/login/{provider}`, `/login/external/exchange`. |
 | `AddApiKeyStore<T>()` | `X-API-Key` authentication. |
 | `AddCustomPasswordValidator<T>()` | LDAP / legacy password check. |
+| `AddPasswordRule<T>()` | Additional rule for new passwords (can be called several times). |
 | `UseRateLimitPartitionKey(Func<HttpContext, string?>)` | Custom rate-limit client key. |
 | `.Authentication` | The `AuthenticationBuilder` – add OAuth/OIDC handlers here. |
 
 All store methods take an optional `ServiceLifetime` (default `Scoped`).
+
+## Observability
+
+Metrics are published on the meter `SlimIdentity` (`SlimIdentityDefaults.MeterName`); logs use the categories
+`SlimIdentity.*` with stable event ids. See [Observability](guides/observability.md).

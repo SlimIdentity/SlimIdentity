@@ -33,7 +33,7 @@ yours – map it in the store.
 
 ```csharp
 builder.Services.AddSlimIdentity(...)
-    .AddEmailSender<MyEmailSender>();     // production: MailKit, SendGrid, … (see samples/Email)
+    .AddEmailSender<MyEmailSender>();     // production: MailKit, SendGrid, … (see samples/templates/Email)
     // .AddNullEmailSender();             // development: writes links and codes to the log
 ```
 
@@ -99,10 +99,16 @@ endpoints; when it expires, exchange the refresh token at `POST /auth/refresh`.
 For a browser SPA on the same site, cookies are usually the better choice: `POST /auth/login?useCookies=true` with
 the header `X-CSRF: 1` – see [SPA with cookies](guides/spa-cookies.md).
 
+**HTTPS:** browsers only send the (always `Secure`) cookie over HTTPS – and to `http://localhost` during development.
+Bearer tokens and API keys also work over plain HTTP, e.g. for service-to-service calls on the same host or in a
+private network; they travel in clear text there, so do not use HTTP across untrusted networks.
+
 ## Next steps
 
-- Persist the Data Protection key ring (`builder.Services.AddDataProtection().PersistKeysTo…`) as soon as you run more
-  than one instance or in containers – cookies, links and refresh tokens are encrypted with it.
+- **Persist the Data Protection key ring** before going to production ([guide](guides/data-protection.md)) – cookies,
+  links, refresh tokens and TOTP secrets are encrypted with it.
 - Choose the capabilities you need: [sessions](guides/sessions-and-logout.md), [2FA](guides/two-factor.md),
-  [external login](guides/external-login.md), [invitations](guides/invitations.md).
+  [external login](guides/external-login.md), [invitations](guides/invitations.md),
+  [breached-password check](configuration.md#password).
+- Add [metrics](guides/observability.md) to your monitoring.
 - Read the [security model](security.md).

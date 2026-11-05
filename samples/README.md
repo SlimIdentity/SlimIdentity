@@ -1,24 +1,36 @@
-# SlimIdentity – copy-paste samples
+# SlimIdentity – samples
 
-These files are **not** NuGet dependencies and are not part of the solution. Copy them into your project and adapt
-them – this keeps the core package free of EF Core, Dapper, SMTP & co.
-CI compiles them against the current library (`dotnet build samples/SamplesCheck`) so they never drift from the API.
+| Folder | Purpose |
+| :--- | :--- |
+| [`SlimIdentity.Demo/`](SlimIdentity.Demo) | Runnable demo with in-memory stores (Native AOT capable). `dotnet run --project samples/SlimIdentity.Demo`, then use `SlimIdentity.Demo.http`. |
+| [`templates/`](templates) | Copy-paste templates for your own project (below). |
 
-| Folder | Content | Packages in your host |
+The templates are **not** NuGet dependencies and are not shipped. Copy them into your project and adapt them – this
+keeps the core package free of EF Core, Dapper, SMTP & co. CI compiles them against the current library
+(`tests/SlimIdentity.SamplesCompileCheck`), so they never drift from the API.
+
+| Template | Content | Packages in your host |
 | :--- | :--- | :--- |
 | `EfCore/` | `AppDbContext` + all stores (user, refresh, 2FA, external login, API key, sessions) | `Microsoft.EntityFrameworkCore` + provider |
-| `Dapper/` | `schema.sql` (PostgreSQL), `DapperUserStore`, `DapperRefreshTokenStore` | `Dapper`, `Npgsql` |
+| `Dapper/` | `schema.sql` (PostgreSQL) + all stores | `Dapper`, `Npgsql` |
 | `Email/` | `MailKitEmailSender`, `SendGridEmailSender`, `LoggingEmailSender`, `OutboxEmailSender` + `OutboxMailWorker` (guaranteed delivery) | `MailKit` or `SendGrid`, EF Core |
-| `Enterprise/` | `LdapPasswordValidator`, legacy hash migration, admin endpoints (impersonation, sudo, API keys, invitations, ban) | `System.DirectoryServices.Protocols` |
-| `Frontend/` | `slimIdentityClient.ts` – cookie flow (incl. `X-CSRF`, device list, invitations) and bearer flow with refresh rotation | – |
+| `Enterprise/` | `LdapPasswordValidator`, legacy hash migration, client certificates (mTLS), admin endpoints (impersonation, sudo, API keys, invitations, ban) | `System.DirectoryServices.Protocols`, `Microsoft.AspNetCore.Authentication.Certificate` |
+| `Security/` | `PwnedPasswordRule` – rejects breached passwords via Have I Been Pwned (k-anonymity) | – |
+| `DataProtection/` | Persisting the key ring: EF Core, Redis, file system + certificate | `Microsoft.AspNetCore.DataProtection.*` |
+| `Frontend/` | `slimIdentityClient.ts` – cookie flow (`X-CSRF`, device list, invitations, TOTP setup with QR code, e-mail change) and bearer flow with refresh rotation | – |
 
 ## Rules for your own stores
 
 - `FindByEmailAsync` must search **case-insensitively** (e.g. a normalized column with a unique index).
 - `UpdateSecurityStateAsync` persists only the security fields of `SlimUser`
   (PasswordHash, SecurityStamp, EmailConfirmed, FailedLoginAttempts, LockoutEndUtc, TwoFactorEnabled).
+- `UpdateEmailAsync` changes the address and its normalized column and returns `false` if it is already taken – let
+  the unique constraint decide instead of checking first.
 - `ValidateAndConsumeRefreshTokenAsync` / `ValidateAndConsumeRecoveryCodeAsync` must delete **atomically**
   (`DELETE … RETURNING` or `ExecuteDeleteAsync() == 1`), otherwise parallel replays are possible.
+- `TryMarkCodeUsedAsync` must be an **atomic compare-and-set**
+  (`UPDATE … SET last = @v WHERE id = @id AND (last IS NULL OR last < @v)` and return whether a row changed).
+- TOTP secrets arrive encrypted – store the string as is; do not decrypt or re-encode it.
 - `IsActive = false` **plus** `ISlimAuthManager.SignOutEverywhereAsync(user)` ends all sessions of a user immediately.
 - `ISlimSessionStore`: `FindAsync` must not return revoked sessions (deleting the row is enough); clean up expired rows
   regularly (`DELETE … WHERE expires_utc < now()`). `UserAgent` / `IpAddress` are personal data – only store them if

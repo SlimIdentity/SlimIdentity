@@ -26,6 +26,15 @@ public static class SlimIdentityDefaults
     /// <summary>OpenAPI tag of all SlimIdentity endpoints.</summary>
     public const string OpenApiTag = "SlimIdentity";
 
+    /// <summary>Name of the <c>System.Diagnostics.Metrics</c> meter, e.g. for OpenTelemetry: <c>AddMeter("SlimIdentity")</c>.</summary>
+    public const string MeterName = "SlimIdentity";
+
+    /// <summary>
+    /// Data Protection purpose used to encrypt TOTP secrets before they are passed to <see cref="ISlimTwoFactorStore"/>.
+    /// Needed only to migrate existing authenticator keys: <c>provider.CreateProtector(TotpSecretProtectionPurpose).Protect(base32Key)</c>.
+    /// </summary>
+    public const string TotpSecretProtectionPurpose = "SlimIdentity.TotpSecret.v1";
+
     internal static bool IsOwnScheme(string scheme) =>
         scheme.StartsWith(AuthenticationScheme, StringComparison.Ordinal);
 }

@@ -71,6 +71,15 @@ public sealed record SlimInvitationInfoRequest(string Token);
 /// <param name="Password">The password to set, according to the password policy.</param>
 public sealed record SlimAcceptInvitationRequest(string Token, string Password);
 
+/// <summary>Body of <c>POST /auth/change-email</c>.</summary>
+/// <param name="NewEmail">The new e-mail address (receives the confirmation link).</param>
+/// <param name="Password">The current password.</param>
+public sealed record SlimChangeEmailRequest(string NewEmail, string Password);
+
+/// <summary>Body of <c>POST /auth/confirm-email-change</c>.</summary>
+/// <param name="Token">Token from the confirmation mail sent to the new address.</param>
+public sealed record SlimConfirmEmailChangeRequest(string Token);
+
 // ---------------------------------------------------------------------------
 // Responses
 // ---------------------------------------------------------------------------
@@ -157,6 +166,28 @@ public sealed record SlimTwoFactorStatusResponse(bool Enabled, string? Method, b
 /// <param name="AuthenticatorUri"><c>otpauth://</c> URI for a QR code.</param>
 /// <param name="SetupToken">Pass to <c>POST /auth/2fa/enable</c> together with the first code.</param>
 public sealed record SlimTwoFactorSetupResponse(string SharedKey, string AuthenticatorUri, string SetupToken);
+
+/// <summary>
+/// Body of <c>GET /auth/password-policy</c>: the rules for new passwords, so a front end can show them and validate
+/// as the user types. The server always validates again.
+/// </summary>
+/// <param name="MinimumLength">Minimum number of characters.</param>
+/// <param name="MaximumLength">Maximum number of characters.</param>
+/// <param name="RequireDigit">At least one digit.</param>
+/// <param name="RequireLowercase">At least one lowercase letter.</param>
+/// <param name="RequireUppercase">At least one uppercase letter.</param>
+/// <param name="RequireNonAlphanumeric">At least one character that is neither letter nor digit.</param>
+/// <param name="HasAdditionalRules">
+/// True if the server applies further rules (e.g. a breached-password check) that can only be checked on submit.
+/// </param>
+public sealed record SlimPasswordPolicyResponse(
+    int MinimumLength,
+    int MaximumLength,
+    bool RequireDigit,
+    bool RequireLowercase,
+    bool RequireUppercase,
+    bool RequireNonAlphanumeric,
+    bool HasAdditionalRules);
 
 /// <summary>Body of <c>POST /auth/invitation/info</c>.</summary>
 /// <param name="Email">The invited address (lets the "set your password" form show it).</param>

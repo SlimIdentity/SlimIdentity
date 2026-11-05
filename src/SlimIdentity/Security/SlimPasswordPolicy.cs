@@ -1,10 +1,10 @@
 namespace SlimIdentity.Security;
 
-/// <summary>Validates new passwords against <see cref="SlimPasswordOptions"/>.</summary>
-internal sealed class SlimPasswordPolicy(IOptions<SlimIdentityOptions> options)
+/// <summary>Validates new passwords against <see cref="SlimPasswordOptions"/> and all registered <see cref="ISlimPasswordRule"/>s.</summary>
+internal sealed class SlimPasswordPolicy(IOptions<SlimIdentityOptions> options, IEnumerable<ISlimPasswordRule> rules)
 {
     /// <summary>Returns validation errors keyed by <paramref name="field"/>, or null if valid.</summary>
-    public Dictionary<string, string[]>? Validate(string? password, string field = "password")
+    public async Task<Dictionary<string, string[]>?> ValidateAsync(string? password, string email, CancellationToken ct, string field = "password")
     {
         var p = options.Value.Password;
         var errors = new List<string>();
@@ -16,6 +16,11 @@ internal sealed class SlimPasswordPolicy(IOptions<SlimIdentityOptions> options)
         if (p.RequireLowercase && !password.Any(char.IsLower)) errors.Add("Password must contain a lowercase letter.");
         if (p.RequireUppercase && !password.Any(char.IsUpper)) errors.Add("Password must contain an uppercase letter.");
         if (p.RequireNonAlphanumeric && password.All(char.IsLetterOrDigit)) errors.Add("Password must contain a non-alphanumeric character.");
+
+        // custom rules (breached-password checks, blocklists, …) only for otherwise valid, reasonably sized input
+        if (errors.Count == 0)
+            foreach (var rule in rules)
+                errors.AddRange(await rule.ValidateAsync(password, email, ct));
 
         return errors.Count == 0 ? null : new Dictionary<string, string[]> { [field] = errors.ToArray() };
     }

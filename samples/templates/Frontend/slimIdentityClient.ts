@@ -35,6 +35,35 @@ export interface SessionInfo {
   ipAddress?: string;
 }
 
+export interface PasswordPolicy {
+  minimumLength: number;
+  maximumLength: number;
+  requireDigit: boolean;
+  requireLowercase: boolean;
+  requireUppercase: boolean;
+  requireNonAlphanumeric: boolean;
+  /** Server-side rules (e.g. breached-password check) – only reported on submit. */
+  hasAdditionalRules: boolean;
+}
+
+/** Loads the server's password rules (anonymous endpoint) – cache it per page load. */
+export async function loadPasswordPolicy(): Promise<PasswordPolicy> {
+  return (await fetch(`${AUTH}/password-policy`)).json();
+}
+
+/** Live validation as the user types; returns the unmet rules (empty = OK). The server validates again on submit. */
+export function checkPassword(password: string, p: PasswordPolicy): string[] {
+  const errors: string[] = [];
+  if (password.length < p.minimumLength) errors.push(`At least ${p.minimumLength} characters`);
+  if (password.length > p.maximumLength) errors.push(`At most ${p.maximumLength} characters`);
+  // same character classes as the server (.NET char.IsDigit / IsLower / IsUpper / IsLetterOrDigit)
+  if (p.requireDigit && !/\p{Nd}/u.test(password)) errors.push("A digit");
+  if (p.requireLowercase && !/\p{Ll}/u.test(password)) errors.push("A lowercase letter");
+  if (p.requireUppercase && !/\p{Lu}/u.test(password)) errors.push("An uppercase letter");
+  if (p.requireNonAlphanumeric && !/[^\p{L}\p{N}]/u.test(password)) errors.push("A special character");
+  return errors;
+}
+
 export type LoginResult =
   | { kind: "ok"; auth: AuthResponse }
   | { kind: "two_factor"; preAuthToken: string; method: "totp" | "email" }
@@ -62,6 +91,32 @@ export const cookieAuth = {
       body: JSON.stringify({ email, password, rememberMe }),
     });
     return toLoginResult(r);
+  },
+
+  /**
+   * Authenticator setup: returns a QR code (data URL for an <img>) plus the key for manual entry.
+   * QR rendering happens in the browser – e.g. with the "qrcode" npm package:
+   *   import QRCode from "qrcode";
+   */
+  async setupAuthenticator(toQrDataUrl: (text: string) => Promise<string>) {
+    const r = await cookieFetch("/auth/2fa/setup", { method: "POST", body: "{}" });
+    const setup: { sharedKey: string; authenticatorUri: string; setupToken: string } = await r.json();
+    return { ...setup, qrCode: await toQrDataUrl(setup.authenticatorUri) };   // e.g. (uri) => QRCode.toDataURL(uri)
+  },
+
+  /** Confirms the first code; returns the recovery codes – show them exactly once. */
+  async enableAuthenticator(setupToken: string, code: string): Promise<string[]> {
+    const r = await cookieFetch("/auth/2fa/enable", { method: "POST", body: JSON.stringify({ setupToken, code }) });
+    return r.ok ? (await r.json()).recoveryCodes : [];
+  },
+
+  /** E-mail change: confirmation link goes to the new address; the page behind it calls confirmEmailChange. */
+  async changeEmail(newEmail: string, password: string) {
+    await cookieFetch("/auth/change-email", { method: "POST", body: JSON.stringify({ newEmail, password }) });
+  },
+
+  async confirmEmailChange(token: string) {
+    return (await cookieFetch("/auth/confirm-email-change", { method: "POST", body: JSON.stringify({ token }) })).ok;
   },
 
   async loginTwoFactor(preAuthToken: string, code: string): Promise<LoginResult> {

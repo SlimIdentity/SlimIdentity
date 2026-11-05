@@ -60,6 +60,23 @@ public sealed class EfCoreUserStore(AppDbContext db) : ISlimUserStore
             .SetProperty(u => u.TwoFactorEnabled, user.TwoFactorEnabled), ct);
     }
 
+    public async Task<bool> UpdateEmailAsync(SlimUser user, string newEmail, CancellationToken ct)
+    {
+        var id = Guid.Parse(user.Id);
+        var normalized = newEmail.ToUpperInvariant();
+        try
+        {
+            // the unique index on NormalizedEmail decides – no check-then-act race
+            return await db.Users.Where(u => u.Id == id).ExecuteUpdateAsync(s => s
+                .SetProperty(u => u.Email, newEmail)
+                .SetProperty(u => u.NormalizedEmail, normalized), ct) == 1;
+        }
+        catch (DbUpdateException)
+        {
+            return false;
+        }
+    }
+
     public async Task<IReadOnlyCollection<Claim>> GetClaimsAsync(SlimUser user, CancellationToken ct)
     {
         var id = Guid.Parse(user.Id);
@@ -113,14 +130,23 @@ public sealed class EfCoreTwoFactorStore(AppDbContext db) : ISlimTwoFactorStore
     {
         var id = Guid.Parse(user.Id);
         return await db.Users.Where(u => u.Id == id).Select(u => u.TotpSecret).FirstOrDefaultAsync(ct);
-        // Tip: encrypt TotpSecret at rest with IDataProtector.
     }
 
-    public async Task SetTotpSecretAsync(SlimUser user, string secret, CancellationToken ct)
+    // the value arrives already encrypted by SlimIdentity (Data Protection) – store it as is
+    public async Task SetTotpSecretAsync(SlimUser user, string protectedSecret, CancellationToken ct)
     {
         var id = Guid.Parse(user.Id);
         await db.Users.Where(u => u.Id == id)
-            .ExecuteUpdateAsync(s => s.SetProperty(u => u.TotpSecret, string.IsNullOrEmpty(secret) ? null : secret), ct);
+            .ExecuteUpdateAsync(s => s.SetProperty(u => u.TotpSecret, string.IsNullOrEmpty(protectedSecret) ? null : protectedSecret), ct);
+    }
+
+    // atomic compare-and-set: a 2FA code (time step) is accepted at most once
+    public async Task<bool> TryMarkCodeUsedAsync(SlimUser user, long usedAt, CancellationToken ct)
+    {
+        var id = Guid.Parse(user.Id);
+        return await db.Users
+            .Where(u => u.Id == id && (u.LastTwoFactorCodeAt == null || u.LastTwoFactorCodeAt < usedAt))
+            .ExecuteUpdateAsync(s => s.SetProperty(u => u.LastTwoFactorCodeAt, usedAt), ct) == 1;
     }
 
     public async Task StoreRecoveryCodesAsync(SlimUser user, IEnumerable<string> hashedCodes, CancellationToken ct)

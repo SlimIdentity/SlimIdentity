@@ -35,13 +35,11 @@ internal sealed class SlimCsrfEndpointFilter(IOptions<SlimIdentityOptions> optio
                 && string.Equals(o1.Host, o2.Host, StringComparison.OrdinalIgnoreCase) && o1.Scheme != o2.Scheme)
             {
                 // Same host, different scheme: almost always a TLS-terminating proxy without UseForwardedHeaders().
-                logger.LogWarning("SlimIdentity: CSRF origin check failed – request origin {Origin} vs. API origin {Self}. " +
-                    "Behind a TLS-terminating reverse proxy call app.UseForwardedHeaders() (X-Forwarded-Proto) with KnownProxies/KnownIPNetworks.",
-                    origin, self);
+                Log.CsrfSchemeMismatch(logger, origin, self);
             }
             else
             {
-                logger.LogInformation("SlimIdentity: CSRF origin {Origin} rejected (API origin {Self}, not in Csrf.AllowedOrigins).", origin, self);
+                Log.CsrfOriginRejected(logger, origin, self);
             }
             return SlimResults.Status("csrf_validation_failed", "Origin not allowed.", StatusCodes.Status403Forbidden);
         }
@@ -110,6 +108,8 @@ internal abstract class SlimClientRateLimiterPolicy(
 
     public Func<OnRejectedContext, CancellationToken, ValueTask>? OnRejected { get; } = static (context, _) =>
     {
+        var policy = context.HttpContext.GetEndpoint()?.Metadata.GetMetadata<EnableRateLimitingAttribute>()?.PolicyName ?? "unknown";
+        context.HttpContext.RequestServices.GetService<SlimMetrics>()?.RateLimited(policy);
         context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
         if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
             context.HttpContext.Response.Headers.RetryAfter = ((int)Math.Ceiling(retryAfter.TotalSeconds)).ToString(CultureInfo.InvariantCulture);

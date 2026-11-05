@@ -12,7 +12,8 @@ CREATE TABLE users (
     failed_login_attempts int          NOT NULL DEFAULT 0,
     lockout_end_utc       timestamptz  NULL,
     two_factor_enabled    boolean      NOT NULL DEFAULT false,
-    totp_secret           text         NULL,   -- ISlimTwoFactorStore; consider encrypting at rest
+    totp_secret           text         NULL,   -- ISlimTwoFactorStore; already encrypted by SlimIdentity
+    last_2fa_code_at      bigint       NULL,   -- ISlimTwoFactorStore replay protection (unix seconds)
     -- business columns belong to you:
     display_name          text         NULL
 );

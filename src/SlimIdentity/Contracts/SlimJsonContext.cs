@@ -33,6 +33,7 @@ namespace SlimIdentity.Contracts;
 [JsonSerializable(typeof(SlimTwoFactorSetupResponse))]
 [JsonSerializable(typeof(SlimRecoveryCodesResponse))]
 [JsonSerializable(typeof(SlimInvitationInfoResponse))]
+[JsonSerializable(typeof(SlimPasswordPolicyResponse))]
 [JsonSerializable(typeof(SlimInvitation))]
 [JsonSerializable(typeof(List<SlimSessionDto>))]
 // route / query parameter and framework types (needed by the OpenAPI schema generator under Native AOT)
@@ -48,5 +49,8 @@ namespace SlimIdentity.Contracts;
 [JsonSerializable(typeof(SlimExchangePayload))]
 [JsonSerializable(typeof(SlimRefreshPayload))]
 [JsonSerializable(typeof(SlimInvitationPayload))]
+[JsonSerializable(typeof(SlimEmailChangePayload))]
+[JsonSerializable(typeof(SlimChangeEmailRequest))]
+[JsonSerializable(typeof(SlimConfirmEmailChangeRequest))]
 [JsonSerializable(typeof(Dictionary<string, string>))]
 internal sealed partial class SlimJsonContext : JsonSerializerContext;

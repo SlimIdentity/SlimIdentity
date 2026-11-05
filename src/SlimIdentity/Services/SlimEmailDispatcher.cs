@@ -4,14 +4,15 @@ using Microsoft.Extensions.Hosting;
 namespace SlimIdentity.Services;
 
 /// <summary>
-/// Sends enumeration-relevant mails (verification, password reset, "account exists") without the request
-/// waiting for the mail server, so that "account exists" and "account unknown" answer equally fast.
+/// Sends enumeration-relevant mails (verification, password reset, "account exists", lockout, e-mail change) without
+/// the request waiting for the mail server, so that "account exists" and "account unknown" answer equally fast.
 /// With <see cref="SlimEmailOptions.SendInBackground"/> = false the mail is sent inline instead.
 /// </summary>
 internal sealed class SlimEmailDispatcher(
     SlimEmailQueue queue,
     IServiceProvider services,
     IOptions<SlimIdentityOptions> options,
+    SlimMetrics metrics,
     ILogger<SlimEmailDispatcher> logger)
 {
     public async Task SendAsync(string kind, Func<ISlimEmailSender, CancellationToken, Task> send, CancellationToken ct)
@@ -19,11 +20,15 @@ internal sealed class SlimEmailDispatcher(
         if (!options.Value.Email.SendInBackground)
         {
             await send(services.GetRequiredService<ISlimEmailSender>(), ct);
+            metrics.Mail(kind, "sent");
             return;
         }
 
         if (!queue.TryEnqueue(new SlimEmailJob(kind, send)))
-            logger.LogError("SlimIdentity: mail queue is full – {Kind} mail dropped.", kind);
+        {
+            Log.MailDropped(logger, kind);
+            metrics.Mail(kind, "dropped");
+        }
     }
 }
 
@@ -42,6 +47,8 @@ internal sealed class SlimEmailQueue(IOptions<SlimIdentityOptions> options)
     public bool TryEnqueue(SlimEmailJob job) => _channel.Writer.TryWrite(job);
 
     public ChannelReader<SlimEmailJob> Reader => _channel.Reader;
+
+    public int Count => _channel.Reader.Count;
 }
 
 /// <summary>
@@ -52,6 +59,7 @@ internal sealed class SlimEmailQueue(IOptions<SlimIdentityOptions> options)
 internal sealed class SlimEmailBackgroundService(
     SlimEmailQueue queue,
     IServiceScopeFactory scopes,
+    SlimMetrics metrics,
     ILogger<SlimEmailBackgroundService> logger) : BackgroundService
 {
     private CancellationToken _shutdownDeadline = CancellationToken.None;
@@ -81,9 +89,8 @@ internal sealed class SlimEmailBackgroundService(
             drained++;
         }
 
-        if (drained > 0) logger.LogInformation("SlimIdentity: sent {Count} queued mail(s) during shutdown.", drained);
-        if (queue.Reader.Count > 0)
-            logger.LogWarning("SlimIdentity: shutdown timeout reached with {Count} unsent mail(s) in the queue.", queue.Reader.Count);
+        if (drained > 0) Log.MailDrained(logger, drained);
+        if (queue.Count > 0) Log.MailLost(logger, queue.Count);
     }
 
     private async Task SendAsync(SlimEmailJob job, CancellationToken ct)
@@ -93,10 +100,12 @@ internal sealed class SlimEmailBackgroundService(
             await using var scope = scopes.CreateAsyncScope();
             var sender = scope.ServiceProvider.GetRequiredService<ISlimEmailSender>();
             await job.Send(sender, ct);
+            metrics.Mail(job.Kind, "sent");
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "SlimIdentity: sending {Kind} mail failed.", job.Kind);
+            Log.MailFailed(logger, ex, job.Kind);
+            metrics.Mail(job.Kind, "failed");
         }
     }
 }
