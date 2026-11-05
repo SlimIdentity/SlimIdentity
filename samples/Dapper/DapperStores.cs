@@ -1,16 +1,19 @@
 // SlimIdentity sample – Dapper (plain SQL, PostgreSQL via Npgsql). Schema: schema.sql
-// Packages: Dapper, Npgsql
+// Packages: Dapper, Npgsql   (for Native AOT use Dapper.AOT or hand-written ADO.NET mapping)
 //
 //   builder.Services.AddSingleton(NpgsqlDataSource.Create(connectionString));
 //   builder.Services.AddSlimIdentity(...)
 //       .AddUserStore<DapperUserStore>()
-//       .AddRefreshTokenStore<DapperRefreshTokenStore>();
+//       .AddRefreshTokenStore<DapperRefreshTokenStore>()
+//       .AddSessionStore<DapperSessionStore>()
+//       .AddTwoFactorStore<DapperTwoFactorStore>()
+//       .AddExternalLoginStore<DapperExternalLoginStore>()
+//       .AddApiKeyStore<DapperApiKeyStore>();
 
 using System.Security.Claims;
-using SlimIdentity;
-using SlimIdentity.Abstractions;
 using Dapper;
 using Npgsql;
+using SlimIdentity;
 
 namespace MyApp.Data;
 
@@ -96,5 +99,146 @@ public sealed class DapperRefreshTokenStore(NpgsqlDataSource db) : ISlimRefreshT
         return await c.QuerySingleOrDefaultAsync<string?>(new CommandDefinition(
             "DELETE FROM refresh_tokens WHERE token_hash = @tokenHash AND expires_at > now() RETURNING user_id::text",
             new { tokenHash }, cancellationToken: ct));
+    }
+}
+
+/// <summary>Server-side sessions. Delete expired rows periodically: DELETE FROM user_sessions WHERE expires_utc &lt; now().</summary>
+public sealed class DapperSessionStore(NpgsqlDataSource db) : ISlimSessionStore
+{
+    private const string Columns = """
+        id                    AS Id,
+        user_id::text         AS UserId,
+        mode                  AS Mode,
+        authentication_method AS AuthenticationMethod,
+        impersonator_id       AS ImpersonatorId,
+        created_utc           AS CreatedUtc,
+        last_seen_utc         AS LastSeenUtc,
+        expires_utc           AS ExpiresUtc,
+        user_agent            AS UserAgent,
+        ip_address            AS IpAddress
+        """;
+
+    public async Task CreateAsync(SlimSession session, CancellationToken ct)
+    {
+        await using var c = await db.OpenConnectionAsync(ct);
+        await c.ExecuteAsync(new CommandDefinition("""
+            INSERT INTO user_sessions (id, user_id, mode, authentication_method, impersonator_id,
+                                       created_utc, last_seen_utc, expires_utc, user_agent, ip_address)
+            VALUES (@Id, @UserId::uuid, @Mode, @AuthenticationMethod, @ImpersonatorId,
+                    @CreatedUtc, @LastSeenUtc, @ExpiresUtc, @UserAgent, @IpAddress)
+            """, session, cancellationToken: ct));
+    }
+
+    public async Task<SlimSession?> FindAsync(string sessionId, CancellationToken ct)
+    {
+        await using var c = await db.OpenConnectionAsync(ct);
+        return await c.QuerySingleOrDefaultAsync<SlimSession>(new CommandDefinition(
+            $"SELECT {Columns} FROM user_sessions WHERE id = @sessionId", new { sessionId }, cancellationToken: ct));
+    }
+
+    public async Task<IReadOnlyCollection<SlimSession>> ListAsync(string userId, CancellationToken ct)
+    {
+        await using var c = await db.OpenConnectionAsync(ct);
+        var rows = await c.QueryAsync<SlimSession>(new CommandDefinition(
+            $"SELECT {Columns} FROM user_sessions WHERE user_id = @userId::uuid AND expires_utc > now()", new { userId }, cancellationToken: ct));
+        return rows.ToList();
+    }
+
+    public async Task TouchAsync(string sessionId, DateTimeOffset lastSeenUtc, DateTimeOffset expiresUtc, CancellationToken ct)
+    {
+        await using var c = await db.OpenConnectionAsync(ct);
+        await c.ExecuteAsync(new CommandDefinition(
+            "UPDATE user_sessions SET last_seen_utc = @lastSeenUtc, expires_utc = @expiresUtc WHERE id = @sessionId",
+            new { sessionId, lastSeenUtc, expiresUtc }, cancellationToken: ct));
+    }
+
+    public async Task RevokeAsync(string sessionId, CancellationToken ct)
+    {
+        await using var c = await db.OpenConnectionAsync(ct);
+        await c.ExecuteAsync(new CommandDefinition("DELETE FROM user_sessions WHERE id = @sessionId", new { sessionId }, cancellationToken: ct));
+    }
+
+    public async Task RevokeAllAsync(string userId, string? exceptSessionId, CancellationToken ct)
+    {
+        await using var c = await db.OpenConnectionAsync(ct);
+        await c.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM user_sessions WHERE user_id = @userId::uuid AND (@exceptSessionId::text IS NULL OR id <> @exceptSessionId)",
+            new { userId, exceptSessionId }, cancellationToken: ct));
+    }
+}
+
+public sealed class DapperTwoFactorStore(NpgsqlDataSource db) : ISlimTwoFactorStore
+{
+    public async Task<string?> GetTotpSecretAsync(SlimUser user, CancellationToken ct)
+    {
+        await using var c = await db.OpenConnectionAsync(ct);
+        return await c.QuerySingleOrDefaultAsync<string?>(new CommandDefinition(
+            "SELECT totp_secret FROM users WHERE id = @id::uuid", new { id = user.Id }, cancellationToken: ct));
+    }
+
+    public async Task SetTotpSecretAsync(SlimUser user, string secret, CancellationToken ct)
+    {
+        await using var c = await db.OpenConnectionAsync(ct);
+        await c.ExecuteAsync(new CommandDefinition(
+            "UPDATE users SET totp_secret = @secret WHERE id = @id::uuid",
+            new { id = user.Id, secret = string.IsNullOrEmpty(secret) ? null : secret }, cancellationToken: ct));
+    }
+
+    public async Task StoreRecoveryCodesAsync(SlimUser user, IEnumerable<string> hashedCodes, CancellationToken ct)
+    {
+        await using var c = await db.OpenConnectionAsync(ct);
+        await using var tx = await c.BeginTransactionAsync(ct);
+        await c.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM recovery_codes WHERE user_id = @id::uuid", new { id = user.Id }, tx, cancellationToken: ct));
+        await c.ExecuteAsync(new CommandDefinition(
+            "INSERT INTO recovery_codes (user_id, code_hash) VALUES (@id::uuid, @hash)",
+            hashedCodes.Select(h => new { id = user.Id, hash = h }), tx, cancellationToken: ct));
+        await tx.CommitAsync(ct);
+    }
+
+    public async Task<bool> ValidateAndConsumeRecoveryCodeAsync(SlimUser user, string hashedCode, CancellationToken ct)
+    {
+        await using var c = await db.OpenConnectionAsync(ct);
+        // atomic: only one parallel request can delete the row
+        return await c.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM recovery_codes WHERE user_id = @id::uuid AND code_hash = @hashedCode",
+            new { id = user.Id, hashedCode }, cancellationToken: ct)) == 1;
+    }
+}
+
+public sealed class DapperExternalLoginStore(NpgsqlDataSource db, ISlimUserStore users) : ISlimExternalLoginStore
+{
+    public async Task<SlimUser?> FindByExternalLoginAsync(string provider, string providerKey, CancellationToken ct)
+    {
+        await using var c = await db.OpenConnectionAsync(ct);
+        var userId = await c.QuerySingleOrDefaultAsync<string?>(new CommandDefinition(
+            "SELECT user_id::text FROM external_logins WHERE provider = @provider AND provider_key = @providerKey",
+            new { provider, providerKey }, cancellationToken: ct));
+        return userId is null ? null : await users.FindByIdAsync(userId, ct);
+    }
+
+    public async Task LinkExternalLoginAsync(string userId, string provider, string providerKey, CancellationToken ct)
+    {
+        await using var c = await db.OpenConnectionAsync(ct);
+        await c.ExecuteAsync(new CommandDefinition(
+            "INSERT INTO external_logins (provider, provider_key, user_id) VALUES (@provider, @providerKey, @userId::uuid)",
+            new { provider, providerKey, userId }, cancellationToken: ct));
+    }
+}
+
+public sealed class DapperApiKeyStore(NpgsqlDataSource db) : ISlimApiKeyStore
+{
+    public async Task<IReadOnlyCollection<Claim>?> ValidateApiKeyAsync(string keyHash, CancellationToken ct)
+    {
+        await using var c = await db.OpenConnectionAsync(ct);
+        var key = await c.QuerySingleOrDefaultAsync<(string ClientId, string[] Scopes)?>(new CommandDefinition("""
+            SELECT client_id, scopes FROM api_keys
+            WHERE key_hash = @keyHash AND NOT revoked AND (expires_at IS NULL OR expires_at > now())
+            """, new { keyHash }, cancellationToken: ct));
+        if (key is not { } k) return null;
+
+        var claims = new List<Claim> { new(SlimClaimTypes.UserId, $"client:{k.ClientId}") };
+        claims.AddRange(k.Scopes.Select(s => new Claim("scope", s)));
+        return claims;
     }
 }

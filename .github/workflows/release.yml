@@ -1,6 +1,6 @@
 name: Release
 
-# Push a tag like v0.1.0 (or v0.1.0-preview.1) to publish to nuget.org and create a GitHub release.
+# Push a tag like v1.0.0 (or v1.0.0-rc.1) to publish to nuget.org and create a GitHub release.
 #
 # One-time setup on nuget.org (Trusted Publishing – no long-lived API key in the repository):
 #   nuget.org → your account → Trusted Publishing → Add policy

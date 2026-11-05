@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Identity;
-using SlimIdentity.Abstractions;
 
 namespace SlimIdentity.Tests.Infrastructure;
 

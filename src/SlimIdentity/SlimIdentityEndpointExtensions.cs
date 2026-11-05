@@ -1,13 +1,13 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.AspNetCore.Mvc;
-using SlimIdentity.Abstractions;
 using SlimIdentity.Contracts;
 using SlimIdentity.Endpoints;
 using SlimIdentity.Http;
 
 namespace SlimIdentity;
 
+/// <summary>Endpoint mapping: <c>app.MapSlimIdentityApi()</c> and <c>.RequireSlimCsrf()</c>.</summary>
 public static class SlimIdentityEndpointExtensions
 {
     private static readonly IAuthorizeData[] SlimAuthorize =

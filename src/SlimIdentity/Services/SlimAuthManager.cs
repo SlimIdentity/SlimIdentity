@@ -1,5 +1,4 @@
 using Microsoft.IdentityModel.JsonWebTokens;
-using SlimIdentity.Abstractions;
 using SlimIdentity.Authentication;
 using SlimIdentity.Contracts;
 using SlimIdentity.Security;

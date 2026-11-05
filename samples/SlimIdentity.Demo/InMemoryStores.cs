@@ -2,10 +2,9 @@ using System.Collections.Concurrent;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Identity;
 using SlimIdentity;
-using SlimIdentity.Abstractions;
 using SlimIdentity.Security;
 
-namespace SlimIdentityDemo;
+namespace SlimIdentity.Demo;
 
 /// <summary>
 /// Demo persistence – everything lives in memory and is lost on restart.

@@ -1,4 +1,5 @@
 -- SlimIdentity sample schema (PostgreSQL). Adapt types for SQL Server / SQLite.
+-- Only the tables of the capabilities you register are needed.
 
 CREATE TABLE users (
     id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -11,6 +12,7 @@ CREATE TABLE users (
     failed_login_attempts int          NOT NULL DEFAULT 0,
     lockout_end_utc       timestamptz  NULL,
     two_factor_enabled    boolean      NOT NULL DEFAULT false,
+    totp_secret           text         NULL,   -- ISlimTwoFactorStore; consider encrypting at rest
     -- business columns belong to you:
     display_name          text         NULL
 );
@@ -21,9 +23,51 @@ CREATE TABLE user_roles (
     PRIMARY KEY (user_id, role)
 );
 
+-- ISlimRefreshTokenStore
 CREATE TABLE refresh_tokens (
     token_hash char(64)    PRIMARY KEY,
     user_id    uuid        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     expires_at timestamptz NOT NULL
 );
 CREATE INDEX ix_refresh_tokens_user ON refresh_tokens(user_id);
+
+-- ISlimSessionStore
+CREATE TABLE user_sessions (
+    id                     char(32)     PRIMARY KEY,
+    user_id                uuid         NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    mode                   varchar(16)  NOT NULL,
+    authentication_method  varchar(32)  NOT NULL,
+    impersonator_id        text         NULL,
+    created_utc            timestamptz  NOT NULL,
+    last_seen_utc          timestamptz  NOT NULL,
+    expires_utc            timestamptz  NOT NULL,
+    user_agent             varchar(256) NULL,   -- personal data: drop the column if you do not need it
+    ip_address             varchar(45)  NULL    -- personal data: drop the column if you do not need it
+);
+CREATE INDEX ix_user_sessions_user ON user_sessions(user_id);
+CREATE INDEX ix_user_sessions_expires ON user_sessions(expires_utc);  -- cleanup: DELETE ... WHERE expires_utc < now()
+
+-- ISlimTwoFactorStore
+CREATE TABLE recovery_codes (
+    user_id   uuid     NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    code_hash char(64) NOT NULL,
+    PRIMARY KEY (user_id, code_hash)
+);
+
+-- ISlimExternalLoginStore
+CREATE TABLE external_logins (
+    provider     varchar(64)  NOT NULL,
+    provider_key varchar(256) NOT NULL,
+    user_id      uuid         NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY (provider, provider_key)
+);
+CREATE INDEX ix_external_logins_user ON external_logins(user_id);
+
+-- ISlimApiKeyStore
+CREATE TABLE api_keys (
+    key_hash   char(64)    PRIMARY KEY,   -- SlimApiKeys.Hash(key)
+    client_id  varchar(64) NOT NULL,
+    scopes     text[]      NOT NULL DEFAULT '{}',
+    expires_at timestamptz NULL,
+    revoked    boolean     NOT NULL DEFAULT false
+);

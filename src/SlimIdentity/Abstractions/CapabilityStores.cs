@@ -1,6 +1,6 @@
 using SlimIdentity.Security;
 
-namespace SlimIdentity.Abstractions;
+namespace SlimIdentity;
 
 /// <summary>
 /// Optional capability: activates <c>/auth/refresh</c> (JWT rotation).
@@ -8,6 +8,7 @@ namespace SlimIdentity.Abstractions;
 /// </summary>
 public interface ISlimRefreshTokenStore
 {
+    /// <summary>Persists a newly issued refresh token (hash only) with its owner and expiry.</summary>
     Task StoreRefreshTokenAsync(string userId, string tokenHash, DateTimeOffset expiresAt, CancellationToken ct);
 
     /// <summary>
@@ -25,6 +26,7 @@ public interface ISlimRefreshTokenStore
 /// </summary>
 public interface ISlimSessionStore
 {
+    /// <summary>Persists a new session at sign-in.</summary>
     Task CreateAsync(SlimSession session, CancellationToken ct);
 
     /// <summary>Returns the session, or <c>null</c> if it does not exist or was revoked. (SlimIdentity checks the expiry itself.)</summary>
@@ -36,6 +38,7 @@ public interface ISlimSessionStore
     /// <summary>Updates <see cref="SlimSession.LastSeenUtc"/> and <see cref="SlimSession.ExpiresUtc"/> (refresh, sliding cookies).</summary>
     Task TouchAsync(string sessionId, DateTimeOffset lastSeenUtc, DateTimeOffset expiresUtc, CancellationToken ct);
 
+    /// <summary>Revokes (deletes) one session; afterwards <see cref="FindAsync"/> must return <c>null</c> for it.</summary>
     Task RevokeAsync(string sessionId, CancellationToken ct);
 
     /// <summary>Revokes all sessions of the user except <paramref name="exceptSessionId"/> (null = all).</summary>
@@ -45,7 +48,9 @@ public interface ISlimSessionStore
 /// <summary>A server-side session (one device / browser).</summary>
 public sealed class SlimSession
 {
+    /// <summary>Random session id (32 hex characters), also the <c>sid</c> claim.</summary>
     public string Id { get; set; } = string.Empty;
+    /// <summary>Owner of the session.</summary>
     public string UserId { get; set; } = string.Empty;
     /// <summary><c>cookie</c> or <c>bearer</c>.</summary>
     public string Mode { get; set; } = "cookie";
@@ -53,8 +58,11 @@ public sealed class SlimSession
     public string AuthenticationMethod { get; set; } = string.Empty;
     /// <summary>Set for impersonation sessions (id of the admin).</summary>
     public string? ImpersonatorId { get; set; }
+    /// <summary>Sign-in time.</summary>
     public DateTimeOffset CreatedUtc { get; set; }
+    /// <summary>Last validation or refresh.</summary>
     public DateTimeOffset LastSeenUtc { get; set; }
+    /// <summary>End of the session; SlimIdentity rejects it afterwards even if the row still exists.</summary>
     public DateTimeOffset ExpiresUtc { get; set; }
     /// <summary>Truncated to 256 characters. Personal data – the host decides whether to persist it.</summary>
     public string? UserAgent { get; set; }
@@ -86,7 +94,10 @@ public interface ISlimTwoFactorStore
 /// </summary>
 public interface ISlimExternalLoginStore
 {
+    /// <summary>Finds the user linked to the external identity (<paramref name="provider"/> = scheme name, <paramref name="providerKey"/> = subject).</summary>
     Task<SlimUser?> FindByExternalLoginAsync(string provider, string providerKey, CancellationToken ct);
+
+    /// <summary>Links an external identity to a user (unique per provider + key).</summary>
     Task LinkExternalLoginAsync(string userId, string provider, string providerKey, CancellationToken ct);
 }
 
@@ -106,5 +117,6 @@ public interface ISlimApiKeyStore
 /// </summary>
 public interface ISlimCustomPasswordValidator
 {
+    /// <summary>Returns true if <paramref name="providedPassword"/> is correct for <paramref name="user"/>. Infrastructure errors should return false and be logged.</summary>
     Task<bool> ValidateAsync(SlimUser user, string providedPassword, CancellationToken ct);
 }

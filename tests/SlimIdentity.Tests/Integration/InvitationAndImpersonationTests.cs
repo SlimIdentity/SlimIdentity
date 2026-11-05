@@ -38,7 +38,7 @@ public sealed class InvitationAndImpersonationTests
     public async Task Invitation_cannot_be_created_for_users_with_a_password()
     {
         await using var app = await TestApp.StartAsync();
-        var auth = app.App.Services.CreateScope().ServiceProvider.GetRequiredService<SlimIdentity.Abstractions.ISlimAuthManager>();
+        var auth = app.App.Services.CreateScope().ServiceProvider.GetRequiredService<ISlimAuthManager>();
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => auth.CreateInvitationAsync(app.Users.Get(TestApp.UserEmail)));
     }

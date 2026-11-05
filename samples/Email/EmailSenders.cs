@@ -3,7 +3,7 @@
 //   SendGridEmailSender  → package SendGrid
 //   LoggingEmailSender   → no package (development)
 
-using SlimIdentity.Abstractions;
+using SlimIdentity;
 using MailKit.Net.Smtp;
 using MailKit.Security;
 using Microsoft.Extensions.Logging;

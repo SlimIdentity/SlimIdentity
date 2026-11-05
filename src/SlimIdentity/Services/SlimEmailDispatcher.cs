@@ -1,6 +1,5 @@
 using System.Threading.Channels;
 using Microsoft.Extensions.Hosting;
-using SlimIdentity.Abstractions;
 
 namespace SlimIdentity.Services;
 

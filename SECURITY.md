@@ -4,7 +4,7 @@ SlimIdentity is an authentication library, so security reports are taken serious
 
 ## Supported versions
 
-The project is in preview (0.x). Security fixes are made for the **latest released version** only.
+Security fixes are made for the **latest released version** only.
 Please upgrade before reporting an issue that may already be fixed.
 
 ## Reporting a vulnerability
@@ -32,7 +32,7 @@ Please include as much as you can:
 
 In scope: the `SlimIdentity` package (`src/`).
 
-Out of scope: the copy-paste samples in `samples/` and the demo application in `tests/SlimIdentityDemo`
+Out of scope: the copy-paste samples in `samples/` and the demo application in `samples/SlimIdentity.Demo`
 (they are examples, not production code – reports about them are still welcome as regular issues if they
 teach insecure patterns), vulnerabilities in ASP.NET Core or other third-party dependencies (please report those
 upstream), and issues that require a misconfiguration explicitly warned against in the documentation.

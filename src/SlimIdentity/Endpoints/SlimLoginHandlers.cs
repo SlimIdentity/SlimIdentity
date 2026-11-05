@@ -1,4 +1,3 @@
-using SlimIdentity.Abstractions;
 using SlimIdentity.Contracts;
 using SlimIdentity.Http;
 using SlimIdentity.Security;
@@ -81,7 +80,7 @@ internal sealed class SlimLoginHandlers(
             var challenge = await BeginTwoFactorAsync(user, cookies, request.RememberMe, ct);
             return challenge is null
                 ? Results.Problem(statusCode: 500, title: "Two-factor authentication is enabled for this user but ISlimTwoFactorStore is not registered.")
-                : Results.Json(challenge, statusCode: StatusCodes.Status401Unauthorized);
+                : SlimResults.Challenge(challenge);
         }
 
         var result = await authManager.SignInCoreAsync(user, cookies, request.RememberMe, SlimAuthManager.MethodPassword, null, null, true, ct);

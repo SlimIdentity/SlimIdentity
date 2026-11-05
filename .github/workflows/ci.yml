@@ -34,8 +34,9 @@ jobs:
       - name: Test
         run: dotnet test SlimIdentity.slnx --configuration Release --no-build --logger "trx;LogFileName=results.trx" --results-directory TestResults
 
-      - name: Compile samples
-        run: dotnet build samples/SamplesCheck --configuration Release
+      # the demo is published as Native AOT: any trimming/AOT warning in the library fails the build
+      - name: Native AOT publish (demo)
+        run: dotnet publish samples/SlimIdentity.Demo --configuration Release --runtime linux-x64 --output aot
 
       - name: Check for vulnerable packages
         run: dotnet list SlimIdentity.slnx package --vulnerable --include-transitive 2>&1 | tee vulnerable.txt && ! grep -q "has the following vulnerable packages" vulnerable.txt

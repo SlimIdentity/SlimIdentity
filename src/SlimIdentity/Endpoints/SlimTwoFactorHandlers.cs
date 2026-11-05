@@ -1,4 +1,3 @@
-using SlimIdentity.Abstractions;
 using SlimIdentity.Contracts;
 using SlimIdentity.Http;
 using SlimIdentity.Security;

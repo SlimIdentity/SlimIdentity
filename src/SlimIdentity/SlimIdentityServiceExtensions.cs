@@ -3,8 +3,8 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
-using SlimIdentity.Abstractions;
 using SlimIdentity.Authentication;
+using SlimIdentity.Contracts;
 using SlimIdentity.Endpoints;
 using SlimIdentity.Http;
 using SlimIdentity.Security;
@@ -12,6 +12,7 @@ using SlimIdentity.Services;
 
 namespace SlimIdentity;
 
+/// <summary>Service registration: <c>builder.Services.AddSlimIdentity(…)</c>.</summary>
 public static class SlimIdentityServiceExtensions
 {
     /// <summary>Registers SlimIdentity configured purely in code.</summary>
@@ -39,6 +40,8 @@ public static class SlimIdentityServiceExtensions
         // ---------------------------------------------------------------- framework-native building blocks
         services.TryAddSingleton(TimeProvider.System);
         services.AddHttpContextAccessor();
+        // AOT: request/response DTOs via source-generated metadata (in front of the host's own resolvers)
+        services.ConfigureHttpJsonOptions(o => o.SerializerOptions.TypeInfoResolverChain.Insert(0, SlimJsonContext.Default));
         services.AddDataProtection();
         services.TryAddScoped<IPasswordHasher<SlimUser>, PasswordHasher<SlimUser>>();
 

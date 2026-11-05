@@ -1,4 +1,6 @@
+using System.Text.Json.Serialization.Metadata;
 using Microsoft.AspNetCore.DataProtection;
+using SlimIdentity.Contracts;
 
 namespace SlimIdentity.Services;
 
@@ -13,8 +15,13 @@ internal sealed class SlimWorkflowTokens(IDataProtectionProvider provider, ILogg
     public const string PreAuthPurpose = "SlimIdentity.PreAuth.v1";
     public const string TwoFactorSetupPurpose = "SlimIdentity.TwoFactorSetup.v1";
     public const string ExternalExchangePurpose = "SlimIdentity.ExternalExchange.v1";
-    public const string RefreshTokenPurpose = "SlimIdentity.RefreshToken.v2";
+    public const string RefreshTokenPurpose = "SlimIdentity.RefreshToken.v1";
     public const string InvitationPurpose = "SlimIdentity.Invitation.v1";
+
+    // AOT-safe: metadata comes from the source-generated context, never from reflection
+    private static JsonTypeInfo<T> TypeInfo<T>() =>
+        (JsonTypeInfo<T>?)SlimJsonContext.Default.GetTypeInfo(typeof(T))
+        ?? throw new InvalidOperationException($"SlimIdentity: {typeof(T).Name} is missing in SlimJsonContext.");
 
     /// <summary>Replaces <c>{token}</c> in the template, or returns the raw token if no template is configured.</summary>
     public static string BuildLink(string? template, string token) =>
@@ -23,7 +30,7 @@ internal sealed class SlimWorkflowTokens(IDataProtectionProvider provider, ILogg
     public string Protect<T>(string purpose, T payload, TimeSpan lifetime)
     {
         var protector = provider.CreateProtector(purpose).ToTimeLimitedDataProtector();
-        return protector.Protect(JsonSerializer.Serialize(payload), lifetime);
+        return protector.Protect(JsonSerializer.Serialize(payload, TypeInfo<T>()), lifetime);
     }
 
     public bool TryUnprotect<T>(string purpose, string? token, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out T? payload) where T : class =>
@@ -38,7 +45,7 @@ internal sealed class SlimWorkflowTokens(IDataProtectionProvider provider, ILogg
         {
             var protector = provider.CreateProtector(purpose).ToTimeLimitedDataProtector();
             var json = protector.Unprotect(token, out expiresAt);
-            payload = JsonSerializer.Deserialize<T>(json);
+            payload = JsonSerializer.Deserialize(json, TypeInfo<T>());
             return payload is not null;
         }
         catch (Exception ex) when (ex is CryptographicException or JsonException or FormatException)

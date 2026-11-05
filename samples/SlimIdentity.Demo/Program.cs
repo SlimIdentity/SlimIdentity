@@ -1,17 +1,20 @@
 using System.Net;
 using System.Security.Claims;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using SlimIdentity;
-using SlimIdentity.Abstractions;
+using SlimIdentity.Contracts;
 using SlimIdentity.Security;
-using SlimIdentityDemo;
+using SlimIdentity.Demo;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddOpenApi();
+builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.TypeInfoResolverChain.Add(DemoJsonContext.Default));
 
 // Reverse proxy with TLS termination: take client IP, scheme and host from X-Forwarded-* – but only from
 // trusted proxies (default: loopback only). Without this the CSRF origin check sees http://, OAuth builds
@@ -77,17 +80,17 @@ app.MapSlimIdentityApi();
 // ---------------------------------------------------------------------------------------------
 
 app.MapGet("/", () => Results.Text(
-    "SlimIdentity demo – see SlimIdentityDemo.http. Users: admin@demo.local / Admin123!, user@demo.local / User1234!"));
+    "SlimIdentity demo – see SlimIdentity.Demo.http. Users: admin@demo.local / Admin123!, user@demo.local / User1234!"));
 
 app.MapGet("/api/hello", (ClaimsPrincipal user) =>
-        new { message = $"Hello {user.GetSlimEmail()}", userId = user.GetSlimUserId(), impersonatedBy = user.GetImpersonatorId() })
+        new HelloResponse($"Hello {user.GetSlimEmail()}", user.GetSlimUserId(), user.GetImpersonatorId()))
     .RequireAuthorization();
 
-app.MapGet("/api/admin", (ClaimsPrincipal user) => new { message = "Admins only", user = user.GetSlimEmail() })
+app.MapGet("/api/admin", (ClaimsPrincipal user) => new MessageResponse("Admins only", user.GetSlimEmail()))
     .RequireAuthorization(p => p.RequireRole("Admin"));
 
 // M2M via X-API-Key: demo-key-123
-app.MapGet("/api/m2m/report", (ClaimsPrincipal client) => new { client = client.GetSlimUserId(), generatedAt = DateTimeOffset.UtcNow })
+app.MapGet("/api/m2m/report", (ClaimsPrincipal client) => new ReportResponse(client.GetSlimUserId(), DateTimeOffset.UtcNow))
     .RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = SlimIdentityDefaults.ApiKeyScheme });
 
 // Admin impersonation via ISlimAuthManager ('act' claim keeps the admin id)
@@ -95,14 +98,13 @@ app.MapPost("/api/admin/impersonate/{userId}", async (
         string userId, [FromQuery] bool? useCookies, ClaimsPrincipal admin,
         ISlimUserStore store, ISlimAuthManager auth, CancellationToken ct) =>
     {
-        if (admin.IsImpersonating()) return Results.BadRequest(new { status = "already_impersonating" });
         var target = await store.FindByIdAsync(userId, ct);
         if (target is null) return Results.NotFound();
 
         var result = await auth.ImpersonateAsync(target, admin.GetSlimUserId()!, useCookies ?? admin.IsSlimCookieSession(), ct);
         return result.Succeeded
             ? Results.Ok(result.ToResponse(DateTimeOffset.UtcNow))
-            : Results.BadRequest(new { status = result.Error });
+            : Results.BadRequest(new SlimStatusResponse(result.Error!));
     })
     .RequireAuthorization(p => p.RequireRole("Admin"))
     .RequireSlimCsrf();
@@ -113,7 +115,8 @@ app.MapPost("/api/admin/impersonate/stop", async (ISlimAuthManager auth, Cancell
         var result = await auth.EndImpersonationAsync(ct);
         return result.Succeeded
             ? Results.Ok(result.ToResponse(DateTimeOffset.UtcNow))
-            : Results.Json(new { status = result.Error }, statusCode: result.Error == "not_impersonating" ? 400 : 401);
+            : Results.Json(new SlimStatusResponse(result.Error!), DemoJsonContext.Default.SlimStatusResponse,
+                statusCode: result.Error == "not_impersonating" ? 400 : 401);
     })
     .RequireAuthorization()
     .RequireSlimCsrf();
@@ -126,7 +129,7 @@ app.MapPost("/api/sudo", async (
         var user = await store.FindByIdAsync(principal.GetSlimUserId()!, ct);
         if (user is null || string.IsNullOrEmpty(user.PasswordHash)
             || hasher.VerifyHashedPassword(user, user.PasswordHash, request.Password) == PasswordVerificationResult.Failed)
-            return Results.BadRequest(new { status = "invalid_password" });
+            return Results.BadRequest(new SlimStatusResponse("invalid_password"));
 
         var result = await auth.ElevateSessionAsync(user, [SlimClaims.SudoFor(TimeSpan.FromMinutes(5))], principal.IsSlimCookieSession(), ct);
         return Results.Ok(result.ToResponse(DateTimeOffset.UtcNow));
@@ -135,7 +138,7 @@ app.MapPost("/api/sudo", async (
     .RequireSlimCsrf()
     .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy);
 
-app.MapDelete("/api/danger-zone", (ClaimsPrincipal user) => new { message = "Sudo action executed", until = user.GetSudoUntil() })
+app.MapDelete("/api/danger-zone", (ClaimsPrincipal user) => new SudoActionResponse("Sudo action executed", user.GetSudoUntil()))
     .RequireAuthorization(SlimIdentityDefaults.SudoPolicy)
     .RequireSlimCsrf();
 
@@ -146,7 +149,7 @@ app.MapPost("/api/admin/users/{userId}/ban", async (string userId, ISlimUserStor
         if (user is null) return Results.NotFound();
         await auth.SignOutEverywhereAsync(user, ct);
         ((InMemoryUserStore)store).SetActive(userId, false);
-        return Results.Ok(new { status = "banned" });
+        return Results.Ok(new SlimStatusResponse("banned"));
     })
     .RequireAuthorization(p => p.RequireRole("Admin"))
     .RequireSlimCsrf();
@@ -155,7 +158,7 @@ app.MapPost("/api/admin/users/{userId}/ban", async (string userId, ISlimUserStor
 // In a real app the link is mailed – the demo returns it.
 app.MapPost("/api/admin/invite", async (InviteRequest request, ISlimUserStore store, ISlimAuthManager auth, CancellationToken ct) =>
     {
-        if (await store.FindByEmailAsync(request.Email, ct) is not null) return Results.Conflict(new { status = "already_exists" });
+        if (await store.FindByEmailAsync(request.Email, ct) is not null) return Results.Conflict(new SlimStatusResponse("already_exists"));
         var user = await store.CreateAsync(request.Email, passwordHash: string.Empty, ct);
         var invitation = await auth.CreateInvitationAsync(user, ct: ct);
         return Results.Ok(invitation);
@@ -164,10 +167,29 @@ app.MapPost("/api/admin/invite", async (InviteRequest request, ISlimUserStore st
     .RequireSlimCsrf();
 
 app.MapGet("/api/admin/users", (ISlimUserStore store) =>
-        ((InMemoryUserStore)store).All.Select(u => new { u.Id, u.Email, u.IsActive, u.EmailConfirmed, u.TwoFactorEnabled, u.LockoutEndUtc }))
+        ((InMemoryUserStore)store).All
+            .Select(u => new UserSummary(u.Id, u.Email, u.IsActive, u.EmailConfirmed, u.TwoFactorEnabled, u.LockoutEndUtc))
+            .ToList())
     .RequireAuthorization(p => p.RequireRole("Admin"));
 
 app.Run();
 
+// Native AOT: the host's own DTOs are serialized via source generation as well (SlimIdentity registers its own).
 internal sealed record SudoRequest(string Password);
 internal sealed record InviteRequest(string Email);
+internal sealed record HelloResponse(string Message, string? UserId, string? ImpersonatedBy);
+internal sealed record MessageResponse(string Message, string? User);
+internal sealed record ReportResponse(string? Client, DateTimeOffset GeneratedAt);
+internal sealed record SudoActionResponse(string Message, DateTimeOffset? Until);
+internal sealed record UserSummary(string Id, string Email, bool IsActive, bool EmailConfirmed, bool TwoFactorEnabled, DateTimeOffset? LockoutEndUtc);
+
+[JsonSerializable(typeof(SudoRequest))]
+[JsonSerializable(typeof(InviteRequest))]
+[JsonSerializable(typeof(HelloResponse))]
+[JsonSerializable(typeof(MessageResponse))]
+[JsonSerializable(typeof(ReportResponse))]
+[JsonSerializable(typeof(SudoActionResponse))]
+[JsonSerializable(typeof(List<UserSummary>))]
+[JsonSerializable(typeof(SlimStatusResponse))]
+[JsonSourceGenerationOptions(JsonSerializerDefaults.Web)]
+internal sealed partial class DemoJsonContext : JsonSerializerContext;

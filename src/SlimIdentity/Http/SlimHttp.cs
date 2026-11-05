@@ -69,16 +69,45 @@ internal sealed class SlimCsrfEndpointFilter(IOptions<SlimIdentityOptions> optio
     private static string SelfOrigin(HttpRequest request) => $"{request.Scheme}://{request.Host.Value}";
 }
 
-/// <summary>Layer 1 brute-force protection: fixed window per client IP, 429 + Retry-After.</summary>
-internal sealed class SlimBruteForceRateLimiterPolicy(IOptions<SlimIdentityOptions> options)
-    : SlimIpRateLimiterPolicy(() => (options.Value.RateLimit.PermitLimit, options.Value.RateLimit.Window));
+/// <summary>Layer 1 brute-force protection: fixed window per client, 429 + Retry-After.</summary>
+internal sealed class SlimBruteForceRateLimiterPolicy(IOptions<SlimIdentityOptions> options, IServiceProvider services)
+    : SlimClientRateLimiterPolicy(options, services, o => (o.PermitLimit, o.Window));
 
-/// <summary>Load guard for <c>/refresh</c>: own, more generous bucket per client IP.</summary>
-internal sealed class SlimRefreshRateLimiterPolicy(IOptions<SlimIdentityOptions> options)
-    : SlimIpRateLimiterPolicy(() => (options.Value.RateLimit.RefreshPermitLimit, options.Value.RateLimit.RefreshWindow));
+/// <summary>Load guard for <c>/refresh</c>: own, more generous bucket per client.</summary>
+internal sealed class SlimRefreshRateLimiterPolicy(IOptions<SlimIdentityOptions> options, IServiceProvider services)
+    : SlimClientRateLimiterPolicy(options, services, o => (o.RefreshPermitLimit, o.RefreshWindow));
 
-internal abstract class SlimIpRateLimiterPolicy(Func<(int PermitLimit, TimeSpan Window)> limits) : IRateLimiterPolicy<string>
+/// <summary>Custom partition key registered via <c>SlimIdentityBuilder.UseRateLimitPartitionKey</c>.</summary>
+internal sealed class SlimRateLimitPartitioner(Func<HttpContext, string?> keySelector)
 {
+    public string? GetKey(HttpContext context) => keySelector(context);
+}
+
+internal abstract class SlimClientRateLimiterPolicy(
+    IOptions<SlimIdentityOptions> options,
+    IServiceProvider services,
+    Func<SlimRateLimitOptions, (int PermitLimit, TimeSpan Window)> limits) : IRateLimiterPolicy<string>
+{
+    private readonly SlimRateLimitPartitioner? _custom = services.GetService<SlimRateLimitPartitioner>();
+
+    /// <summary>
+    /// Client key: IPv4 address, or the IPv6 network prefix (a client usually controls a whole /64 and could rotate
+    /// addresses within it). Requests without a remote address (in-process test servers, Unix sockets) share one bucket.
+    /// </summary>
+    internal static string ClientKey(System.Net.IPAddress? address, int ipv6PrefixLength)
+    {
+        if (address is null) return "unknown";
+        if (address.IsIPv4MappedToIPv6) address = address.MapToIPv4();
+        if (address.AddressFamily != System.Net.Sockets.AddressFamily.InterNetworkV6 || ipv6PrefixLength >= 128)
+            return address.ToString();
+
+        Span<byte> bytes = stackalloc byte[16];
+        address.TryWriteBytes(bytes, out _);
+        for (var bit = ipv6PrefixLength; bit < 128; bit++)
+            bytes[bit / 8] &= (byte)~(0x80 >> (bit % 8));
+        return $"{new System.Net.IPAddress(bytes)}/{ipv6PrefixLength}";
+    }
+
     public Func<OnRejectedContext, CancellationToken, ValueTask>? OnRejected { get; } = static (context, _) =>
     {
         context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
@@ -89,8 +118,9 @@ internal abstract class SlimIpRateLimiterPolicy(Func<(int PermitLimit, TimeSpan 
 
     public RateLimitPartition<string> GetPartition(HttpContext httpContext)
     {
-        var (permitLimit, window) = limits();
-        var key = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        var o = options.Value.RateLimit;
+        var (permitLimit, window) = limits(o);
+        var key = _custom?.GetKey(httpContext) ?? ClientKey(httpContext.Connection.RemoteIpAddress, o.IPv6PrefixLength);
         return RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
         {
             PermitLimit = permitLimit,
@@ -104,17 +134,21 @@ internal abstract class SlimIpRateLimiterPolicy(Func<(int PermitLimit, TimeSpan 
 internal static class SlimResults
 {
     public static IResult Status(string status, string? message = null, int statusCode = StatusCodes.Status200OK) =>
-        Results.Json(new SlimStatusResponse(status, message), statusCode: statusCode);
+        Results.Json(new SlimStatusResponse(status, message), SlimJsonContext.Default.SlimStatusResponse, statusCode: statusCode);
 
     public static IResult InvalidCredentials() =>
         Results.Json(new SlimLoginChallengeResponse { Status = "invalid_credentials", Message = "Invalid e-mail or password." },
-            statusCode: StatusCodes.Status401Unauthorized);
+            SlimJsonContext.Default.SlimLoginChallengeResponse, statusCode: StatusCodes.Status401Unauthorized);
+
+    public static IResult Challenge(SlimLoginChallengeResponse challenge) =>
+        Results.Json(challenge, SlimJsonContext.Default.SlimLoginChallengeResponse, statusCode: StatusCodes.Status401Unauthorized);
 
     public static IResult Locked(HttpContext http, DateTimeOffset lockoutEnd, DateTimeOffset now)
     {
         var seconds = (int)Math.Max(1, Math.Ceiling((lockoutEnd - now).TotalSeconds));
         http.Response.Headers.RetryAfter = seconds.ToString(CultureInfo.InvariantCulture);
-        return Results.Json(new SlimLockedResponse("locked_out", lockoutEnd), statusCode: StatusCodes.Status423Locked);
+        return Results.Json(new SlimLockedResponse("locked_out", lockoutEnd), SlimJsonContext.Default.SlimLockedResponse,
+            statusCode: StatusCodes.Status423Locked);
     }
 
     public static IResult InvalidToken(int statusCode = StatusCodes.Status400BadRequest) =>

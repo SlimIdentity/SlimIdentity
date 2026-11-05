@@ -1,0 +1,20 @@
+name: Feature request
+description: Suggest an improvement or a new capability.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and why is it hard today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How could SlimIdentity support it? Keep the core principles in mind (no database dependency, opt-in capabilities, secure defaults).
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives / workarounds

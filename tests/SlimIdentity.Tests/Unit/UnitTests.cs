@@ -66,6 +66,23 @@ public sealed class LockoutDurationTests
     }
 }
 
+public sealed class RateLimitKeyTests
+{
+    [Theory]
+    [InlineData("203.0.113.7", 64, "203.0.113.7")]
+    [InlineData("::ffff:203.0.113.7", 64, "203.0.113.7")]                         // IPv4-mapped
+    [InlineData("2001:db8:aaaa:bbbb:1:2:3:4", 64, "2001:db8:aaaa:bbbb::/64")]     // whole /64 = one client
+    [InlineData("2001:db8:aaaa:bbbb:ffff::1", 64, "2001:db8:aaaa:bbbb::/64")]
+    [InlineData("2001:db8:aaaa:bbbb:1:2:3:4", 48, "2001:db8:aaaa::/48")]
+    [InlineData("2001:db8::1", 128, "2001:db8::1")]
+    public void Client_key_groups_ipv6_by_prefix(string address, int prefix, string expected) =>
+        Assert.Equal(expected, SlimIdentity.Http.SlimClientRateLimiterPolicy.ClientKey(System.Net.IPAddress.Parse(address), prefix));
+
+    [Fact]
+    public void Missing_address_shares_one_bucket() =>
+        Assert.Equal("unknown", SlimIdentity.Http.SlimClientRateLimiterPolicy.ClientKey(null, 64));
+}
+
 public sealed class ActorClaimTests
 {
     [Fact]

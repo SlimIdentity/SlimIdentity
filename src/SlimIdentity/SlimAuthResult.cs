@@ -1,0 +1,49 @@
+using SlimIdentity.Contracts;
+
+namespace SlimIdentity;
+
+/// <summary>Result of <see cref="ISlimAuthManager"/> sign-in operations.</summary>
+public sealed record SlimAuthResult
+{
+    /// <summary>Whether the operation succeeded. Otherwise see <see cref="Error"/>.</summary>
+    public bool Succeeded { get; init; }
+    /// <summary>True if a cookie was issued, false for a JWT pair.</summary>
+    public bool UsedCookies { get; init; }
+    /// <summary>JWT access token (bearer mode).</summary>
+    public string? AccessToken { get; init; }
+    /// <summary>Expiry of <see cref="AccessToken"/>.</summary>
+    public DateTimeOffset? AccessTokenExpiresAt { get; init; }
+    /// <summary>Refresh token (bearer mode with <see cref="ISlimRefreshTokenStore"/>).</summary>
+    public string? RefreshToken { get; init; }
+    /// <summary>Expiry of <see cref="RefreshToken"/>.</summary>
+    public DateTimeOffset? RefreshTokenExpiresAt { get; init; }
+    /// <summary>The issued principal.</summary>
+    public ClaimsPrincipal? Principal { get; init; }
+    /// <summary>Server-side session id (only with <see cref="ISlimSessionStore"/>).</summary>
+    public string? SessionId { get; init; }
+    /// <summary>Machine-readable error code, e.g. <c>account_inactive</c>, <c>impersonator_invalid</c>.</summary>
+    public string? Error { get; init; }
+
+    internal static SlimAuthResult Failed(string error) => new() { Succeeded = false, Error = error };
+
+    /// <summary>Maps the result to the JSON DTO returned by the built-in endpoints.</summary>
+    public SlimAuthResponse ToResponse(DateTimeOffset utcNow) => UsedCookies
+        ? new SlimAuthResponse { Status = "success", Mode = "cookie" }
+        : new SlimAuthResponse
+        {
+            Status = "success",
+            Mode = "bearer",
+            TokenType = "Bearer",
+            AccessToken = AccessToken,
+            AccessTokenExpiresAt = AccessTokenExpiresAt,
+            ExpiresIn = AccessTokenExpiresAt is { } exp ? (int)Math.Max(0, (exp - utcNow).TotalSeconds) : null,
+            RefreshToken = RefreshToken,
+            RefreshTokenExpiresAt = RefreshTokenExpiresAt,
+        };
+}
+
+/// <summary>Result of <see cref="ISlimAuthManager.CreateInvitationAsync"/>: send <see cref="Link"/> to the invited user.</summary>
+/// <param name="Token">Raw invitation token.</param>
+/// <param name="Link"><c>Links.InvitationUrl</c> with the token inserted, or the raw token if no template is configured.</param>
+/// <param name="ExpiresAt">End of validity.</param>
+public sealed record SlimInvitation(string Token, string Link, DateTimeOffset ExpiresAt);

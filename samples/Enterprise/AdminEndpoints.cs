@@ -5,7 +5,6 @@
 
 using System.Security.Claims;
 using SlimIdentity;
-using SlimIdentity.Abstractions;
 using SlimIdentity.Security;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;

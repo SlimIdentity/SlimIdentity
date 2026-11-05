@@ -11,7 +11,6 @@
 using System.DirectoryServices.Protocols;
 using System.Net;
 using SlimIdentity;
-using SlimIdentity.Abstractions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 

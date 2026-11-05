@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using SlimIdentity.Abstractions;
 using SlimIdentity.Security;
 
 namespace SlimIdentity.Authentication;

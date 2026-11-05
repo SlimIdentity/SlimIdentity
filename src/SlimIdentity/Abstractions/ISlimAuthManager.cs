@@ -1,7 +1,7 @@
 using SlimIdentity.Contracts;
 using SlimIdentity.Security;
 
-namespace SlimIdentity.Abstractions;
+namespace SlimIdentity;
 
 /// <summary>
 /// Session and token management for the host's own endpoints (custom registration, admin panel, …).

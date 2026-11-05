@@ -50,6 +50,7 @@ internal sealed class SlimIdentityOptionsValidator : IValidateOptions<SlimIdenti
         if (o.RateLimit.Window <= TimeSpan.Zero) f.Add("RateLimit.Window must be positive.");
         if (o.RateLimit.RefreshPermitLimit < 1) f.Add("RateLimit.RefreshPermitLimit must be >= 1.");
         if (o.RateLimit.RefreshWindow <= TimeSpan.Zero) f.Add("RateLimit.RefreshWindow must be positive.");
+        if (o.RateLimit.IPv6PrefixLength is < 32 or > 128) f.Add("RateLimit.IPv6PrefixLength must be between 32 and 128.");
 
         // Password
         var p = o.Password;

@@ -1,6 +1,5 @@
-using SlimIdentity.Abstractions;
 
-namespace SlimIdentity.Security;
+namespace SlimIdentity;
 
 /// <summary>Claim helpers for host code.</summary>
 public static class SlimClaims
@@ -27,7 +26,8 @@ public static class SlimClaims
         return actor;
     }
 
-    internal static string SerializeActor(Dictionary<string, string> actor) => JsonSerializer.Serialize(actor);
+    internal static string SerializeActor(Dictionary<string, string> actor) =>
+        JsonSerializer.Serialize(actor, Contracts.SlimJsonContext.Default.DictionaryStringString);
 
     /// <summary>Parses the <c>act</c> claim. Returns null unless it is an object with string <c>sub</c>.</summary>
     internal static SlimActor? ParseActorClaim(string? actorJson)
@@ -67,10 +67,12 @@ internal sealed record SlimActor(string UserId, string? SecurityStamp, string? A
 /// <summary>Convenience accessors on <see cref="ClaimsPrincipal"/>.</summary>
 public static class SlimClaimsPrincipalExtensions
 {
+    /// <summary>User id (<c>sub</c>, falling back to <see cref="ClaimTypes.NameIdentifier"/>), or null if anonymous.</summary>
     public static string? GetSlimUserId(this ClaimsPrincipal principal) =>
         principal.FindFirst(SlimClaimTypes.UserId)?.Value
         ?? principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
+    /// <summary>E-mail address (<c>email</c>, falling back to <see cref="ClaimTypes.Email"/>).</summary>
     public static string? GetSlimEmail(this ClaimsPrincipal principal) =>
         principal.FindFirst(SlimClaimTypes.Email)?.Value
         ?? principal.FindFirst(ClaimTypes.Email)?.Value;
@@ -79,13 +81,16 @@ public static class SlimClaimsPrincipalExtensions
     public static string? GetImpersonatorId(this ClaimsPrincipal principal) =>
         SlimClaims.ParseActor(principal.FindFirst(SlimClaimTypes.Actor)?.Value);
 
+    /// <summary>True during an impersonation session.</summary>
     public static bool IsImpersonating(this ClaimsPrincipal principal) => principal.GetImpersonatorId() is not null;
 
+    /// <summary>End of the step-up ("sudo") mode (<c>sudo_until</c> claim), or null.</summary>
     public static DateTimeOffset? GetSudoUntil(this ClaimsPrincipal principal) =>
         long.TryParse(principal.FindFirst(SlimClaimTypes.SudoUntil)?.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var unix)
             ? DateTimeOffset.FromUnixTimeSeconds(unix)
             : null;
 
+    /// <summary>True while the step-up ("sudo") mode is active – the basis of <see cref="SlimIdentityDefaults.SudoPolicy"/>.</summary>
     public static bool IsInSudoMode(this ClaimsPrincipal principal, TimeProvider? timeProvider = null) =>
         principal.GetSudoUntil() is { } until && until > (timeProvider ?? TimeProvider.System).GetUtcNow();
 

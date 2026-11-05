@@ -13,7 +13,6 @@
 
 using System.Security.Claims;
 using SlimIdentity;
-using SlimIdentity.Abstractions;
 using Microsoft.EntityFrameworkCore;
 
 namespace MyApp.Data;

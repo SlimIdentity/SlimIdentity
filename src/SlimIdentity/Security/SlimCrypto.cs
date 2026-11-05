@@ -1,4 +1,3 @@
-using SlimIdentity.Abstractions;
 using System.Buffers.Binary;
 using System.Buffers.Text;
 
@@ -15,20 +14,6 @@ internal static class SlimHashing
         if (a is null || b is null) return false;
         return CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(a), Encoding.UTF8.GetBytes(b));
     }
-}
-
-/// <summary>Helpers for hosts that issue API keys for the <c>X-API-Key</c> handler.</summary>
-public static class SlimApiKeys
-{
-    /// <summary>Creates a new random key. Show <c>Key</c> once to the client, persist only <c>Hash</c>.</summary>
-    public static (string Key, string Hash) Generate(string prefix = "sk")
-    {
-        var key = $"{prefix}_{Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32))}";
-        return (key, Hash(key));
-    }
-
-    /// <summary>SHA-256 hex hash, exactly what <see cref="ISlimApiKeyStore.ValidateApiKeyAsync"/> receives.</summary>
-    public static string Hash(string key) => SlimHashing.Sha256Hex(key);
 }
 
 /// <summary>RFC 4648 Base32 (no padding) – used for TOTP secrets.</summary>
