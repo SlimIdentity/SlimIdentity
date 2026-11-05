@@ -133,7 +133,13 @@ internal sealed class SlimExternalLoginHandlers(
         }
         metrics.ExternalLogin(provider, "success");
 
-        if (user.TwoFactorEnabled)
+        // the browser may carry a "remember this device" cookie from an earlier second factor
+        var remembered = user.TwoFactorEnabled
+            && services.GetService<SlimTwoFactorService>() is { } twoFactor
+            && twoFactor.IsRememberedDevice(user, Http, null);
+        var amr = remembered ? SlimAuthManager.MethodRememberedDevice : SlimAuthManager.MethodExternal;
+
+        if (user.TwoFactorEnabled && !remembered)
         {
             var challenge = await login.BeginTwoFactorAsync(user, cookies, false, ct);
             if (challenge is null) return Redirect(returnUrl, "slim_error", "two_factor_unavailable");
@@ -147,7 +153,7 @@ internal sealed class SlimExternalLoginHandlers(
 
         if (cookies)
         {
-            await authManager.SignInCoreAsync(user, true, false, SlimAuthManager.MethodExternal, null, null, false, ct);
+            await authManager.SignInCoreAsync(user, true, false, amr, null, null, false, ct);
             return Results.Redirect(returnUrl);
         }
 

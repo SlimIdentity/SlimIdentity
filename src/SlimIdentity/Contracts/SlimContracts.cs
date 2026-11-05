@@ -10,13 +10,20 @@ namespace SlimIdentity.Contracts;
 /// <param name="Email">Login identifier (e-mail, or user name for LDAP).</param>
 /// <param name="Password">The password.</param>
 /// <param name="RememberMe">Cookie mode: persistent cookie that survives a browser restart.</param>
-public sealed record SlimLoginRequest(string Email, string Password, bool RememberMe = false);
+/// <param name="TwoFactorRememberToken">
+/// Bearer mode: the token from a previous <c>/auth/login/2fa</c> with <c>rememberDevice</c>; skips the second factor on
+/// this device. (Cookie mode uses a cookie instead.)
+/// </param>
+public sealed record SlimLoginRequest(string Email, string Password, bool RememberMe = false, string? TwoFactorRememberToken = null);
 
 /// <summary>Body of <c>POST /auth/login/2fa</c>: either <see cref="Code"/> (TOTP / e-mail code) or <see cref="RecoveryCode"/>.</summary>
 /// <param name="PreAuthToken">Token from the <c>requires_two_factor</c> answer of <c>/auth/login</c>.</param>
 /// <param name="Code">6-digit TOTP or e-mail code.</param>
 /// <param name="RecoveryCode">One of the recovery codes (single use).</param>
-public sealed record SlimTwoFactorLoginRequest(string PreAuthToken, string? Code = null, string? RecoveryCode = null);
+/// <param name="RememberDevice">
+/// Skip the second factor on this device for <c>TwoFactor.RememberDeviceLifetime</c> (only if the feature is enabled).
+/// </param>
+public sealed record SlimTwoFactorLoginRequest(string PreAuthToken, string? Code = null, string? RecoveryCode = null, bool RememberDevice = false);
 
 /// <summary>Body of <c>POST /auth/refresh</c>.</summary>
 /// <param name="RefreshToken">The current refresh token (single use).</param>
@@ -108,6 +115,18 @@ public sealed class SlimAuthResponse
     public string? RefreshToken { get; init; }
     /// <summary>Expiry of the refresh token.</summary>
     public DateTimeOffset? RefreshTokenExpiresAt { get; init; }
+    /// <summary>
+    /// Bearer mode, after <c>/auth/login/2fa</c> with <c>rememberDevice</c>: store it securely on the device and send it
+    /// as <c>twoFactorRememberToken</c> with future logins. (Cookie mode sets a cookie instead.)
+    /// </summary>
+    public string? TwoFactorRememberToken { get; init; }
+
+    internal SlimAuthResponse WithTwoFactorRememberToken(string token) => new()
+    {
+        Status = Status, Mode = Mode, TokenType = TokenType, AccessToken = AccessToken, ExpiresIn = ExpiresIn,
+        AccessTokenExpiresAt = AccessTokenExpiresAt, RefreshToken = RefreshToken, RefreshTokenExpiresAt = RefreshTokenExpiresAt,
+        TwoFactorRememberToken = token,
+    };
 }
 
 /// <summary>

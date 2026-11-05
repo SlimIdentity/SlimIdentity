@@ -39,6 +39,9 @@ internal static partial class Log
     [LoggerMessage(2005, LogLevel.Warning, "SlimIdentity: replayed two-factor code for user {UserId} rejected.")]
     public static partial void TwoFactorCodeReplayed(ILogger logger, string userId);
 
+    [LoggerMessage(2007, LogLevel.Information, "SlimIdentity: all remembered 2FA devices of user {UserId} forgotten (security stamp rotated).")]
+    public static partial void RememberedDevicesForgotten(ILogger logger, string userId);
+
     [LoggerMessage(2006, LogLevel.Error, "SlimIdentity: the TOTP secret of user {UserId} cannot be decrypted (Data Protection key ring lost or changed?). The user has to sign in with a recovery code.")]
     public static partial void TotpSecretUndecryptable(ILogger logger, Exception exception, string userId);
 

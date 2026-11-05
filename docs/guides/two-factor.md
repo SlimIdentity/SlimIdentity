@@ -13,7 +13,7 @@ builder.Services.AddSlimIdentity(o => o.TwoFactor.AuthenticatorIssuer = "My Prod
 | :--- | :--- | :--- |
 | TOTP secret | Encrypted with Data Protection (purpose `SlimIdentity.TotpSecret.v1`) | Store the string as is |
 | Recovery codes | SHA-256 hashes, salted per user (codes have 80 bits of entropy) | `ValidateAndConsumeRecoveryCodeAsync` deletes **atomically** |
-| Last used code | Unix seconds of the last accepted TOTP step / e-mail code | `TryMarkCodeUsedAsync` is an **atomic compare-and-set** |
+| Last used code | Unix milliseconds of the last accepted TOTP step / e-mail code (`bigint`) | `TryMarkCodeUsedAsync` is an **atomic compare-and-set** |
 
 EF Core and Dapper implementations are in [`samples/templates`](../../samples/templates).
 
@@ -45,6 +45,35 @@ gets new tokens/cookie in the response.
 1. `POST /auth/login` → `401 { "status": "requires_two_factor", "preAuthToken": "…", "twoFactorMethod": "totp" | "email" }`.
    For e-mail 2FA the code has just been sent.
 2. `POST /auth/login/2fa` with `preAuthToken` and `code` – or `recoveryCode` – → session.
+
+## Remember this device (optional)
+
+Users who sign in daily on the same device can skip the second factor there for a while – the password is still
+required every time. Off by default:
+
+```csharp
+o.TwoFactor.RememberDeviceLifetime = TimeSpan.FromDays(30);   // max. 90 days
+```
+
+1. The user ticks "Remember this device" → `POST /auth/login/2fa` with `"rememberDevice": true` (TOTP or e-mail code;
+   never after a recovery code).
+2. **Browser (cookie mode):** SlimIdentity sets the `HttpOnly`/`Secure` cookie `SlimAuth.2fa`, scoped to the auth
+   routes. **Apps (bearer mode):** the response contains `twoFactorRememberToken` – store it in secure storage and send
+   it as `twoFactorRememberToken` with `/auth/login`.
+3. Later sign-ins on that device with the correct password skip the second factor (`amr` = `mfa_remembered`), also
+   for external logins in the same browser.
+
+Forgetting:
+
+| Action | Effect |
+| :--- | :--- |
+| `POST /auth/2fa/forget-device` | This browser asks again (deletes the cookie). Apps simply delete their token. |
+| `POST /auth/2fa/forget-all-devices` (authenticated) | **All** remembered devices ask again. Implemented by rotating the security stamp, so all *other* sessions end as well; the calling device gets a renewed session. |
+| Password change / reset, sign out everywhere, enabling / disabling 2FA, ban | All remembered devices are forgotten automatically. |
+| Expiry | After `RememberDeviceLifetime`. |
+
+Remembered devices are stateless (signed tokens), so there is no list of individual devices – like most providers,
+SlimIdentity offers "forget this device" and "forget all devices".
 
 ## Protections
 

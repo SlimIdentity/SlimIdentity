@@ -77,6 +77,8 @@ internal sealed class SlimIdentityOptionsValidator : IValidateOptions<SlimIdenti
         if (o.TwoFactor.RecoveryCodeCount is < 1 or > 50) f.Add("TwoFactor.RecoveryCodeCount must be between 1 and 50.");
         if (o.TwoFactor.TotpTimeStepTolerance is < 0 or > 3) f.Add("TwoFactor.TotpTimeStepTolerance must be between 0 and 3.");
         if (string.IsNullOrWhiteSpace(o.TwoFactor.AuthenticatorIssuer)) f.Add("TwoFactor.AuthenticatorIssuer is required.");
+        if (o.TwoFactor.RememberDeviceLifetime is { } remember && (remember <= TimeSpan.Zero || remember > TimeSpan.FromDays(90)))
+            f.Add("TwoFactor.RememberDeviceLifetime must be between 0 and 90 days (or null to disable it).");
 
         // External
         foreach (var url in o.ExternalLogin.AllowedReturnUrls)

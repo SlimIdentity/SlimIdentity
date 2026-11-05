@@ -20,6 +20,8 @@ First public release (1.0.0) in preparation.
   lifetime, security-stamp based session invalidation, background mail queue.
 - 2FA hardening: TOTP secrets encrypted with Data Protection before they reach the store, 80-bit recovery codes hashed
   per user, replay protection for TOTP and e-mail codes (`ISlimTwoFactorStore.TryMarkCodeUsedAsync`).
+- Optional "remember this device" for 2FA (`TwoFactor.RememberDeviceLifetime`, off by default): cookie or bearer token
+  bound to user and security stamp, `/2fa/forget-device` and `/2fa/forget-all-devices`.
 - E-mail change: `/change-email` (password confirmation) and `/confirm-email-change` (link to the new address,
   notification of the old one, all sessions end).
 - Pluggable password rules (`ISlimPasswordRule`, `AddPasswordRule<T>()`), e.g. a breached-password check, and

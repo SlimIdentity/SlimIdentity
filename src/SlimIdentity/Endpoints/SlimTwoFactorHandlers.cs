@@ -105,6 +105,30 @@ internal sealed class SlimTwoFactorHandlers(
         return Results.Ok(new SlimRecoveryCodesResponse(codes, null));
     }
 
+    // POST /2fa/forget-device – this browser asks for the second factor again (bearer clients delete their token)
+    public IResult ForgetDevice()
+    {
+        twoFactor.ForgetDevice(Http);
+        return SlimResults.Status("device_forgotten");
+    }
+
+    // POST /2fa/forget-all-devices – every remembered device asks again; other sessions end, this one stays
+    public async Task<IResult> ForgetAllDevicesAsync(CancellationToken ct)
+    {
+        var (user, error) = await account.LoadCurrentUserAsync(forbidImpersonation: true, ct);
+        if (user is null) return error!;
+
+        // remembered devices are bound to the security stamp – rotating it is the only stateless way to revoke them all
+        user.SecurityStamp = SlimUser.NewSecurityStamp();
+        await store.UpdateSecurityStateAsync(user, ct);
+        await authManager.RevokeSessionsAsync(user.Id, SlimAuthManager.CurrentSessionId(Http.User), ct);
+        twoFactor.ForgetDevice(Http);
+        Log.RememberedDevicesForgotten(logger, user.Id);
+
+        var session = await authManager.RefreshCurrentSessionAsync(user, ct);
+        return Results.Ok(session.ToResponse(time.GetUtcNow()));
+    }
+
     // ------------------------------------------------------------------ helpers
 
     private async Task<IResult> ActivateAsync(SlimUser user, CancellationToken ct)

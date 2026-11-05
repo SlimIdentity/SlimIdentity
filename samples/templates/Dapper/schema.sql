@@ -13,7 +13,7 @@ CREATE TABLE users (
     lockout_end_utc       timestamptz  NULL,
     two_factor_enabled    boolean      NOT NULL DEFAULT false,
     totp_secret           text         NULL,   -- ISlimTwoFactorStore; already encrypted by SlimIdentity
-    last_2fa_code_at      bigint       NULL,   -- ISlimTwoFactorStore replay protection (unix seconds)
+    last_2fa_code_at      bigint       NULL,   -- ISlimTwoFactorStore replay protection (unix milliseconds)
     -- business columns belong to you:
     display_name          text         NULL
 );

@@ -50,6 +50,7 @@ namespace SlimIdentity.Contracts;
 [JsonSerializable(typeof(SlimRefreshPayload))]
 [JsonSerializable(typeof(SlimInvitationPayload))]
 [JsonSerializable(typeof(SlimEmailChangePayload))]
+[JsonSerializable(typeof(SlimRememberDevicePayload))]
 [JsonSerializable(typeof(SlimChangeEmailRequest))]
 [JsonSerializable(typeof(SlimConfirmEmailChangeRequest))]
 [JsonSerializable(typeof(Dictionary<string, string>))]

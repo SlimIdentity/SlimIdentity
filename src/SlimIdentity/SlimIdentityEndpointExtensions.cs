@@ -329,6 +329,19 @@ public static class SlimIdentityEndpointExtensions
             .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
             .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy);
 
+        group.MapPost("/forget-device", static ([FromServices] SlimTwoFactorHandlers h) => h.ForgetDevice())
+            .WithName("SlimIdentity_TwoFactorForgetDevice")
+            .WithSummary("This browser asks for the second factor again (deletes the remember-device cookie).")
+            .Produces<SlimStatusResponse>()
+            .AllowAnonymous();
+
+        group.MapPost("/forget-all-devices", static ([FromServices] SlimTwoFactorHandlers h, CancellationToken ct) =>
+                h.ForgetAllDevicesAsync(ct))
+            .WithName("SlimIdentity_TwoFactorForgetAllDevices")
+            .WithSummary("All remembered devices ask for the second factor again; other sessions end, this one is renewed.")
+            .Produces<SlimAuthResponse>()
+            .Produces(StatusCodes.Status401Unauthorized);
+
         group.MapPost("/recovery-codes", static ([FromBody] SlimPasswordConfirmationRequest request,
                 [FromServices] SlimTwoFactorHandlers h, CancellationToken ct) => h.RegenerateRecoveryCodesAsync(request, ct))
             .WithName("SlimIdentity_TwoFactorRecoveryCodes")

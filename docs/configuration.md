@@ -123,6 +123,7 @@ flags off, plus a breached-password rule.
 | `RecoveryCodeCount` | `10` | 1–50. |
 | `TotpTimeStepTolerance` | `1` | Accepted 30-second steps before/after now (0–3). |
 | `SetupTokenLifetime` | `00:10:00` | Time between `/2fa/setup` and `/2fa/enable`. |
+| `RememberDeviceLifetime` | `null` (off) | "Remember this device": skip the second factor on a device for this long (max. 90 days). See the [2FA guide](guides/two-factor.md#remember-this-device-optional). |
 
 ## `ExternalLogin`
 

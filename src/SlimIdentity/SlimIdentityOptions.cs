@@ -217,6 +217,14 @@ public sealed class SlimTwoFactorOptions
     public int TotpTimeStepTolerance { get; set; } = 1;
     /// <summary>Time between <c>/2fa/setup</c> and <c>/2fa/enable</c>. Default 10 minutes.</summary>
     public TimeSpan SetupTokenLifetime { get; set; } = TimeSpan.FromMinutes(10);
+
+    /// <summary>
+    /// "Remember this device": after a successful second factor with <c>rememberDevice: true</c>, this device skips the
+    /// second factor for this long (the password is still required). <c>null</c> (default) disables the feature.
+    /// Remembered devices are bound to the security stamp – password change, sign out everywhere, 2FA changes and
+    /// <c>/2fa/forget-all-devices</c> invalidate all of them. Maximum 90 days.
+    /// </summary>
+    public TimeSpan? RememberDeviceLifetime { get; set; }
 }
 
 /// <summary>OAuth / OIDC logins.</summary>

@@ -105,8 +105,8 @@ internal static class SlimTotp
         return match;
     }
 
-    /// <summary>Start of a time step in unix seconds (the unit of <c>ISlimTwoFactorStore.TryMarkCodeUsedAsync</c>).</summary>
-    public static long StepStart(long step) => step * StepSeconds;
+    /// <summary>Start of a time step in unix milliseconds (the unit of <c>ISlimTwoFactorStore.TryMarkCodeUsedAsync</c>).</summary>
+    public static long StepStart(long step) => step * StepSeconds * 1000;
 
     internal static string Compute(byte[] key, long counter)
     {

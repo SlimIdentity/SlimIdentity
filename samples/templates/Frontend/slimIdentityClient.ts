@@ -14,6 +14,8 @@ export interface AuthResponse {
   accessToken?: string;
   refreshToken?: string;
   expiresIn?: number;
+  /** bearer mode, after /login/2fa with rememberDevice */
+  twoFactorRememberToken?: string;
 }
 
 export interface LoginChallenge {
@@ -110,6 +112,16 @@ export const cookieAuth = {
     return r.ok ? (await r.json()).recoveryCodes : [];
   },
 
+  /** This browser asks for the second factor again. */
+  async forgetThisDevice() {
+    await cookieFetch("/auth/2fa/forget-device", { method: "POST", body: "{}" });
+  },
+
+  /** All remembered devices ask again; other sessions end, this one is renewed. */
+  async forgetAllDevices() {
+    await cookieFetch("/auth/2fa/forget-all-devices", { method: "POST", body: "{}" });
+  },
+
   /** E-mail change: confirmation link goes to the new address; the page behind it calls confirmEmailChange. */
   async changeEmail(newEmail: string, password: string) {
     await cookieFetch("/auth/change-email", { method: "POST", body: JSON.stringify({ newEmail, password }) });
@@ -119,8 +131,9 @@ export const cookieAuth = {
     return (await cookieFetch("/auth/confirm-email-change", { method: "POST", body: JSON.stringify({ token }) })).ok;
   },
 
-  async loginTwoFactor(preAuthToken: string, code: string): Promise<LoginResult> {
-    const r = await cookieFetch("/auth/login/2fa", { method: "POST", body: JSON.stringify({ preAuthToken, code }) });
+  /** "Remember this device" sets a cookie (if TwoFactor.RememberDeviceLifetime is configured on the server). */
+  async loginTwoFactor(preAuthToken: string, code: string, rememberDevice = false): Promise<LoginResult> {
+    const r = await cookieFetch("/auth/login/2fa", { method: "POST", body: JSON.stringify({ preAuthToken, code, rememberDevice }) });
     return toLoginResult(r);
   },
 
@@ -179,10 +192,12 @@ export const cookieAuth = {
 let accessToken: string | null = null;                 // memory only – never localStorage
 let refreshPromise: Promise<boolean> | null = null;
 const REFRESH_KEY = "slim.refresh";                    // for mobile use secure storage instead
+const REMEMBER_KEY = "slim.2fa-remember";              // "remember this device" – mobile: secure storage
 
 function storeTokens(auth: AuthResponse) {
   accessToken = auth.accessToken ?? null;
   if (auth.refreshToken) sessionStorage.setItem(REFRESH_KEY, auth.refreshToken);
+  if (auth.twoFactorRememberToken) localStorage.setItem(REMEMBER_KEY, auth.twoFactorRememberToken);
 }
 
 async function refresh(): Promise<boolean> {
@@ -213,21 +228,22 @@ async function bearerFetch(path: string, init: RequestInit = {}, retry = true): 
 
 export const bearerAuth = {
   async login(email: string, password: string): Promise<LoginResult> {
+    const twoFactorRememberToken = localStorage.getItem(REMEMBER_KEY) ?? undefined;   // skips 2FA on a remembered device
     const r = await fetch(`${AUTH}/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, twoFactorRememberToken }),
     });
     const result = await toLoginResult(r);
     if (result.kind === "ok") storeTokens(result.auth);
     return result;
   },
 
-  async loginTwoFactor(preAuthToken: string, code: string): Promise<LoginResult> {
+  async loginTwoFactor(preAuthToken: string, code: string, rememberDevice = false): Promise<LoginResult> {
     const r = await fetch(`${AUTH}/login/2fa`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ preAuthToken, code }),
+      body: JSON.stringify({ preAuthToken, code, rememberDevice }),
     });
     const result = await toLoginResult(r);
     if (result.kind === "ok") storeTokens(result.auth);

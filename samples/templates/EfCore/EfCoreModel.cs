@@ -21,7 +21,7 @@ public class AppUser
     public DateTimeOffset? LockoutEndUtc { get; set; }
     public bool TwoFactorEnabled { get; set; }
     public string? TotpSecret { get; set; }            // encrypted by SlimIdentity
-    public long? LastTwoFactorCodeAt { get; set; }     // replay protection (unix seconds)
+    public long? LastTwoFactorCodeAt { get; set; }     // replay protection (unix milliseconds)
 
     // --- your business data – SlimIdentity never sees it
     public string? DisplayName { get; set; }

@@ -18,6 +18,7 @@ internal sealed class SlimWorkflowTokens(IDataProtectionProvider provider, ILogg
     public const string RefreshTokenPurpose = "SlimIdentity.RefreshToken.v1";
     public const string InvitationPurpose = "SlimIdentity.Invitation.v1";
     public const string EmailChangePurpose = "SlimIdentity.EmailChange.v1";
+    public const string RememberDevicePurpose = "SlimIdentity.TwoFactorRememberDevice.v1";
 
     // AOT-safe: metadata comes from the source-generated context, never from reflection
     private static JsonTypeInfo<T> TypeInfo<T>() =>
@@ -59,8 +60,10 @@ internal sealed class SlimWorkflowTokens(IDataProtectionProvider provider, ILogg
 
 internal sealed record SlimEmailTokenPayload(string Uid, string Email, string Stamp);
 internal sealed record SlimResetTokenPayload(string Uid, string Stamp);
-/// <summary><c>IssuedAt</c> (unix seconds) makes e-mail codes single use via <c>ISlimTwoFactorStore.TryMarkCodeUsedAsync</c>.</summary>
+/// <summary><c>IssuedAt</c> (unix milliseconds) makes e-mail codes single use via <c>ISlimTwoFactorStore.TryMarkCodeUsedAsync</c>.</summary>
 internal sealed record SlimPreAuthPayload(string Uid, string Stamp, bool UseCookies, bool RememberMe, string Method, string? CodeHash, long IssuedAt);
+/// <summary>"Remember this device" for 2FA; <c>ExpiresAt</c> (unix seconds) is checked against the injected clock.</summary>
+internal sealed record SlimRememberDevicePayload(string Uid, string Stamp, long ExpiresAt);
 internal sealed record SlimEmailChangePayload(string Uid, string OldEmail, string NewEmail, string Stamp);
 internal sealed record SlimTwoFactorSetupPayload(string Uid, string Secret);
 internal sealed record SlimExchangePayload(string Uid, string Stamp, string Provider, string Nonce);

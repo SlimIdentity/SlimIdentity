@@ -21,6 +21,8 @@ internal sealed class SlimAuthManager(
     internal const string MethodMfa = "mfa";
     internal const string MethodExternal = "ext";
     internal const string MethodImpersonation = "impersonation";
+    /// <summary>Password + a device on which the second factor was remembered.</summary>
+    internal const string MethodRememberedDevice = "mfa_remembered";
 
     private const int MaxUserAgentLength = 256;
 

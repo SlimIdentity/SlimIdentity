@@ -23,8 +23,8 @@ public interface ISlimTwoFactorStore
     Task<bool> ValidateAndConsumeRecoveryCodeAsync(SlimUser user, string hashedCode, CancellationToken ct);
 
     /// <summary>
-    /// Replay protection (RFC 6238 §5.2): stores <paramref name="usedAt"/> (unix seconds of the code's time step or issue
-    /// time) and returns <c>true</c> only if it is <b>greater</b> than the value stored before. Must be atomic, e.g.
+    /// Replay protection (RFC 6238 §5.2): stores <paramref name="usedAt"/> (unix milliseconds of the code's time step or
+    /// issue time, a 64-bit value) and returns <c>true</c> only if it is <b>greater</b> than the value stored before. Must be atomic, e.g.
     /// <c>UPDATE users SET last_2fa_code_at = @usedAt WHERE id = @id AND (last_2fa_code_at IS NULL OR last_2fa_code_at &lt; @usedAt)</c>
     /// and return whether a row was updated. A code is thereby accepted at most once.
     /// </summary>

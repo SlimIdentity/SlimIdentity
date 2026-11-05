@@ -19,8 +19,8 @@ metadata (tag `SlimIdentity`), so typed clients can be generated from `/openapi/
 
 | Endpoint | Body | Success | Errors |
 | :--- | :--- | :--- | :--- |
-| `POST /login` ⏱ | `email`, `password`, `rememberMe` | `200` session | `400 invalid_request`; `401 invalid_credentials`; `401 requires_two_factor` (+ `preAuthToken`, `twoFactorMethod`); `403 email_not_confirmed`; with `RevealAccountState`: `403 account_disabled`, `423 locked_out` |
-| `POST /login/2fa` ⏱ | `preAuthToken` + `code` or `recoveryCode` | `200` session | `401 invalid_token`, `401 invalid_two_factor_code`, `423 locked_out` |
+| `POST /login` ⏱ | `email`, `password`, `rememberMe`, `twoFactorRememberToken` (bearer, optional) | `200` session | `400 invalid_request`; `401 invalid_credentials`; `401 requires_two_factor` (+ `preAuthToken`, `twoFactorMethod`); `403 email_not_confirmed`; with `RevealAccountState`: `403 account_disabled`, `423 locked_out` |
+| `POST /login/2fa` ⏱ | `preAuthToken` + `code` or `recoveryCode`, `rememberDevice` | `200` session (+ `twoFactorRememberToken` in bearer mode / cookie `SlimAuth.2fa` in cookie mode when remembered) | `401 invalid_token`, `401 invalid_two_factor_code`, `423 locked_out` |
 | `POST /refresh` | `refreshToken` | `200` new token pair | `400 invalid_request`, `401 invalid_token`, `401 session_expired` |
 | `POST /logout` | `refreshToken` (optional) | `200 logged_out` | – |
 | `POST /logout-all` 🔒 | – | `200 logged_out_everywhere` | `401`, `403 not_allowed_while_impersonating` |
@@ -82,6 +82,8 @@ Links are created by the host with `ISlimAuthManager.CreateInvitationAsync` – 
 | `POST /2fa/enable-email` ⏱ | `password` | `200` `recoveryCodes` + `session` | `400 invalid_password`, `423` |
 | `POST /2fa/disable` ⏱ | `password` | `200` refreshed session | `400 invalid_password`, `423` |
 | `POST /2fa/recovery-codes` ⏱ | `password` | `200` new `recoveryCodes` | `400 two_factor_disabled`, `400 invalid_password`, `423` |
+| `POST /2fa/forget-device` (anonymous) | – | `200 device_forgotten` – this browser asks for the second factor again | – |
+| `POST /2fa/forget-all-devices` | – | `200` renewed session – all remembered devices ask again, all other sessions end | `403` during impersonation |
 
 Enabling or disabling 2FA rotates the security stamp: all other devices are signed out, the calling device receives a
 new session. Every TOTP time step and e-mail code is accepted only once (replay protection) – including the code used

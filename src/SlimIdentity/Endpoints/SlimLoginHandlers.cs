@@ -82,6 +82,17 @@ internal sealed class SlimLoginHandlers(
             return SlimResults.Status("email_not_confirmed", "The e-mail address has not been confirmed yet.", StatusCodes.Status403Forbidden);
         }
 
+        // remembered device: the second factor was passed on this device before – the password was just verified
+        if (user.TwoFactorEnabled && services.GetService<SlimTwoFactorService>() is { } twoFactor
+            && twoFactor.IsRememberedDevice(user, Http, request.TwoFactorRememberToken))
+        {
+            await credentials.RegisterSuccessAsync(user, null, rehash: false, resetLockout: true, ct);
+            metrics.TwoFactor("remembered_device", "success");
+            var remembered = await authManager.SignInCoreAsync(user, cookies, request.RememberMe, SlimAuthManager.MethodRememberedDevice, null, null, true, ct);
+            metrics.Login(remembered.Succeeded ? "success" : "rejected", cookies);
+            return ToResult(remembered);
+        }
+
         if (user.TwoFactorEnabled)
         {
             var challenge = await BeginTwoFactorAsync(user, cookies, request.RememberMe, ct);
@@ -112,7 +123,7 @@ internal sealed class SlimLoginHandlers(
             return null;
         }
 
-        var issuedAt = time.GetUtcNow().ToUnixTimeSeconds();
+        var issuedAt = time.GetUtcNow().ToUnixTimeMilliseconds();
         string method;
         string? codeHash = null;
         if ((await twoFactor.GetSecretAsync(user, ct)).Configured)
@@ -193,7 +204,12 @@ internal sealed class SlimLoginHandlers(
 
         if (!SlimModes.TryResolve(O, payload.UseCookies, out var cookies, out var modeError)) return modeError!;
         var result = await authManager.SignInCoreAsync(user, cookies, payload.RememberMe, SlimAuthManager.MethodMfa, null, null, true, ct);
-        return ToResult(result);
+
+        // "remember this device" – only after a real second factor, never after a recovery code
+        var rememberToken = result.Succeeded && request.RememberDevice && method != "recovery"
+            ? twoFactor.RememberDevice(user, Http, cookies)
+            : null;
+        return ToResult(result, rememberToken);
     }
 
     // ------------------------------------------------------------------ POST /refresh
@@ -298,9 +314,12 @@ internal sealed class SlimLoginHandlers(
 
     // ------------------------------------------------------------------ helpers
 
-    internal IResult ToResult(SlimAuthResult result) => result.Succeeded
-        ? Results.Ok(result.ToResponse(time.GetUtcNow()))
-        : SlimResults.InvalidCredentials();
+    internal IResult ToResult(SlimAuthResult result, string? twoFactorRememberToken = null)
+    {
+        if (!result.Succeeded) return SlimResults.InvalidCredentials();
+        var response = result.ToResponse(time.GetUtcNow());
+        return Results.Ok(twoFactorRememberToken is null ? response : response.WithTwoFactorRememberToken(twoFactorRememberToken));
+    }
 
     private static string HashEmailCode(string userId, string code, long issuedAt) =>
         SlimHashing.Sha256Hex($"slimidentity.email-code.v1:{userId}:{issuedAt}:{code}");

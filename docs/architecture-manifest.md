@@ -144,4 +144,5 @@ Deliberately not part of the package (extra dependency, highly deployment specif
 | Recovery codes: 80 bits + per-user salted SHA-256 instead of a keyed HMAC | At 80 bits an offline search is infeasible; a separate HMAC key would add a secret to manage (and lose) without real gain. |
 | Replay protection via one "last used" value per user | RFC 6238 §5.2; a single atomic compare-and-set covers TOTP steps and e-mail codes. |
 | Metrics via `System.Diagnostics.Metrics` | Zero dependency, OpenTelemetry-ready, no cost when nobody listens. |
+| "Remember this device" is stateless and off by default | Signed token bound to the security stamp: no table, revoked by every security event; "forget all" rotates the stamp (other sessions end, too). |
 | QR codes are rendered by the front end | No image dependency; the front end controls size and styling. |

@@ -10,10 +10,66 @@ namespace SlimIdentity.Services;
 internal sealed class SlimTwoFactorService(
     ISlimTwoFactorStore store,
     IDataProtectionProvider dataProtection,
+    SlimWorkflowTokens workflow,
     IOptions<SlimIdentityOptions> options,
     TimeProvider time,
     ILogger<SlimTwoFactorService> logger)
 {
+    // ------------------------------------------------------------------ "remember this device"
+
+    public bool RememberDeviceEnabled => options.Value.TwoFactor.RememberDeviceLifetime is not null;
+
+    private string RememberCookieName => options.Value.Cookies.CookieName + ".2fa";
+
+    /// <summary>
+    /// True if this request comes from a device the user remembered after a successful second factor: the cookie
+    /// (browser) or <paramref name="bearerToken"/> (apps) must belong to the user, match the current security stamp and
+    /// not be expired.
+    /// </summary>
+    public bool IsRememberedDevice(SlimUser user, HttpContext http, string? bearerToken)
+    {
+        if (!RememberDeviceEnabled) return false;
+        var token = !string.IsNullOrEmpty(bearerToken) ? bearerToken : http.Request.Cookies[RememberCookieName];
+        return workflow.TryUnprotect<SlimRememberDevicePayload>(SlimWorkflowTokens.RememberDevicePurpose, token, out var payload)
+            && string.Equals(payload.Uid, user.Id, StringComparison.Ordinal)
+            && SlimHashing.FixedTimeEquals(payload.Stamp, user.SecurityStamp)
+            && DateTimeOffset.FromUnixTimeSeconds(payload.ExpiresAt) > time.GetUtcNow();
+    }
+
+    /// <summary>Issues the remember token; in cookie mode it is set as cookie and <c>null</c> is returned.</summary>
+    public string? RememberDevice(SlimUser user, HttpContext http, bool cookieMode)
+    {
+        if (options.Value.TwoFactor.RememberDeviceLifetime is not { } lifetime) return null;
+
+        var expires = time.GetUtcNow() + lifetime;
+        var token = workflow.Protect(SlimWorkflowTokens.RememberDevicePurpose,
+            new SlimRememberDevicePayload(user.Id, user.SecurityStamp, expires.ToUnixTimeSeconds()), lifetime);
+        if (!cookieMode) return token;
+
+        http.Response.Cookies.Append(RememberCookieName, token, RememberCookieOptions(expires));
+        return null;
+    }
+
+    /// <summary>Deletes the remember cookie of this browser.</summary>
+    public void ForgetDevice(HttpContext http) =>
+        http.Response.Cookies.Delete(RememberCookieName, RememberCookieOptions(null));
+
+    private CookieOptions RememberCookieOptions(DateTimeOffset? expires)
+    {
+        var o = options.Value;
+        return new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = true,
+            SameSite = o.Cookies.SameSite,
+            Domain = o.Cookies.Domain,
+            Path = o.RoutePrefix,   // only sent to the auth endpoints
+            Expires = expires,
+            IsEssential = true,
+        };
+    }
+
+    // ------------------------------------------------------------------ authenticator secret
     private readonly IDataProtector _secretProtector = dataProtection.CreateProtector(SlimIdentityDefaults.TotpSecretProtectionPurpose);
 
     /// <summary>Result of reading the authenticator secret.</summary>
@@ -54,7 +110,7 @@ internal sealed class SlimTwoFactorService(
         return false;
     }
 
-    /// <summary>Consumes an e-mail code by its issue time (unix seconds) – the same code cannot be used twice.</summary>
+    /// <summary>Consumes an e-mail code by its issue time (unix milliseconds) – the same code cannot be used twice.</summary>
     public async Task<bool> ConsumeEmailCodeAsync(SlimUser user, long issuedAt, CancellationToken ct)
     {
         if (await store.TryMarkCodeUsedAsync(user, issuedAt, ct)) return true;

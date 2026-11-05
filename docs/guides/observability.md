@@ -21,7 +21,7 @@ Without OpenTelemetry you can watch the counters live: `dotnet-counters monitor 
 | Instrument | Tags | Meaning |
 | :--- | :--- | :--- |
 | `slimidentity.logins` | `result` (`success`, `invalid_password`, `unknown_user`, `inactive`, `locked_out`, `requires_two_factor`, `email_not_confirmed`, `rejected`), `mode` (`cookie`, `bearer`) | Password sign-in attempts |
-| `slimidentity.two_factor.verifications` | `method` (`totp`, `email`, `recovery`), `result` (`success`, `failure`) | Second-factor attempts |
+| `slimidentity.two_factor.verifications` | `method` (`totp`, `email`, `recovery`, `remembered_device`), `result` (`success`, `failure`) | Second-factor attempts and skips on remembered devices |
 | `slimidentity.lockouts` | – | Account lockouts |
 | `slimidentity.token_refreshes` | `result` (`success`, `invalid`, `reuse_detected`, `session_expired`) | Refresh-token rotations |
 | `slimidentity.sign_outs` | `scope` (`session`, `everywhere`) | Logouts and session revocations |
@@ -51,7 +51,7 @@ answer does not (enumeration protection). Keep metrics internal.
 | Range | Area | Examples |
 | :--- | :--- | :--- |
 | 1xxx | Sign-in | 1001 lockout, 1002 password rehashed, 1004 CSRF scheme mismatch (proxy misconfiguration) |
-| 2xxx | Two-factor | 2002 recovery code used, 2005 replayed code rejected, 2006 TOTP secret cannot be decrypted |
+| 2xxx | Two-factor | 2002 recovery code used, 2005 replayed code rejected, 2006 TOTP secret cannot be decrypted, 2007 all remembered devices forgotten |
 | 3xxx | Tokens and sessions | 3002/3003 refresh-token reuse, 3004 all sessions revoked |
 | 4xxx | Account | 4002 password reset, 4004/4005 e-mail change, 4003 invitation accepted |
 | 5xxx | External login | 5001 account conflict, 5002 linked, 5003 user created |
