@@ -73,8 +73,9 @@ If you find a gap, please report it privately ([SECURITY.md](../SECURITY.md)).
   refresh-token store an in-memory registry is used, which is per instance – run several instances only with a store.
 - `/register` performs one database write for new addresses only; this can make the response measurably slower than
   for existing addresses.
-- Rate limiting is per client IP (or your custom key) and per instance (in-memory); distributed rate limiting needs
-  your own policy or a gateway.
+- Rate limiting is per client IP (or your custom key) and per instance (in-memory); a hard global limit belongs in the
+  gateway. The account lockout is stored in the database and therefore global
+  ([several instances](guides/multiple-instances.md)).
 - The mail limit per recipient is kept in memory per instance; with several instances the effective limit is a multiple.
 - The code has not been independently audited yet. The [attack scenarios](attack-scenarios.md) list what is covered by
   tests and what is still open.

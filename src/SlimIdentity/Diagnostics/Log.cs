@@ -122,6 +122,19 @@ internal static partial class Log
     [LoggerMessage(7005, LogLevel.Information, "SlimIdentity: {Kind} mail not sent – per-recipient limit reached (possible mail bombing).")]
     public static partial void MailThrottled(ILogger logger, string kind);
 
+    // ---------------------------------------------------------------- 8xxx deployment / infrastructure
+    [LoggerMessage(8001, LogLevel.Warning, "SlimIdentity: requests from {Proxy} carry X-Forwarded-For, but it was not applied – the app sees the proxy's address, so all clients behind it share one rate-limit bucket (and the scheme may be wrong). Call app.UseForwardedHeaders() with this proxy in KnownProxies / KnownIPNetworks.")]
+    public static partial void ForwardedHeadersNotApplied(ILogger logger, string proxy);
+
+    [LoggerMessage(8002, LogLevel.Warning, "SlimIdentity: Data Protection keys are stored locally (no PersistKeysTo… configured). Cookies, links and refresh tokens of this instance are unreadable for other instances and lost when the container is replaced. Persist the key ring centrally – see docs/guides/data-protection.md.")]
+    public static partial void DataProtectionKeysLocal(ILogger logger);
+
+    [LoggerMessage(8003, LogLevel.Information, "SlimIdentity: no Data Protection application name is set; keys are isolated by the content-root path. With several instances in different directories call SetApplicationName(\"…\").")]
+    public static partial void DataProtectionNoApplicationName(ILogger logger);
+
+    [LoggerMessage(8004, LogLevel.Warning, "SlimIdentity: external login without ISlimRefreshTokenStore – the one-time exchange codes are tracked in memory and single-use per instance only. Register a refresh-token store when running several instances.")]
+    public static partial void ExchangeCodesPerInstance(ILogger logger);
+
     // SlimNullEmailSender (development only – these log live links and codes)
     [LoggerMessage(7101, LogLevel.Warning, "[SlimIdentity:NullEmailSender] Verification for {Email}: {Link}")]
     public static partial void NullMailVerification(ILogger logger, string email, string link);

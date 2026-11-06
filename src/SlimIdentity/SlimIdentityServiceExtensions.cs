@@ -58,6 +58,7 @@ public static class SlimIdentityServiceExtensions
         // ---------------------------------------------------------------- mail dispatch (enumeration-safe timing)
         services.TryAddSingleton<SlimEmailQueue>();
         services.TryAddSingleton<SlimMailThrottle>();
+        services.TryAddSingleton<Http.SlimDeploymentDiagnostics>();
         services.TryAddScoped<SlimEmailDispatcher>();
         services.AddHostedService<SlimEmailBackgroundService>();
 

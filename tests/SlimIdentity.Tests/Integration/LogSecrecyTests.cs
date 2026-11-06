@@ -14,30 +14,6 @@ namespace SlimIdentity.Tests.Integration;
 /// </summary>
 public sealed class LogSecrecyTests
 {
-    private sealed class CapturingLoggerProvider : ILoggerProvider
-    {
-        public ConcurrentQueue<string> Entries { get; } = new();
-        public ILogger CreateLogger(string categoryName) => new Logger(this, categoryName);
-        public void Dispose() { }
-
-        private sealed class Logger(CapturingLoggerProvider owner, string category) : ILogger
-        {
-            public IDisposable? BeginScope<TState>(TState state) where TState : notnull
-            {
-                owner.Entries.Enqueue($"[scope {category}] {state}");
-                return null;
-            }
-
-            public bool IsEnabled(LogLevel logLevel) => true;
-
-            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
-            {
-                var structured = state is IEnumerable<KeyValuePair<string, object?>> kv ? string.Join(" | ", kv.Select(p => $"{p.Key}={p.Value}")) : "";
-                owner.Entries.Enqueue($"[{logLevel} {category} {eventId.Id}] {formatter(state, exception)} {structured} {exception}");
-            }
-        }
-    }
-
     [Fact]
     public async Task No_secret_or_address_is_ever_logged()
     {

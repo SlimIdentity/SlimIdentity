@@ -30,7 +30,8 @@ var app = builder.Build();
 app.UseForwardedHeaders();      // first – before UseHttpsRedirection, UseRateLimiter, UseAuthentication
 ```
 
-- By default only **loopback** proxies are trusted. In Docker/Kubernetes the headers are otherwise **silently ignored**.
+- By default only **loopback** proxies are trusted. In Docker/Kubernetes the headers are otherwise ignored – SlimIdentity
+  then logs warning `8001` once per proxy address, so the mistake does not stay silent.
 - `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true` enables For + Proto but trusts **every** sender – only if the app is
   reachable exclusively through the proxy.
 - The proxy must pass the original host (nginx: `proxy_set_header Host $host;`) or set `X-Forwarded-Host`, and set
@@ -46,7 +47,5 @@ If the proxy maps `https://example.com/api/` to the app root, call `app.UsePathB
 
 ## Multiple instances
 
-- Persist the Data Protection key ring in a shared location (`PersistKeysToDbContext`, `PersistKeysToAzureBlobStorage`,
-  `PersistKeysToStackExchangeRedis`, a shared volume, …) – otherwise a cookie or link from one instance is invalid on
-  another, and all sessions are lost on restart.
-- The built-in rate limiter is per instance. With N instances the effective limit is N × `PermitLimit`.
+Shared key ring, same application name and secret, clocks, per-instance limits and the diagnostics for all of it:
+[Running several instances](multiple-instances.md).

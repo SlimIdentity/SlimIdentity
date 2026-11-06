@@ -23,6 +23,7 @@
 - [Client certificates (mTLS)](guides/client-certificates.md)
 - [Data Protection key ring](guides/data-protection.md) – required for production
 - [Running behind a reverse proxy](guides/reverse-proxy.md) – TLS termination, forwarded headers
+- [Running several instances](guides/multiple-instances.md) – load balancer checklist, no sticky sessions, diagnostics
 - [Observability](guides/observability.md) – metrics (OpenTelemetry) and log event ids
 - [Native AOT](guides/native-aot.md)
 - [Migrating from ASP.NET Core Identity](guides/migrating-from-aspnet-identity.md)

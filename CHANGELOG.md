@@ -55,6 +55,9 @@ First public release (1.0.0) in preparation.
 - Playground in the demo (every flow clickable, fake mailbox, virtual authenticator, request log),
   `docker compose up` and a local [Breakme mode](BREAKME.md) with secret passwords for the seeded accounts.
 - The TypeScript client template is type-checked (`tsc --strict`) in CI.
+- Several instances: deployment diagnostics (unapplied forwarded headers, local key ring, missing Data Protection
+  application name, exchange codes without a shared store – log events 8001–8004), a two-instance test suite proving
+  that no sticky sessions are needed, and the guide [Running several instances](docs/guides/multiple-instances.md).
 - Native AOT and trimming compatibility.
 - Samples for EF Core, Dapper, MailKit, SendGrid, outbox delivery, LDAP, client certificates (mTLS), Data Protection
   key ring persistence, Have I Been Pwned, admin endpoints and a TypeScript client (incl. QR code for TOTP setup).

@@ -92,6 +92,7 @@ internal abstract class SlimClientRateLimiterPolicy(
     Func<SlimRateLimitOptions, (int PermitLimit, TimeSpan Window)> limits) : IRateLimiterPolicy<string>
 {
     private readonly SlimRateLimitPartitioner? _custom = services.GetService<SlimRateLimitPartitioner>();
+    private readonly SlimDeploymentDiagnostics? _diagnostics = services.GetService<SlimDeploymentDiagnostics>();
 
     /// <summary>
     /// Client key: IPv4 address, or the IPv6 network prefix (a client usually controls a whole /64 and could rotate
@@ -125,7 +126,9 @@ internal abstract class SlimClientRateLimiterPolicy(
     {
         var o = options.Value.RateLimit;
         var (permitLimit, window) = limits(o);
-        var key = _custom?.GetKey(httpContext) ?? ClientKey(httpContext.Connection.RemoteIpAddress, o.IPv6PrefixLength);
+        var custom = _custom?.GetKey(httpContext);
+        if (custom is null) _diagnostics?.InspectRequest(httpContext);   // the IP is the key – is it the client's?
+        var key = custom ?? ClientKey(httpContext.Connection.RemoteIpAddress, o.IPv6PrefixLength);
         return RateLimitPartition.GetFixedWindowLimiter(key, _ => new FixedWindowRateLimiterOptions
         {
             PermitLimit = permitLimit,

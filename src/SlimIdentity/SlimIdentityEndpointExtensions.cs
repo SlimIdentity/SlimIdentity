@@ -36,6 +36,8 @@ public static class SlimIdentityEndpointExtensions
                 "SlimIdentity: AddNullEmailSender() in the Production environment – it would write live password-reset links and " +
                 "2FA codes to the log. Register a real sender with .AddEmailSender<T>(), or pass allowInProduction: true deliberately.");
 
+        sp.GetService<SlimDeploymentDiagnostics>()?.InspectStartup(sp);
+
         var group = endpoints.MapGroup(o.RoutePrefix)
             .WithTags(SlimIdentityDefaults.OpenApiTag)
             .AddEndpointFilter<RouteGroupBuilder, SlimCsrfEndpointFilter>();

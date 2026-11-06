@@ -112,6 +112,7 @@ All packages are released together with the same version.
   [client certificates](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/client-certificates.md) ·
   [Data Protection](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/data-protection.md) ·
   [reverse proxy](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/reverse-proxy.md) ·
+  [several instances](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/multiple-instances.md) ·
   [observability](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/observability.md) ·
   [Native AOT](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/native-aot.md) ·
   [migrating from ASP.NET Core Identity](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/migrating-from-aspnet-identity.md)

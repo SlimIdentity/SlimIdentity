@@ -21,7 +21,7 @@ Test names refer to `tests/SlimIdentity.Tests` (`Integration/…`, `Unit/Propert
 | A4 | Address variants: case, Unicode normalization, whitespace, `+tag`, homoglyphs | covered – `AttackScenario.A4_*`. **Fixed:** NFC and NFD forms of one address created two accounts; addresses are now trimmed and NFC-normalized. `+tag` and homoglyphs are different addresses by design. |
 | A5 | Password longer than the maximum, huge bodies → rejected before hashing | covered – `Login.Oversized_password_is_rejected_without_distinguishing_accounts` (body size: Kestrel limits, host) |
 | A6 | Permanent lockout of a victim → growth capped (≤ 1 h) | covered – `Login.Lockout_is_progressive_and_hidden_by_default`, unit `LockoutDuration` |
-| A7 | `X-Forwarded-For` spoofing to evade the rate limit → ignored without configured proxies | covered – `OpenScenario.A7_spoofed_forwarded_headers_do_not_reset_the_rate_limit`; trusted proxies are the host's `UseForwardedHeaders` ([guide](guides/reverse-proxy.md)) |
+| A7 | `X-Forwarded-For` spoofing to evade the rate limit → ignored without configured proxies | covered – `OpenScenario.A7_spoofed_forwarded_headers_do_not_reset_the_rate_limit`; trusted proxies are the host's `UseForwardedHeaders` ([guide](guides/reverse-proxy.md)); a forgotten configuration is reported (`8001`, `DeploymentDiagnostics.*`) |
 | A8 | IPv6 rotation within a /64 → one bucket | covered – `PropertyTests.All_addresses_of_one_ipv6_network_share_a_rate_limit_key` |
 | A9 | `/register` timing (write only for new addresses) | design – known limitation in the [security model](security.md#known-limitations); only measurable against the real database of a deployment, not in-process |
 
@@ -89,7 +89,7 @@ Test names refer to `tests/SlimIdentity.Tests` (`Integration/…`, `Unit/Propert
 | F3 | Same provider key at another provider → no mix-up | covered – conformance (external-login store) |
 | F4 | Exchange code reused, parallel, after expiry | covered – `ExternalLogin.The_exchange_code_works_only_once` (both modes), `OpenScenario.F4_*` (8 parallel redemptions, expiry) |
 | F5 | Missing or forged `state` / correlation (OAuth CSRF) | design – handled by the ASP.NET Core remote handlers |
-| F6 | Several instances without a shared store → replay window | design – documented in the [security model](security.md#known-limitations) |
+| F6 | Several instances without a shared store → replay window | covered – with a refresh-token store the code is single-use across instances; without one, start-up warning `8004` ([several instances](guides/multiple-instances.md)), `DeploymentDiagnostics.External_login_without_refresh_store_is_reported_in_production` |
 | F7 | Credentials or codes in logs, referrers, URL history | covered – `ExternalLogin.New_external_user_…` (no tokens in URLs), `LogSecrecy.No_secret_or_address_is_ever_logged` |
 
 ## G. Admin, impersonation, API keys
