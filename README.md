@@ -10,13 +10,20 @@ SlimIdentity gives SPAs (Blazor, React, Vue, …) and mobile apps a complete, be
 while your project keeps full control over its database, ORM and user model. It sits between hand-written login
 endpoints (easy to get wrong) and `Microsoft.AspNetCore.Identity` / `MapIdentityApi` (a fixed table schema).
 
+**A facade, not a crypto library.** SlimIdentity implements no cryptography of its own: password hashing, cookies, JWTs,
+encryption and rate limiting are the ASP.NET Core building blocks you already trust. What it adds are the *flows* –
+the order of checks, uniform answers, single-use tokens, safe behaviour under parallel requests. The data stays in
+your database, behind small interfaces you implement; a few of their methods carry security guarantees, so start from
+the provided samples ([how it works](https://github.com/timmkautz/slimidentity/blob/main/docs/how-it-works.md)).
+
 > **Status: pre-release.** Working towards 1.0 – the API may still change until then, and the code has not been
 > independently audited yet. Please report security issues privately – see
 > [SECURITY.md](https://github.com/timmkautz/slimidentity/blob/main/SECURITY.md).
 
 ## Features
 
-- **Bring your own database** – implement one small interface (`ISlimUserStore`); no EF Core, Dapper or driver dependency.
+- **Bring your own database** – one required store (`ISlimUserStore`, ready-to-copy for EF Core and Dapper); no EF
+  Core, Dapper or driver dependency.
 - **Cookies or JWT** per request: HttpOnly/Secure/SameSite cookies with CSRF protection, or access + refresh tokens
   with rotation, reuse detection and an absolute session lifetime.
 - **Server-side sessions** (optional): real per-device logout, device list, sign out everywhere.
@@ -41,22 +48,22 @@ dotnet add package SlimIdentity --prerelease
 
 ```csharp
 builder.Services.AddSlimIdentity(builder.Configuration.GetSection("SlimIdentity"))
-    .AddUserStore<MyUserStore>()              // required: your database
-    .AddEmailSender<MyEmailSender>()          // required (or .AddNullEmailSender() for development)
-    .AddRefreshTokenStore<MyTokenStore>()     // optional → /auth/refresh
-    .AddSessionStore<MySessionStore>()        // optional → per-device logout, /auth/sessions
-    .AddTwoFactorStore<MyTotpStore>();        // optional → /auth/login/2fa, /auth/2fa/*
+    .AddUserStore<MyUserStore>()              // required: your database (copy from samples/templates)
+    .AddNullEmailSender();                    // development; production: .AddEmailSender<MyEmailSender>()
 
 var app = builder.Build();
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
-app.MapSlimIdentityApi();   // /auth/login, /auth/refresh, /auth/me, …
+app.MapSlimIdentityApi();   // /auth/register, /auth/login, /auth/me, …
 ```
 
 ```json
-{ "SlimIdentity": { "Tokens": { "JwtSecret": "<at least 32 random bytes, from a secret store>" } } }
+{ "SlimIdentity": { "Links": { "BaseUrl": "https://app.example.com" } } }
 ```
+
+That is a complete cookie-based setup. Add `Tokens.JwtSecret` for bearer tokens, and further capabilities – refresh
+tokens, sessions, 2FA, external login – with one line each. Step by step: **[minimal setup](https://github.com/timmkautz/slimidentity/blob/main/docs/minimal-setup.md)**.
 
 Ready-to-copy stores for **EF Core** and **Dapper**, mail senders (**MailKit**, **SendGrid**, outbox), LDAP, admin
 endpoints and a **TypeScript client** are in [`samples/`](https://github.com/timmkautz/slimidentity/tree/main/samples).
@@ -64,7 +71,9 @@ A runnable demo: `dotnet run --project samples/SlimIdentity.Demo` (users and req
 
 ## Documentation
 
-- [Getting started](https://github.com/timmkautz/slimidentity/blob/main/docs/getting-started.md)
+- [Minimal setup](https://github.com/timmkautz/slimidentity/blob/main/docs/minimal-setup.md) ·
+  [Getting started](https://github.com/timmkautz/slimidentity/blob/main/docs/getting-started.md) ·
+  [How it works](https://github.com/timmkautz/slimidentity/blob/main/docs/how-it-works.md)
 - [Configuration reference](https://github.com/timmkautz/slimidentity/blob/main/docs/configuration.md) ·
   [Endpoint reference](https://github.com/timmkautz/slimidentity/blob/main/docs/endpoints.md) ·
   [Security model](https://github.com/timmkautz/slimidentity/blob/main/docs/security.md)

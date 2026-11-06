@@ -1,6 +1,8 @@
 # Getting started
 
-This walks through a minimal setup: JWT login for a SPA or mobile app, backed by your own database.
+This walks through a setup with JWT login for a SPA or mobile app, backed by your own database, and explains each
+step. Just want it running? See the [minimal setup](minimal-setup.md). How the pieces fit together – and why some
+store methods must be atomic – is described in [How SlimIdentity works](how-it-works.md).
 
 ## 1. Install
 
@@ -34,6 +36,8 @@ public interface ISlimUserStore
 
 The narrow methods exist because sign-in requests are slow (password hashing) and run in parallel: they must never
 write back a whole, possibly outdated `SlimUser` – that could undo a password change that happened in the meantime.
+Copy the store from the samples rather than writing it from scratch – the rules that matter for security are listed in
+[How SlimIdentity works](how-it-works.md#your-part-the-stores).
 
 `SlimUser` is a plain transfer object with the security fields only (`Id`, `Email`, `PasswordHash`, `SecurityStamp`,
 `IsActive`, `EmailConfirmed`, `FailedLoginAttempts`, `LockoutEndUtc`, `TwoFactorEnabled`). Your own user entity stays

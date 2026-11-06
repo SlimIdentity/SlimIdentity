@@ -2,7 +2,9 @@
 
 **Start here**
 
-- [Getting started](getting-started.md) – install, implement the user store, first login
+- [Minimal setup](minimal-setup.md) – the shortest path: one table, one store, a few lines
+- [How SlimIdentity works](how-it-works.md) – a facade over ASP.NET Core; what it does, and what your stores must guarantee
+- [Getting started](getting-started.md) – the same setup explained step by step, with JWT and refresh tokens
 - [Configuration reference](configuration.md) – every option with its default
 - [Endpoint reference](endpoints.md) – routes, request/response bodies, status codes
 - [Security model](security.md) – what SlimIdentity protects against, and what remains your job
