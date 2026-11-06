@@ -42,6 +42,19 @@ dotnet publish samples/SlimIdentity.Demo -c Release -r linux-x64   # or win-x64 
 
 CI builds with warnings as errors, runs all tests and publishes the demo as Native AOT.
 
+Optional local runs:
+
+```bash
+# templates against real database servers (CI uses service containers); databases are dropped and recreated
+docker run -d --rm --name slim-pg -e POSTGRES_PASSWORD=slimidentity -e POSTGRES_DB=conformance -p 55432:5432 postgres:17
+docker run -d --rm --name slim-mssql -e ACCEPT_EULA=Y -e "MSSQL_SA_PASSWORD=Slim-Identity-2026!" -p 51433:1433 mcr.microsoft.com/mssql/server:2022-latest
+SLIMIDENTITY_TEST_POSTGRES="Host=localhost;Port=55432;Database=conformance;Username=postgres;Password=slimidentity" \
+SLIMIDENTITY_TEST_SQLSERVER="Server=localhost,51433;User Id=sa;Password=Slim-Identity-2026!;TrustServerCertificate=true" \
+  dotnet test tests/SlimIdentity.Samples.Tests
+# timing measurement of attack scenario A3 (before a release, ~30 s)
+SLIMIDENTITY_TIMING=1 dotnet test tests/SlimIdentity.Tests --filter TimingTests
+```
+
 ## Pull requests
 
 - Keep changes focused; one topic per pull request.

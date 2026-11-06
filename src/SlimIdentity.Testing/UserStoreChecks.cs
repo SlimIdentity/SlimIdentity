@@ -45,6 +45,24 @@ internal static class UserStoreChecks
                 }
             });
 
+        await run.CheckAsync(Store, "treats quotes, SQL metacharacters and LIKE wildcards in addresses as plain text",
+            "Use parameterized statements only (never build SQL from the address) and compare with '=' – not LIKE, whose '%' and '_' would match other addresses.",
+            async () =>
+            {
+                var id = Guid.NewGuid().ToString("N");
+                var tricky = $"o'brien\"--;{id}@{run.Options.EmailDomain}";
+                var user = await run.NewUserAsync(tricky);
+                var found = await stores.UseAsync<ISlimUserStore, SlimUser?>(s => s.FindByEmailAsync(tricky, ct));
+                Expect.Equal(user.Id, found?.Id, "FindByEmailAsync with quotes and comment characters");
+
+                var underscore = await run.NewUserAsync($"wild_card-{id}@{run.Options.EmailDomain}");
+                var wildcard = await stores.UseAsync<ISlimUserStore, SlimUser?>(s => s.FindByEmailAsync($"wild%card-{id}@{run.Options.EmailDomain}", ct));
+                Expect.True(wildcard is null, "FindByEmailAsync(\"wild%card…\") found \"wild_card…\" – the lookup interprets LIKE wildcards.");
+                var single = await stores.UseAsync<ISlimUserStore, SlimUser?>(s => s.FindByEmailAsync($"wildXcard-{id}@{run.Options.EmailDomain}", ct));
+                Expect.True(single is null, "FindByEmailAsync(\"wildXcard…\") found \"wild_card…\" – '_' is treated as a wildcard.");
+                Expect.Equal(underscore.Id, (await run.ReloadAsync(underscore)).Id, "the user with '_' in the address");
+            });
+
         await run.CheckAsync(Store, "CreateAsync returns null for a taken address (any casing)",
             "Let the unique index on the normalized address decide; catch the unique violation (or use ON CONFLICT DO NOTHING) and return null.",
             async () =>

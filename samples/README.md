@@ -8,8 +8,10 @@
 The templates are **not** NuGet dependencies and are not shipped. Copy them into your project and adapt them – this
 keeps the core package free of EF Core, Dapper, SMTP & co. CI compiles them against the current library and runs the
 [`SlimIdentity.Testing`](../src/SlimIdentity.Testing/README.md) conformance checks against the EF Core stores
-(`tests/SlimIdentity.Samples.Tests`, SQLite), so they never drift from the API or the store contracts. The Dapper
-stores target PostgreSQL – run the checks against your own database after adapting them.
+(`tests/SlimIdentity.Samples.Tests`: EF Core on SQLite, PostgreSQL and SQL Server, Dapper on PostgreSQL – the servers
+as CI service containers), so they never drift from the API or the store contracts. Locally the server runs are
+skipped unless `SLIMIDENTITY_TEST_POSTGRES` / `SLIMIDENTITY_TEST_SQLSERVER` hold connection strings to disposable
+servers (see CONTRIBUTING).
 
 | Template | Content | Packages in your host |
 | :--- | :--- | :--- |

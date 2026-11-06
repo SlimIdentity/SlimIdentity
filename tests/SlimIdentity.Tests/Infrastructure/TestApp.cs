@@ -190,6 +190,18 @@ public sealed class ApiClient(HttpClient http)
         return content.Length == 0 ? default : JsonDocument.Parse(content).RootElement.Clone();
     }
 
+    /// <summary>POST with a raw body (malformed JSON, other content types).</summary>
+    public async Task<HttpResponseMessage> SendRawAsync(string path, string body, string contentType)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, new Uri(new Uri("https://localhost"), path))
+        {
+            Content = new StringContent(body, System.Text.Encoding.UTF8, contentType),
+        };
+        if (BearerToken is not null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", BearerToken);
+        if (SendCsrfHeader) request.Headers.Add("X-CSRF", "1");
+        return await http.SendAsync(request);
+    }
+
     public async Task<HttpResponseMessage> SendAsync(HttpMethod method, string path, object? body, IReadOnlyDictionary<string, string>? headers = null)
     {
         using var request = new HttpRequestMessage(method, new Uri(new Uri("https://localhost"), path));

@@ -16,6 +16,30 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # disposable databases for the store conformance checks of the templates (tests/SlimIdentity.Samples.Tests):
+    # EF Core on PostgreSQL and SQL Server, Dapper on PostgreSQL (SQLite runs without a service)
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: slimidentity
+          POSTGRES_DB: conformance
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: Y
+          MSSQL_SA_PASSWORD: Slim-Identity-2026!
+        ports: ['1433:1433']
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P Slim-Identity-2026! -Q 'SELECT 1'"
+          --health-interval 10s --health-timeout 5s --health-retries 12
+    env:
+      SLIMIDENTITY_TEST_POSTGRES: Host=localhost;Port=5432;Database=conformance;Username=postgres;Password=slimidentity
+      SLIMIDENTITY_TEST_SQLSERVER: Server=localhost,1433;User Id=sa;Password=Slim-Identity-2026!;TrustServerCertificate=true
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
