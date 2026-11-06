@@ -62,6 +62,10 @@ jobs:
       - name: Native AOT publish (demo)
         run: dotnet publish samples/SlimIdentity.Demo --configuration Release --runtime linux-x64 --output aot
 
+      # the TypeScript client template is type-checked like the C# templates are compiled (Node is preinstalled)
+      - name: Type-check the TypeScript client
+        run: npx --yes -p typescript@5.8.3 tsc -p samples/templates/Frontend
+
       - name: Check for vulnerable packages
         run: dotnet list SlimIdentity.slnx package --vulnerable --include-transitive 2>&1 | tee vulnerable.txt && ! grep -q "has the following vulnerable packages" vulnerable.txt
 

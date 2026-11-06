@@ -10,11 +10,15 @@ using SlimIdentity;
 using SlimIdentity.Contracts;
 using SlimIdentity.Security;
 using SlimIdentity.Demo;
+using Microsoft.Extensions.Options;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddOpenApi();
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.TypeInfoResolverChain.Add(DemoJsonContext.Default));
+builder.Services.AddSingleton<DemoSettings>();
+builder.Services.AddSingleton<DemoMailbox>();
+builder.Services.AddSingleton(TimeProvider.System);
 
 // Reverse proxy with TLS termination: take client IP, scheme and host from X-Forwarded-* – but only from
 // trusted proxies (default: loopback only). Without this the CSRF origin check sees http://, OAuth builds
@@ -63,9 +67,27 @@ var slim = builder.Services.AddSlimIdentity(
 
 var app = builder.Build();
 
+var demo = app.Services.GetRequiredService<DemoSettings>();
+if (demo.Breakme)
+{
+    Console.ForegroundColor = ConsoleColor.Yellow;
+    Console.WriteLine($"""
+
+        ===== BREAKME MODE =====================================================
+        Seeded accounts have random passwords (only shown here, for the operator):
+          admin@demo.local  {demo.AdminPassword}
+          user@demo.local   {demo.UserPassword}
+        Rules and goals: BREAKME.md
+        ========================================================================
+        """);
+    Console.ResetColor();
+}
+
 // 2. Standard pipeline – order stays explicit in the host
 app.UseForwardedHeaders(); // first: everything below needs the real scheme, host and client IP
 app.UseHttpsRedirection();
+app.UseDefaultFiles();     // playground: wwwroot/index.html
+app.UseStaticFiles();
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
@@ -79,8 +101,13 @@ app.MapSlimIdentityApi();
 // Demo endpoints of the "host application"
 // ---------------------------------------------------------------------------------------------
 
-app.MapGet("/", () => Results.Text(
-    "SlimIdentity demo – see SlimIdentity.Demo.http. Users: admin@demo.local / Admin123!, user@demo.local / User1234!"));
+// Playground (wwwroot/index.html): fake mailbox and the links from the mails (they point back into the page)
+app.MapGet("/api/playground/info", (DemoSettings settings, IOptions<SlimIdentityOptions> options) =>
+    new DemoInfo(settings.Breakme, !string.IsNullOrEmpty(options.Value.Tokens.JwtSecret), ["admin@demo.local", "user@demo.local"]));
+app.MapGet("/api/playground/mailbox", (string address, DemoMailbox mailbox) => mailbox.For(address))
+    .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy);
+foreach (var page in new[] { "/verify-email", "/reset-password", "/accept-invitation", "/confirm-email-change" })
+    app.MapGet(page, (IWebHostEnvironment env) => Results.File(Path.Combine(env.WebRootPath, "index.html"), "text/html"));
 
 app.MapGet("/api/hello", (ClaimsPrincipal user) =>
         new HelloResponse($"Hello {user.GetSlimEmail()}", user.GetSlimUserId(), user.GetImpersonatorId()))
@@ -192,5 +219,7 @@ internal sealed record UserSummary(string Id, string Email, bool IsActive, bool 
 [JsonSerializable(typeof(SudoActionResponse))]
 [JsonSerializable(typeof(List<UserSummary>))]
 [JsonSerializable(typeof(SlimStatusResponse))]
+[JsonSerializable(typeof(DemoInfo))]
+[JsonSerializable(typeof(IReadOnlyList<DemoMail>))]
 [JsonSourceGenerationOptions(JsonSerializerDefaults.Web)]
 internal sealed partial class DemoJsonContext : JsonSerializerContext;

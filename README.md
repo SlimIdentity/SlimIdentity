@@ -24,8 +24,9 @@ the provided samples and verify your stores with the
 
 ## Features
 
-- **Bring your own database** – one required store (`ISlimUserStore`, ready-to-copy for EF Core and Dapper); no EF
-  Core, Dapper or driver dependency.
+- **Your database, your user entity** – the `SlimIdentity.EntityFrameworkCore` package stores everything in your
+  `DbContext` (verified on SQLite, PostgreSQL and SQL Server); any other database via one interface
+  (`ISlimUserStore`, ready-to-copy for Dapper). The core package has no database dependency at all.
 - **Cookies or JWT** per request: HttpOnly/Secure/SameSite cookies with CSRF protection, or access + refresh tokens
   with rotation, reuse detection and an absolute session lifetime.
 - **Server-side sessions** (optional): real per-device logout, device list, sign out everywhere.
@@ -46,11 +47,12 @@ the provided samples and verify your stores with the
 
 ```bash
 dotnet add package SlimIdentity --prerelease
+dotnet add package SlimIdentity.EntityFrameworkCore --prerelease   # or bring your own store
 ```
 
 ```csharp
 builder.Services.AddSlimIdentity(builder.Configuration.GetSection("SlimIdentity"))
-    .AddUserStore<MyUserStore>()              // required: your database (copy from samples/templates)
+    .AddEntityFrameworkStores<AppDbContext, AppUser, Guid>()   // your DbContext, your user entity
     .AddNullEmailSender();                    // development; production: .AddEmailSender<MyEmailSender>()
 
 var app = builder.Build();
@@ -67,9 +69,29 @@ app.MapSlimIdentityApi();   // /auth/register, /auth/login, /auth/me, …
 That is a complete cookie-based setup. Add `Tokens.JwtSecret` for bearer tokens, and further capabilities – refresh
 tokens, sessions, 2FA, external login – with one line each. Step by step: **[minimal setup](https://github.com/timmkautz/slimidentity/blob/main/docs/minimal-setup.md)**.
 
-Ready-to-copy stores for **EF Core** and **Dapper**, mail senders (**MailKit**, **SendGrid**, outbox), LDAP, admin
-endpoints and a **TypeScript client** are in [`samples/`](https://github.com/timmkautz/slimidentity/tree/main/samples).
-A runnable demo: `dotnet run --project samples/SlimIdentity.Demo` (users and requests in `SlimIdentity.Demo.http`).
+Ready-to-copy stores for **Dapper** (and EF Core, if you need full control), mail senders (**MailKit**, **SendGrid**,
+outbox), LDAP, admin endpoints and a **TypeScript client** are in [`samples/`](https://github.com/timmkautz/slimidentity/tree/main/samples).
+
+## Try it
+
+```bash
+docker compose up --build      # → http://localhost:8080
+```
+
+A playground for every flow – cookies and bearer tokens, 2FA with a virtual authenticator, sessions, password reset,
+impersonation – with a fake mailbox and a request log. Want to attack it? [`BREAKME.md`](https://github.com/timmkautz/slimidentity/blob/main/BREAKME.md).
+Without Docker: `dotnet run --project samples/SlimIdentity.Demo` → <http://localhost:5209> (seeded users
+`admin@demo.local` / `Admin123!` and `user@demo.local` / `User1234!`; requests in `SlimIdentity.Demo.http`).
+
+## Packages
+
+| Package | Purpose |
+| :--- | :--- |
+| `SlimIdentity` | The endpoints, flows and security mechanisms. No database dependency; Native AOT compatible. |
+| `SlimIdentity.EntityFrameworkCore` | All stores on your `DbContext` and user entity (EF Core itself is not AOT compatible). |
+| `SlimIdentity.Testing` | Conformance checks for your own store implementations – for test projects. |
+
+All packages are released together with the same version.
 
 ## Documentation
 

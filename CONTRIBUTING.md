@@ -26,9 +26,11 @@ The solution contains:
 | :--- | :--- |
 | `src/SlimIdentity` | the main NuGet package |
 | `src/SlimIdentity.Testing` | NuGet package: conformance checks for store implementations |
+| `src/SlimIdentity.EntityFrameworkCore` | NuGet package: EF Core stores on the host's `DbContext` and user entity |
+| `tests/SlimIdentity.EntityFrameworkCore.Tests` | conformance of the EF Core package (Guid and int keys) on SQLite, PostgreSQL, SQL Server; end-to-end run |
 | `tests/SlimIdentity.Tests` | unit and integration tests (in-memory host, `FakeTimeProvider`), conformance of the test stores |
 | `tests/SlimIdentity.Samples.Tests` | compiles the copy-paste templates in `samples/` and runs the conformance checks against the EF Core stores (SQLite) |
-| `samples/SlimIdentity.Demo` | runnable demo (`dotnet run --project samples/SlimIdentity.Demo`, see the `.http` file) |
+| `samples/SlimIdentity.Demo` | runnable demo and playground (`dotnet run --project samples/SlimIdentity.Demo` or `docker compose up --build`); Breakme mode for attackers: [BREAKME.md](BREAKME.md) |
 
 All packages in `src/` share their metadata (`src/Directory.Build.props`) and get the same version from the git tag.
 A change to a store contract needs a matching check in `SlimIdentity.Testing`.
@@ -51,6 +53,8 @@ docker run -d --rm --name slim-mssql -e ACCEPT_EULA=Y -e "MSSQL_SA_PASSWORD=Slim
 SLIMIDENTITY_TEST_POSTGRES="Host=localhost;Port=55432;Database=conformance;Username=postgres;Password=slimidentity" \
 SLIMIDENTITY_TEST_SQLSERVER="Server=localhost,51433;User Id=sa;Password=Slim-Identity-2026!;TrustServerCertificate=true" \
   dotnet test tests/SlimIdentity.Samples.Tests
+# type check of the TypeScript client (CI does the same; without local Node: run it in a node:22 container)
+npx --yes -p typescript@5.8.3 tsc -p samples/templates/Frontend
 # timing measurement of attack scenario A3 (before a release, ~30 s)
 SLIMIDENTITY_TIMING=1 dotnet test tests/SlimIdentity.Tests --filter TimingTests
 ```

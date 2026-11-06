@@ -12,8 +12,12 @@ dotnet add package SlimIdentity --prerelease
 
 ## 2. Implement the user store
 
-SlimIdentity never touches a database. You implement `ISlimUserStore` against whatever you use
-(EF Core, Dapper, a REST service, …). Complete EF Core and Dapper versions are in
+> **Using EF Core?** Skip this step: the `SlimIdentity.EntityFrameworkCore` package implements every store on your own
+> `DbContext` and user entity – see the [minimal setup](minimal-setup.md). This section explains the contract for
+> everything else.
+
+SlimIdentity's core never touches a database. You implement `ISlimUserStore` against whatever you use
+(Dapper, another ORM, a REST service, …). Complete Dapper and EF Core versions are in
 [`samples/`](https://github.com/timmkautz/slimidentity/tree/main/samples); the contract is small:
 
 ```csharp

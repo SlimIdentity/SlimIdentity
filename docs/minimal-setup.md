@@ -1,24 +1,26 @@
 # Minimal setup
 
-The shortest path to a working, secure login: one table, one class, a few lines in `Program.cs`. Everything else –
-2FA, sessions, refresh tokens, external login – can be added later without changing what you build here.
+The shortest path to a working, secure login with Entity Framework Core: your user entity, three small additions, a
+few lines in `Program.cs`. Not using EF Core? Then step 3 is one copied store class instead – see
+[without EF Core](#without-ef-core).
 
 **What you get:** `/auth/register`, `/auth/login`, `/auth/logout`, `/auth/me`, e-mail verification, password reset and
-change, e-mail change, invitations – with rate limiting, account lockout, CSRF protection and enumeration resistance
-already active.
+change, e-mail change, invitations, server-side sessions, 2FA and external login (once you add a provider) – with rate
+limiting, account lockout, CSRF protection and enumeration resistance already active.
 
 **What you provide:**
 
 | | Effort |
 | :--- | :--- |
-| A user table with nine security columns | one migration |
-| `ISlimUserStore` – the bridge to that table | copy one class from the samples |
+| Thirteen properties on your user entity | copy-paste |
+| One line in `OnModelCreating`, one migration | `ApplySlimIdentity<AppUser, Guid>()` |
 | `ISlimEmailSender` – sends the mails | `AddNullEmailSender()` while developing |
 
 ## 1. Install
 
 ```bash
 dotnet add package SlimIdentity --prerelease
+dotnet add package SlimIdentity.EntityFrameworkCore --prerelease
 ```
 
 ## 2. Program.cs
@@ -27,12 +29,13 @@ dotnet add package SlimIdentity --prerelease
 using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 using SlimIdentity;
+using SlimIdentity.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddDbContext<AppDbContext>(o => o.UseSqlite("Data Source=app.db"));   // your database
 builder.Services.AddSlimIdentity(builder.Configuration.GetSection("SlimIdentity"))
-    .AddUserStore<EfCoreUserStore>()
+    .AddEntityFrameworkStores<AppDbContext, AppUser, Guid>()
     .AddNullEmailSender();          // development: links and codes go to the log
 
 var app = builder.Build();
@@ -62,33 +65,46 @@ from user secrets or a key vault) and JWT bearer tokens are enabled as well:
 dotnet user-secrets set "SlimIdentity:Tokens:JwtSecret" "$(openssl rand -base64 48)"
 ```
 
-## 3. The user table and the store
+## 3. The user entity and the model
 
-Your user entity keeps its own shape – it only needs these columns (names are up to you):
+Your user entity keeps its own shape and business data – it implements `ISlimUserEntity<TKey>` with plain public
+properties (keys: `Guid`, `int`, `long` or `string`):
 
-| Column | Type | Note |
-| :--- | :--- | :--- |
-| `Id` | `Guid` / `int` / `string` | |
-| `Email` | `string` | |
-| `NormalizedEmail` | `string` | upper-cased, **unique index** – lookups are case-insensitive and duplicates impossible |
-| `PasswordHash` | `string` | empty for external-login and invited users |
-| `SecurityStamp` | `string` | |
-| `IsActive` | `bool` | `false` = banned / deactivated |
-| `EmailConfirmed` | `bool` | |
-| `FailedLoginAttempts` | `int` | |
-| `LockoutEndUtc` | `DateTimeOffset?` | |
-| `TwoFactorEnabled` | `bool` | stays `false` until you add 2FA |
+```csharp
+public class AppUser : ISlimUserEntity<Guid>
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Email { get; set; } = "";
+    public string NormalizedEmail { get; set; } = "";
+    public string PasswordHash { get; set; } = "";
+    public string SecurityStamp { get; set; } = "";
+    public bool IsActive { get; set; } = true;
+    public bool EmailConfirmed { get; set; }
+    public int FailedLoginAttempts { get; set; }
+    public DateTimeOffset? LockoutEndUtc { get; set; }
+    public bool TwoFactorEnabled { get; set; }
+    public string? TotpSecret { get; set; }
+    public long? LastTwoFactorCodeAt { get; set; }
+    public long? LastTwoFactorChallengeAt { get; set; }
 
-Then copy **`EfCoreUserStore`** from
-[`samples/templates/EfCore/EfCoreStores.cs`](../samples/templates/EfCore/EfCoreStores.cs) (only this class – the others
-belong to optional features) and adapt the entity name. If you have no roles yet, let `GetClaimsAsync` return an empty
-list. Using Dapper instead? Take `DapperUserStore` and the `users` table from
-[`samples/templates/Dapper`](../samples/templates/Dapper).
+    public string? DisplayName { get; set; }   // yours – SlimIdentity never sees it
+}
 
-> Copy the store rather than writing it from scratch: several of its methods must be **atomic single statements**
-> (e.g. `IncrementFailedLoginAttemptsAsync`), and the security guarantees depend on that – see
-> [How SlimIdentity works](how-it-works.md#your-part-the-stores). Once adapted, verify it against your database with
-> one call from `SlimIdentity.Testing` ([how](how-it-works.md#verify-your-stores)).
+public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
+{
+    public DbSet<AppUser> Users => Set<AppUser>();
+    protected override void OnModelCreating(ModelBuilder b) => b.ApplySlimIdentity<AppUser, Guid>();
+}
+```
+
+`ApplySlimIdentity` adds the unique index on the normalized address and four small tables (refresh tokens, sessions,
+recovery codes, external logins). Create the migration: `dotnet ef migrations add SlimIdentity`. Roles or other claims
+for cookies and tokens come from an `ISlimUserClaimsProvider<AppUser>` you register – see the
+[package README](../src/SlimIdentity.EntityFrameworkCore/README.md).
+
+The package is verified in CI against SQLite, PostgreSQL and SQL Server with the
+[store conformance checks](how-it-works.md#verify-your-stores) – atomic counters, single-use tokens and unique addresses
+included.
 
 ## 4. Try it
 
@@ -126,13 +142,23 @@ value); the [TypeScript client](../samples/templates/Frontend/slimIdentityClient
 
 ## Adding more later
 
-Each capability is one line plus its store – nothing above changes:
+With the EF Core package, sessions, refresh tokens, 2FA and external-login storage are already in place (leave stores
+out with `AddEntityFrameworkStores<…>(o => o.TwoFactor = false)`). What remains is configuration:
 
 | Feature | Add | Guide |
 | :--- | :--- | :--- |
-| Refresh tokens (mobile / bearer) | `.AddRefreshTokenStore<T>()` + `Tokens.JwtSecret` | [mobile / bearer](guides/mobile-bearer.md) |
-| Device list, per-device logout | `.AddSessionStore<T>()` | [sessions](guides/sessions-and-logout.md) |
-| Two-factor authentication | `.AddTwoFactorStore<T>()` | [2FA](guides/two-factor.md) |
-| Google, Entra ID, Keycloak, … | `.AddExternalLoginStore<T>()` + an OAuth handler | [external login](guides/external-login.md) |
+| Bearer tokens (mobile apps, token SPAs) | `Tokens.JwtSecret` | [mobile / bearer](guides/mobile-bearer.md) |
+| Two-factor authentication | nothing – the `/auth/2fa/*` endpoints are active | [2FA](guides/two-factor.md) |
+| Google, Entra ID, Keycloak, … | an OAuth handler on `.Authentication` | [external login](guides/external-login.md) |
 | Breached-password check | `.AddPasswordRule<PwnedPasswordRule>()` | [configuration](configuration.md#passwords) |
 | API keys for services | `.AddApiKeyStore<T>()` | [admin features](guides/admin-features.md) |
+
+## Without EF Core
+
+Dapper, another ORM or a REST service: implement `ISlimUserStore` yourself – start from the ready-made
+[Dapper](../samples/templates/Dapper) or [EF Core](../samples/templates/EfCore) templates rather than from scratch,
+because several methods must be **atomic single statements** (e.g. `IncrementFailedLoginAttemptsAsync`) and the
+security guarantees depend on that ([why](how-it-works.md#your-part-the-stores)). Register it with
+`.AddUserStore<MyUserStore>()` and verify it against your database with one call from `SlimIdentity.Testing`
+([how](how-it-works.md#verify-your-stores)). The optional stores (`AddSessionStore`, `AddTwoFactorStore`,
+`AddRefreshTokenStore`, `AddExternalLoginStore`) follow the same pattern.

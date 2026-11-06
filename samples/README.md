@@ -2,7 +2,7 @@
 
 | Folder | Purpose |
 | :--- | :--- |
-| [`SlimIdentity.Demo/`](SlimIdentity.Demo) | Runnable demo with in-memory stores (Native AOT capable). `dotnet run --project samples/SlimIdentity.Demo`, then use `SlimIdentity.Demo.http`. |
+| [`SlimIdentity.Demo/`](SlimIdentity.Demo) | Runnable demo with in-memory stores (Native AOT capable) and the **playground** (`wwwroot/`: every flow clickable, fake mailbox, virtual authenticator, request log). `dotnet run --project samples/SlimIdentity.Demo` → <http://localhost:5209>, or `docker compose up --build` in the repository root → <http://localhost:8080> ([Breakme mode](../BREAKME.md)). Requests for editors: `SlimIdentity.Demo.http`. |
 | [`templates/`](templates) | Copy-paste templates for your own project (below). |
 
 The templates are **not** NuGet dependencies and are not shipped. Copy them into your project and adapt them – this
@@ -15,7 +15,7 @@ servers (see CONTRIBUTING).
 
 | Template | Content | Packages in your host |
 | :--- | :--- | :--- |
-| `EfCore/` | `AppDbContext` + all stores (user, refresh, 2FA, external login, API key, sessions) | `Microsoft.EntityFrameworkCore` + provider |
+| `EfCore/` | `AppDbContext` + all stores (user, refresh, 2FA, external login, API key, sessions) – only if you need full control over the mapping; otherwise use the **`SlimIdentity.EntityFrameworkCore` package** | `Microsoft.EntityFrameworkCore` + provider |
 | `Dapper/` | `schema.sql` (PostgreSQL) + all stores | `Dapper`, `Npgsql` |
 | `Email/` | `MailKitEmailSender`, `SendGridEmailSender`, `LoggingEmailSender`, `OutboxEmailSender` + `OutboxMailWorker` (guaranteed delivery) | `MailKit` or `SendGrid`, EF Core |
 | `Enterprise/` | `LdapPasswordValidator`, legacy hash migration, client certificates (mTLS), admin endpoints (impersonation, sudo, API keys, invitations, ban) | `System.DirectoryServices.Protocols`, `Microsoft.AspNetCore.Authentication.Certificate` |

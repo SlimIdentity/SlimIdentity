@@ -427,3 +427,6 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# local Claude Code preview configuration
+.claude/launch.json

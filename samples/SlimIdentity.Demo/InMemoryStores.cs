@@ -15,11 +15,11 @@ public sealed class InMemoryUserStore : ISlimUserStore
     private readonly ConcurrentDictionary<string, SlimUser> _users = new();
     private readonly ConcurrentDictionary<string, string[]> _roles = new();
 
-    public InMemoryUserStore()
+    public InMemoryUserStore(DemoSettings settings)
     {
         var hasher = new PasswordHasher<SlimUser>();
-        Seed(hasher, "admin@demo.local", "Admin123!", ["Admin"]);
-        Seed(hasher, "user@demo.local", "User1234!", []);
+        Seed(hasher, "admin@demo.local", settings.AdminPassword, ["Admin"]);
+        Seed(hasher, "user@demo.local", settings.UserPassword, []);
     }
 
     private void Seed(PasswordHasher<SlimUser> hasher, string email, string password, string[] roles)
@@ -250,8 +250,8 @@ public sealed class InMemoryApiKeyStore : ISlimApiKeyStore
             : null);
 }
 
-/// <summary>Prints mails to the console.</summary>
-public sealed class ConsoleEmailSender : ISlimEmailSender
+/// <summary>Prints mails to the console and drops them into the playground's fake mailbox.</summary>
+public sealed class ConsoleEmailSender(DemoMailbox mailbox) : ISlimEmailSender
 {
     public Task SendVerificationEmailAsync(string email, string verificationTokenOrLink, CancellationToken ct) =>
         Write("Verify your e-mail", email, verificationTokenOrLink);
@@ -274,8 +274,9 @@ public sealed class ConsoleEmailSender : ISlimEmailSender
     public Task SendLockoutNotificationEmailAsync(string email, DateTimeOffset lockoutEndUtc, CancellationToken ct) =>
         Write("Your account was temporarily locked", email, $"Too many failed sign-ins. Locked until {lockoutEndUtc:u}. Not you? Change your password.");
 
-    private static Task Write(string subject, string to, string body)
+    private Task Write(string subject, string to, string body)
     {
+        mailbox.Deliver(to, subject, body);
         Console.ForegroundColor = ConsoleColor.Cyan;
         Console.WriteLine($"""
 

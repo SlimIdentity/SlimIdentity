@@ -38,6 +38,10 @@ First public release (1.0.0) in preparation.
   and `TrustedOrigins` (CSRF origin check and external-login return URLs in one list). Security-relevant protocol
   details (CSRF, refresh-token reuse detection, challenge and code lifetimes, TOTP tolerance, recovery codes) are fixed
   by design; passwords follow NIST SP 800-63B (length, no composition rules).
+- `SlimIdentity.EntityFrameworkCore` package: `ISlimUserEntity<TKey>` on your own user entity,
+  `modelBuilder.ApplySlimIdentity<AppUser, Guid>()` and `.AddEntityFrameworkStores<AppDbContext, AppUser, Guid>()` –
+  all stores on your `DbContext` (Guid, int, long or string keys), optional claims provider and user factory. Verified
+  on SQLite, PostgreSQL and SQL Server.
 - `SlimIdentity.Testing` package: `SlimStoreConformance.VerifyAsync(services)` checks store implementations against
   their contracts – lookup, uniqueness, atomic counters and single-use consumption under parallel requests – with any
   test framework and against the real database. CI runs it against the test stores and the EF Core templates (SQLite).
@@ -48,10 +52,14 @@ First public release (1.0.0) in preparation.
   2FA and sessions), addresses Unicode-normalized (NFC), mail limit per recipient against mail bombing,
   `AddNullEmailSender()` refuses to start in `Production`, no secrets or addresses in logs (tested).
 - [Attack scenarios](docs/attack-scenarios.md): review checklist with the covering test per scenario.
+- Playground in the demo (every flow clickable, fake mailbox, virtual authenticator, request log),
+  `docker compose up` and a local [Breakme mode](BREAKME.md) with secret passwords for the seeded accounts.
+- The TypeScript client template is type-checked (`tsc --strict`) in CI.
 - Native AOT and trimming compatibility.
 - Samples for EF Core, Dapper, MailKit, SendGrid, outbox delivery, LDAP, client certificates (mTLS), Data Protection
   key ring persistence, Have I Been Pwned, admin endpoints and a TypeScript client (incl. QR code for TOTP setup).
 
-All packages of the repository (`SlimIdentity`, `SlimIdentity.Testing`) are released together with the same version.
+All packages of the repository (`SlimIdentity`, `SlimIdentity.EntityFrameworkCore`, `SlimIdentity.Testing`) are released
+together with the same version.
 
 [Unreleased]: https://github.com/timmkautz/slimidentity/commits/main

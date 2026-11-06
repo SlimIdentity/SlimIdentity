@@ -9,7 +9,8 @@ Within minutes it provides hardened, best-practice JSON endpoints for modern web
 mobile apps, while leaving databases, ORMs (EF Core, Dapper) and domain models entirely to the host project.
 
 ## 2. Core principles
-1. **Zero persistence:** the package references no EF Core, Dapper or database driver. It talks to the host
+1. **Zero persistence in the core:** the `SlimIdentity` package references no EF Core, Dapper or database driver.
+   Persistence lives in separate, optional packages (`SlimIdentity.EntityFrameworkCore`) or in the host. It talks to the host
    exclusively through small interfaces. Internal helpers (e.g. the mail queue) stay in memory; durability is
    implemented by the host behind an interface (outbox pattern).
 2. **No generics, no base classes:** no generic type parameters on the application, no inheritance. Internally a
@@ -102,6 +103,8 @@ app.MapSlimIdentityApi();
 ```
 src/SlimIdentity/                          the main package
 src/SlimIdentity.Testing/                  package: conformance checks for store implementations (test projects only)
+src/SlimIdentity.EntityFrameworkCore/      package: EF Core stores on the host's DbContext and user entity
+tests/SlimIdentity.EntityFrameworkCore.Tests/  conformance of the EF Core package on SQLite, PostgreSQL, SQL Server
 tests/SlimIdentity.Tests/                  unit and integration tests (in-memory host, fake clock, fake OAuth provider)
 tests/SlimIdentity.Samples.Tests/          compiles the copy-paste templates; conformance of the EF Core stores (SQLite)
 samples/SlimIdentity.Demo/                 runnable demo with in-memory stores (Native AOT) + .http file
@@ -148,6 +151,7 @@ Deliberately not part of the package (extra dependency, highly deployment specif
 | Single-use challenges via a second "last used" value | Code times and challenge times cannot share one counter (a code from the current step may predate a new challenge); a second compare-and-set needs no token table. Of two open challenges only the newer one can still complete. |
 | Narrow store methods for sign-in bookkeeping | Sign-ins are slow (hashing) and parallel; writing back the whole user could undo a concurrent password change, and read-modify-write would lose failed attempts. One small statement each is easy to implement atomically in any database. |
 | Few options, secure behaviour fixed | Every switch is something to understand and a way to weaken the protection. JWT is enabled by its secret, all links derive from one `BaseUrl`, one `TrustedOrigins` list serves CSRF and redirects; CSRF, reuse detection and protocol lifetimes are not configurable. |
+| EF Core stores as a package: an interface on the host's entity, not a base class or a fixed table | The host keeps its user entity, table and key type (`Guid`, `int`, `long`, `string`); SlimIdentity only needs thirteen properties. Generics are fine here – they stay inside the optional package, the core API remains generic-free. |
 | Store contracts are checked by a test kit, not just documented | The guarantees that matter (atomicity, uniqueness, single use) are invisible in normal operation; `SlimIdentity.Testing` makes them verifiable against the real database. Separate package, so test code never ships to production. |
 | No password composition rules | NIST SP 800-63B: length and a breached-password check beat character classes; classic rules remain possible as an `ISlimPasswordRule`. |
 | `CreateAsync` returns `null` for a taken address | The unique index decides, not a prior lookup – concurrent registrations get the uniform answer instead of an error. |

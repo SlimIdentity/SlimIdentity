@@ -30,7 +30,9 @@ Please include as much as you can:
 
 ## Scope
 
-In scope: the `SlimIdentity` package (`src/`).
+In scope: the packages in `src/` (`SlimIdentity`, `SlimIdentity.EntityFrameworkCore`, `SlimIdentity.Testing`). Findings
+made with the local [Breakme playground](BREAKME.md) that affect these packages are very welcome – a failing test is
+the ideal proof of concept.
 
 Out of scope: the copy-paste samples in `samples/` and the demo application in `samples/SlimIdentity.Demo`
 (they are examples, not production code – reports about them are still welcome as regular issues if they

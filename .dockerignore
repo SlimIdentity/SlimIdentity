@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+**/TestResults/
+.vs/
+.vscode/
+.idea/
+.claude/
+artifacts/
+aot/
+*.user

@@ -44,8 +44,9 @@ silently gone:
 | Refresh tokens, recovery codes, 2FA codes and challenges are consumed **atomically** (`DELETE … RETURNING`, compare-and-set) | a stolen token or code can be used twice in parallel |
 | Secrets are stored exactly as received | – (they arrive already hashed or encrypted; nothing to do but not to transform them) |
 
-The [samples](../samples) implement all of this for EF Core and Dapper – **copy them instead of starting from
-scratch**. The complete rules are listed in the [samples README](../samples/README.md#rules-for-your-own-stores);
+With EF Core, the `SlimIdentity.EntityFrameworkCore` package implements all of this for you – verified on SQLite,
+PostgreSQL and SQL Server. Otherwise, the [samples](../samples) implement it for Dapper and EF Core – **copy them
+instead of starting from scratch**. The complete rules are listed in the [samples README](../samples/README.md#rules-for-your-own-stores);
 each interface member documents its contract in IntelliSense.
 
 ### Verify your stores
