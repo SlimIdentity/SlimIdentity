@@ -10,13 +10,22 @@ namespace SlimIdentity.Services;
 /// </summary>
 internal sealed class SlimEmailDispatcher(
     SlimEmailQueue queue,
+    SlimMailThrottle throttle,
     IServiceProvider services,
     IOptions<SlimIdentityOptions> options,
     SlimMetrics metrics,
     ILogger<SlimEmailDispatcher> logger)
 {
-    public async Task SendAsync(string kind, Func<ISlimEmailSender, CancellationToken, Task> send, CancellationToken ct)
+    /// <summary>Sends (or queues) a mail to <paramref name="recipient"/> – unless the per-recipient limit is reached.</summary>
+    public async Task SendAsync(string kind, string recipient, Func<ISlimEmailSender, CancellationToken, Task> send, CancellationToken ct)
     {
+        if (!throttle.TryAcquire(kind, recipient))
+        {
+            Log.MailThrottled(logger, kind);
+            metrics.Mail(kind, "throttled");
+            return;
+        }
+
         if (!options.Value.Email.SendInBackground)
         {
             await send(services.GetRequiredService<ISlimEmailSender>(), ct);

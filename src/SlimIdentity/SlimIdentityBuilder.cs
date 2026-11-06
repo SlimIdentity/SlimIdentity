@@ -36,10 +36,24 @@ public sealed class SlimIdentityBuilder
 
     /// <summary>Registers the mandatory e-mail sender.</summary>
     public SlimIdentityBuilder AddEmailSender<[DynamicallyAccessedMembers(Ctors)] TSender>(ServiceLifetime lifetime = ServiceLifetime.Scoped)
-        where TSender : class, ISlimEmailSender => Register<ISlimEmailSender, TSender>(lifetime);
+        where TSender : class, ISlimEmailSender
+    {
+        Services.RemoveAll<SlimNullEmailSenderGuard>();
+        return Register<ISlimEmailSender, TSender>(lifetime);
+    }
 
-    /// <summary>Logs mails (including tokens and codes!) instead of sending them. Development only.</summary>
-    public SlimIdentityBuilder AddNullEmailSender() => AddEmailSender<SlimNullEmailSender>(ServiceLifetime.Singleton);
+    /// <summary>
+    /// Logs mails – including live links and codes – instead of sending them. Development only:
+    /// <c>MapSlimIdentityApi</c> refuses to start in the <c>Production</c> environment unless
+    /// <paramref name="allowInProduction"/> is <c>true</c> (e.g. for a production-like test system without mail).
+    /// </summary>
+    /// <param name="allowInProduction">Explicitly allow the null sender in the <c>Production</c> environment.</param>
+    public SlimIdentityBuilder AddNullEmailSender(bool allowInProduction = false)
+    {
+        Register<ISlimEmailSender, SlimNullEmailSender>(ServiceLifetime.Singleton);
+        Services.Replace(ServiceDescriptor.Singleton(new SlimNullEmailSenderGuard(allowInProduction)));
+        return this;
+    }
 
     // ---------------------------------------------------------------- optional capabilities
 
@@ -121,7 +135,9 @@ public sealed class SlimIdentityBuilder
         return this;
     }
 
-    private SlimIdentityBuilder Register<TService, [DynamicallyAccessedMembers(Ctors)] TImplementation>(ServiceLifetime lifetime)
+    internal sealed record SlimNullEmailSenderGuard(bool AllowInProduction);
+
+    private SlimIdentityBuilder Register<TService,[DynamicallyAccessedMembers(Ctors)] TImplementation>(ServiceLifetime lifetime)
         where TService : class
         where TImplementation : class, TService
     {

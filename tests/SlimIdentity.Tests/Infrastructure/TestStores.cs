@@ -23,6 +23,9 @@ public sealed class TestUserStore : ISlimUserStore
 
     public void SetActive(string userId, bool active) => _users[userId].IsActive = active;
 
+    /// <summary>Snapshot of all persisted users.</summary>
+    public IReadOnlyList<SlimUser> All => _users.Values.Select(Clone).ToList();
+
     /// <summary>Simulates a password change by another request (new hash, new stamp).</summary>
     public void ChangePassword(string userId, string password)
     {

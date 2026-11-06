@@ -115,7 +115,8 @@ value); the [TypeScript client](../samples/templates/Frontend/slimIdentityClient
 
 ## Before production
 
-1. **Real mail sender** instead of `AddNullEmailSender()` – MailKit, SendGrid or an outbox:
+1. **Real mail sender** instead of `AddNullEmailSender()` (which refuses to start in the `Production` environment) –
+   MailKit, SendGrid or an outbox:
    [`samples/templates/Email`](../samples/templates/Email).
 2. **Persist the Data Protection key ring** – otherwise every restart signs everybody out and invalidates all links
    ([guide](guides/data-protection.md)).

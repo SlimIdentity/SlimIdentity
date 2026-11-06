@@ -93,6 +93,9 @@ internal static partial class Log
     [LoggerMessage(5003, LogLevel.Information, "SlimIdentity: created user {UserId} from {Provider} login.")]
     public static partial void ExternalUserCreated(ILogger logger, string userId, string provider);
 
+    [LoggerMessage(5004, LogLevel.Warning, "SlimIdentity: unconfirmed account {UserId} claimed by the verified owner via {Provider} – password, 2FA and sessions of the registrant removed (possible pre-account hijacking).")]
+    public static partial void UnverifiedAccountClaimed(ILogger logger, string provider, string userId);
+
     // ---------------------------------------------------------------- 6xxx impersonation
     [LoggerMessage(6001, LogLevel.Warning, "SlimIdentity: user {Impersonator} impersonates {Target}.")]
     public static partial void ImpersonationStarted(ILogger logger, string impersonator, string target);
@@ -115,6 +118,9 @@ internal static partial class Log
 
     [LoggerMessage(7004, LogLevel.Warning, "SlimIdentity: shutdown timeout reached with {Count} unsent mail(s) in the queue.")]
     public static partial void MailLost(ILogger logger, int count);
+
+    [LoggerMessage(7005, LogLevel.Information, "SlimIdentity: {Kind} mail not sent – per-recipient limit reached (possible mail bombing).")]
+    public static partial void MailThrottled(ILogger logger, string kind);
 
     // SlimNullEmailSender (development only – these log live links and codes)
     [LoggerMessage(7101, LogLevel.Warning, "[SlimIdentity:NullEmailSender] Verification for {Email}: {Link}")]

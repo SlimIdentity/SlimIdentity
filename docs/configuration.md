@@ -118,7 +118,7 @@ The client is identified by IP address. Behind a reverse proxy you need `UseForw
 | Method | Effect |
 | :--- | :--- |
 | `AddUserStore<T>()` | **Required.** |
-| `AddEmailSender<T>()` / `AddNullEmailSender()` | **Required** (null sender for development only). |
+| `AddEmailSender<T>()` / `AddNullEmailSender()` | **Required.** The null sender logs links and codes; it stops the start in the `Production` environment unless `AddNullEmailSender(allowInProduction: true)`. |
 | `AddRefreshTokenStore<T>()` | `/refresh`, refresh tokens in bearer responses. |
 | `AddSessionStore<T>()` | Server-side sessions, `/sessions`. |
 | `AddTwoFactorStore<T>()` | `/login/2fa`, `/2fa/*`. |

@@ -94,6 +94,38 @@ public sealed class ExternalLoginTests
     }
 
     [Fact]
+    public async Task Pre_registered_unverified_account_is_taken_over_by_the_verified_owner_not_shared()
+    {
+        // Attack scenario E8 (pre-account hijacking): the attacker registers the victim's address with an own password
+        // before the victim ever signs up. The victim later signs in with a provider that has verified the address.
+        const string victim = "victim@test.local";
+        await using var app = await TestApp.StartAsync(WithProvider(
+            new Claim(ClaimTypes.NameIdentifier, "google-victim"), new Claim(ClaimTypes.Email, victim), new Claim("email_verified", "true")));
+
+        await app.CreateClient().PostJsonAsync("/auth/register", new { email = victim, password = "Attacker-Pass-123" });
+        var attacker = await app.LoginBearerAsync(victim, "Attacker-Pass-123");   // unconfirmed accounts can sign in by default
+
+        var browser = app.CreateClient();
+        await NavigateAsync(browser, "useCookies=true&returnUrl=/done");
+        Assert.Equal(HttpStatusCode.OK, (await browser.GetAsync("/api/hello")).StatusCode);   // the victim is in
+
+        var attackerClient = app.CreateClient();
+        attackerClient.BearerToken = attacker.AccessToken;
+        Assert.Equal(HttpStatusCode.Unauthorized, (await attackerClient.GetAsync("/api/hello")).StatusCode);   // running session ended
+        await app.CreateClient().PostJsonAsync("/auth/login", new { email = victim, password = "Attacker-Pass-123" }, HttpStatusCode.Unauthorized);
+        await app.CreateClient().PostJsonAsync("/auth/refresh", new { refreshToken = attacker.RefreshToken }, HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task Linking_a_confirmed_account_keeps_its_password()
+    {
+        await using var app = await TestApp.StartAsync(WithProvider(
+            new Claim(ClaimTypes.NameIdentifier, "ext-user"), new Claim(ClaimTypes.Email, TestApp.UserEmail), new Claim("email_verified", "true")));
+        await NavigateAsync(app.CreateClient(), "useCookies=true&returnUrl=/done");
+        await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword);
+    }
+
+    [Fact]
     public async Task Foreign_return_urls_are_rejected()
     {
         await using var app = await TestApp.StartAsync(WithProvider(new Claim(ClaimTypes.NameIdentifier, "x")));

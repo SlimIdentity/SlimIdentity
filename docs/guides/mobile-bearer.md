@@ -20,12 +20,16 @@ builder.Services.AddSlimIdentity(o => o.Tokens.JwtSecret = secret)
 ## Storage
 
 - Mobile: refresh token in the platform's secure storage (Keychain / Android Keystore); access token in memory.
-- Browser: access token in memory only; refresh token in `sessionStorage` at most – or prefer cookies for same-site SPAs.
+- Browser: access token in memory only; the refresh token in web storage (see below for several tabs) – or, better
+  for same-site SPAs, the cookie flow, which has no refresh tokens at all.
 
 ## Refreshing correctly
 
 Refresh tokens are **single use**. If two requests refresh the same token in parallel, the second one looks like a
-replay and the session is revoked (reuse detection). Serialize refreshes in the client:
+replay and the session is revoked (reuse detection – deliberately without a grace period). Serialize refreshes in the
+client.
+
+**One app instance** (mobile app, single tab): share one in-flight promise.
 
 ```ts
 let refreshing: Promise<boolean> | null = null;
@@ -34,6 +38,29 @@ function refresh() {
   return refreshing;
 }
 ```
+
+**Several browser tabs** sharing one session: keep the refresh token in `localStorage` and serialize across tabs with
+the [Web Locks API](https://developer.mozilla.org/docs/Web/API/Web_Locks_API). Read the token *inside* the lock – the
+tab before may have rotated it in the meantime:
+
+```ts
+function refresh() {
+  refreshing ??= navigator.locks.request("slim-refresh", async () => {
+    const token = localStorage.getItem("slim.refresh");      // newest token, never one another tab already used
+    if (!token) return false;
+    const r = await fetch("/auth/refresh", { method: "POST", headers: { "Content-Type": "application/json" },
+                                              body: JSON.stringify({ refreshToken: token }) });
+    if (!r.ok) return false;
+    const auth = await r.json();
+    localStorage.setItem("slim.refresh", auth.refreshToken);  // before the lock is released
+    accessToken = auth.accessToken;                           // per tab, in memory
+    return true;
+  }).finally(() => (refreshing = null));
+  return refreshing;
+}
+```
+
+The [TypeScript client](../../samples/templates/Frontend/slimIdentityClient.ts) does exactly this.
 
 If a refresh response is lost (network error), the client cannot retry with the old token – the user has to sign in
 again. This is the intended trade-off of rotation.

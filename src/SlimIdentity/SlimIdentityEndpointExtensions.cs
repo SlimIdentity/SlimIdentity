@@ -29,6 +29,12 @@ public static class SlimIdentityEndpointExtensions
             throw new InvalidOperationException("SlimIdentity: no ISlimUserStore registered. Call .AddUserStore<T>() after AddSlimIdentity().");
         if (!Has<ISlimEmailSender>())
             throw new InvalidOperationException("SlimIdentity: no ISlimEmailSender registered. Call .AddEmailSender<T>() or .AddNullEmailSender().");
+        if (sp.GetService<SlimIdentityBuilder.SlimNullEmailSenderGuard>() is { AllowInProduction: false }
+            && sp.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>() is { } environment
+            && Microsoft.Extensions.Hosting.HostEnvironmentEnvExtensions.IsProduction(environment))
+            throw new InvalidOperationException(
+                "SlimIdentity: AddNullEmailSender() in the Production environment – it would write live password-reset links and " +
+                "2FA codes to the log. Register a real sender with .AddEmailSender<T>(), or pass allowInProduction: true deliberately.");
 
         var group = endpoints.MapGroup(o.RoutePrefix)
             .WithTags(SlimIdentityDefaults.OpenApiTag)

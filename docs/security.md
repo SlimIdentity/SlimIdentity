@@ -43,6 +43,10 @@ If you find a gap, please report it privately ([SECURITY.md](../SECURITY.md)).
 | Account takeover via e-mail change | Requires the current password; the new address must confirm; the old address is notified; all sessions end. |
 | Open redirect in external login | `returnUrl` must be a local path or a trusted origin; control characters and surrounding whitespace (which browsers strip, turning `/\t/evil` into `//evil`), user info and non-HTTP schemes are rejected, and the redirect uses the URL as parsed by .NET. Covered by property-based tests. |
 | Account takeover via external login | Auto-linking only for **verified** e-mails (`email_verified` or explicitly trusted provider); otherwise `account_conflict`. |
+| Pre-account hijacking (attacker registers the victim's address first) | The first proof of the mailbox – a verified external login or a password reset – removes the registrant's password, 2FA and sessions; the account is never shared. |
+| Look-alike addresses | Addresses are trimmed and Unicode-normalized (NFC) before they reach the store, so precomposed and decomposed forms are one account; case-insensitive lookup is a store rule. `+tag` and homoglyphs are different addresses. |
+| Mail bombing | At most 3 mails per recipient and kind within 15 minutes (5 for 2FA codes); further requests get the same answer without a mail. Per instance. |
+| Dev mail sender in production | `AddNullEmailSender()` stops the start in the `Production` environment (it would log live links and codes) unless explicitly allowed. |
 | Tokens in URLs / logs | Bearer clients get a short-lived (1 min), single-use code after external login, never tokens in a URL – a code leaked via history, logs or a referrer is worthless once exchanged. Logs and metrics contain user ids at most, never passwords, tokens or codes. |
 | Abuse of impersonation | The impersonation session carries the admin's id and stamp (`act`); it ends as soon as the admin is banned or signs out everywhere. Never persistent, no refresh token, sensitive actions (`/change-password`, `/change-email`, 2FA changes, …) are blocked. |
 | Leaked API keys | Only SHA-256 hashes are stored; keys have 256 bits of entropy and a recognizable prefix for secret scanners. |
@@ -71,4 +75,6 @@ If you find a gap, please report it privately ([SECURITY.md](../SECURITY.md)).
   for existing addresses.
 - Rate limiting is per client IP (or your custom key) and per instance (in-memory); distributed rate limiting needs
   your own policy or a gateway.
-- The code has not been independently audited yet.
+- The mail limit per recipient is kept in memory per instance; with several instances the effective limit is a multiple.
+- The code has not been independently audited yet. The [attack scenarios](attack-scenarios.md) list what is covered by
+  tests and what is still open.

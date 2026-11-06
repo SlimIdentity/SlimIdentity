@@ -30,7 +30,7 @@ internal sealed class SlimAccountHandlers(
 
     public async Task<IResult> RegisterAsync(SlimRegisterRequest? request, CancellationToken ct)
     {
-        var email = request?.Email?.Trim();
+        var email = SlimEmailAddress.Normalize(request?.Email);
         if (!IsValidEmail(email)) return InvalidEmail("email");
 
         if (await passwordPolicy.ValidateAsync(request!.Password, email!, ct) is { } errors)
@@ -67,7 +67,7 @@ internal sealed class SlimAccountHandlers(
         async Task<IResult> AccountExistsAsync(string existingEmail)
         {
             metrics.Registration("existing_account");
-            await mail.SendAsync("account-exists", (s, c) => s.SendAccountExistsEmailAsync(existingEmail, c), ct);
+            await mail.SendAsync(SlimMailKinds.AccountExists, existingEmail, (s, c) => s.SendAccountExistsEmailAsync(existingEmail, c), ct);
             return accepted;
         }
     }
@@ -95,7 +95,7 @@ internal sealed class SlimAccountHandlers(
 
     public async Task<IResult> ResendVerificationAsync(SlimEmailRequest? request, CancellationToken ct)
     {
-        var email = request?.Email?.Trim();
+        var email = SlimEmailAddress.Normalize(request?.Email);
         if (!string.IsNullOrEmpty(email))
         {
             var user = await store.FindByEmailAsync(email, ct);
@@ -111,14 +111,14 @@ internal sealed class SlimAccountHandlers(
             new SlimEmailTokenPayload(user.Id, user.Email, user.SecurityStamp), O.Tokens.EmailVerificationTokenLifetime);
         var email = user.Email;
         var link = SlimWorkflowTokens.BuildLink(O.Links.EmailVerificationTemplate, token);
-        await mail.SendAsync("verification", (s, c) => s.SendVerificationEmailAsync(email, link, c), ct);
+        await mail.SendAsync(SlimMailKinds.Verification, email, (s, c) => s.SendVerificationEmailAsync(email, link, c), ct);
     }
 
     // ------------------------------------------------------------------ POST /forgot-password & /reset-password
 
     public async Task<IResult> ForgotPasswordAsync(SlimEmailRequest? request, CancellationToken ct)
     {
-        var email = request?.Email?.Trim();
+        var email = SlimEmailAddress.Normalize(request?.Email);
         if (!string.IsNullOrEmpty(email))
         {
             var user = await store.FindByEmailAsync(email, ct);
@@ -128,7 +128,7 @@ internal sealed class SlimAccountHandlers(
                     new SlimResetTokenPayload(user.Id, user.SecurityStamp), O.Tokens.PasswordResetTokenLifetime);
                 var address = user.Email;
                 var link = SlimWorkflowTokens.BuildLink(O.Links.PasswordResetTemplate, token);
-                await mail.SendAsync("password-reset", (s, c) => s.SendPasswordResetEmailAsync(address, link, c), ct);
+                await mail.SendAsync(SlimMailKinds.PasswordReset, address, (s, c) => s.SendPasswordResetEmailAsync(address, link, c), ct);
                 metrics.PasswordReset("requested");
             }
         }
@@ -148,7 +148,18 @@ internal sealed class SlimAccountHandlers(
             return SlimResults.Validation(errors);
 
         credentials.ApplyNewPassword(user, request.NewPassword); // rotates stamp → token single-use, all sessions revoked
-        user.EmailConfirmed = true;                               // the mailbox has just been proven
+        if (!user.EmailConfirmed)
+        {
+            // First proof of the mailbox: whoever registered the address before (possibly an attacker – pre-account
+            // hijacking) must not keep a second factor that locks the real owner out.
+            user.TwoFactorEnabled = false;
+            if (services.GetService<SlimTwoFactorService>() is { } twoFactor)
+            {
+                await twoFactor.RemoveSecretAsync(user, ct);
+                await twoFactor.RemoveRecoveryCodesAsync(user, ct);
+            }
+            user.EmailConfirmed = true;
+        }
         await store.UpdateSecurityStateAsync(user, ct);
         await authManager.RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
 
@@ -164,7 +175,7 @@ internal sealed class SlimAccountHandlers(
         var (user, error) = await LoadCurrentUserAsync(forbidImpersonation: true, ct);
         if (user is null) return error!;
 
-        var newEmail = request?.NewEmail?.Trim();
+        var newEmail = SlimEmailAddress.Normalize(request?.NewEmail);
         if (!IsValidEmail(newEmail)) return InvalidEmail("newEmail");
         if (string.Equals(newEmail, user.Email, StringComparison.OrdinalIgnoreCase))
             return SlimResults.BadRequest("email_unchanged", "The new address equals the current one.");
@@ -180,11 +191,11 @@ internal sealed class SlimAccountHandlers(
             var token = workflow.Protect(SlimWorkflowTokens.EmailChangePurpose,
                 new SlimEmailChangePayload(user.Id, user.Email, target, user.SecurityStamp), O.Tokens.EmailVerificationTokenLifetime);
             var link = SlimWorkflowTokens.BuildLink(O.Links.EmailChangeTemplate, token);
-            await mail.SendAsync("email-change", (s, c) => s.SendEmailChangeConfirmationAsync(target, link, c), ct);
+            await mail.SendAsync(SlimMailKinds.EmailChange, target, (s, c) => s.SendEmailChangeConfirmationAsync(target, link, c), ct);
         }
         else
         {
-            await mail.SendAsync("account-exists", (s, c) => s.SendAccountExistsEmailAsync(target, c), ct);
+            await mail.SendAsync(SlimMailKinds.AccountExists, target, (s, c) => s.SendAccountExistsEmailAsync(target, c), ct);
         }
 
         Log.EmailChangeRequested(logger, user.Id);
@@ -215,7 +226,7 @@ internal sealed class SlimAccountHandlers(
         await authManager.RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
 
         var (oldEmail, newEmail) = (payload.OldEmail, payload.NewEmail);
-        await mail.SendAsync("email-changed", (s, c) => s.SendEmailChangedNotificationAsync(oldEmail, newEmail, c), ct);
+        await mail.SendAsync(SlimMailKinds.EmailChanged, oldEmail, (s, c) => s.SendEmailChangedNotificationAsync(oldEmail, newEmail, c), ct);
 
         Log.EmailChanged(logger, user.Id);
         metrics.EmailChange("completed");

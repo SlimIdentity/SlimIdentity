@@ -26,7 +26,9 @@ stores target PostgreSQL – run the checks against your own database after adap
 Verify them automatically with [`SlimIdentity.Testing`](../src/SlimIdentity.Testing/README.md) – one call in a test
 against your real database checks all of the following, including the parallel cases.
 
-- `FindByEmailAsync` must search **case-insensitively** (e.g. a normalized column with a unique index).
+- `FindByEmailAsync` must search **case-insensitively** (e.g. a normalized column with a unique index). Addresses
+  arrive trimmed and Unicode-normalized (NFC); if you import users, normalize existing addresses the same way
+  (`email.Normalize(NormalizationForm.FormC)`).
 - `CreateAsync` returns `null` if the address is already taken (unique index on the normalized address,
   `ON CONFLICT DO NOTHING` / catch the unique violation) – concurrent registrations then get the uniform answer.
 - `UpdateSecurityStateAsync` persists only the security fields of `SlimUser`

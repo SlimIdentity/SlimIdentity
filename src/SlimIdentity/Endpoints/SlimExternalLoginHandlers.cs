@@ -75,10 +75,11 @@ internal sealed class SlimExternalLoginHandlers(
         var providerKey = principal.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? principal.FindFirst("sub")?.Value;
         if (string.IsNullOrEmpty(providerKey)) return Redirect(returnUrl, "slim_error", "missing_provider_key");
 
-        var email = principal.FindFirst(ClaimTypes.Email)?.Value
-                    ?? principal.FindFirst("email")?.Value
-                    ?? principal.FindFirst("preferred_username")?.Value
-                    ?? principal.FindFirst(ClaimTypes.Upn)?.Value;
+        var email = SlimEmailAddress.Normalize(
+            principal.FindFirst(ClaimTypes.Email)?.Value
+            ?? principal.FindFirst("email")?.Value
+            ?? principal.FindFirst("preferred_username")?.Value
+            ?? principal.FindFirst(ClaimTypes.Upn)?.Value);
         var emailVerified = IsEmailVerified(principal, provider);
 
         var user = await externalStore.FindByExternalLoginAsync(provider, providerKey, ct);
@@ -98,8 +99,21 @@ internal sealed class SlimExternalLoginHandlers(
                 await externalStore.LinkExternalLoginAsync(existing.Id, provider, providerKey, ct);
                 if (!existing.EmailConfirmed)
                 {
+                    // Pre-account hijacking: nobody has proven ownership of this address yet – whoever registered it
+                    // (possibly an attacker, with an own password) must not share the account with the verified owner.
+                    // Remove the password and end every session; the owner can set a password later via reset.
                     existing.EmailConfirmed = true;
+                    existing.PasswordHash = string.Empty;
+                    existing.SecurityStamp = SlimUser.NewSecurityStamp();
+                    existing.TwoFactorEnabled = false;   // a 2FA set up by the registrant must not lock out the owner
                     await store.UpdateSecurityStateAsync(existing, ct);
+                    await authManager.RevokeSessionsAsync(existing.Id, null, ct);
+                    if (services.GetService<ISlimTwoFactorStore>() is { } twoFactorStore)
+                    {
+                        await twoFactorStore.SetTotpSecretAsync(existing, string.Empty, ct);
+                        await twoFactorStore.StoreRecoveryCodesAsync(existing, [], ct);
+                    }
+                    Log.UnverifiedAccountClaimed(logger, provider, existing.Id);
                 }
                 Log.ExternalLoginLinked(logger, provider, existing.Id);
                 metrics.ExternalLogin(provider, "linked");
@@ -109,7 +123,7 @@ internal sealed class SlimExternalLoginHandlers(
             {
                 if (!O.ExternalLogin.AllowAutoRegistration) return Redirect(returnUrl, "slim_error", "registration_disabled");
 
-                user = await store.CreateAsync(email.Trim(), string.Empty, ct);
+                user = await store.CreateAsync(email, string.Empty, ct);
                 if (user is null)
                 {
                     // the address was registered concurrently – never link silently; the next attempt follows the rules above

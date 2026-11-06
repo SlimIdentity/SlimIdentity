@@ -9,6 +9,7 @@ namespace SlimIdentity.Endpoints;
 internal sealed class SlimLoginHandlers(
     ISlimUserStore store,
     ISlimEmailSender emailSender,
+    SlimMailThrottle mailThrottle,
     SlimCredentialService credentials,
     SlimAuthManager authManager,
     SlimWorkflowTokens workflow,
@@ -30,13 +31,14 @@ internal sealed class SlimLoginHandlers(
     public async Task<IResult> LoginAsync(SlimLoginRequest? request, bool? useCookies, CancellationToken ct)
     {
         if (!SlimModes.TryResolve(O, useCookies, out var cookies, out var modeError)) return modeError!;
-        if (request is null || string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrEmpty(request.Password))
+        var email = SlimEmailAddress.Normalize(request?.Email);
+        if (request is null || email is null || string.IsNullOrEmpty(request.Password))
             return SlimResults.BadRequest("invalid_request", "E-mail and password are required.");
 
         // Oversized passwords are never hashed (DoS) – identical answer for known and unknown accounts.
         if (request.Password.Length > O.Password.MaximumLength) return Failed("invalid_password");
 
-        var user = await store.FindByEmailAsync(request.Email.Trim(), ct);
+        var user = await store.FindByEmailAsync(email, ct);
         if (user is null)
         {
             credentials.BurnDummyHash(request.Password); // timing-attack mitigation
@@ -135,7 +137,17 @@ internal sealed class SlimLoginHandlers(
             method = MethodEmail;
             var code = SlimTotp.GenerateNumericCode();
             codeHash = HashEmailCode(user.Id, code, issuedAt);
-            await emailSender.SendTwoFactorCodeAsync(user.Email, code, ct);
+            // sent inline (the user waits for it); over the per-recipient limit the challenge is issued without a mail
+            if (mailThrottle.TryAcquire(SlimMailKinds.TwoFactorCode, user.Email))
+            {
+                await emailSender.SendTwoFactorCodeAsync(user.Email, code, ct);
+                metrics.Mail(SlimMailKinds.TwoFactorCode, "sent");
+            }
+            else
+            {
+                Log.MailThrottled(logger, SlimMailKinds.TwoFactorCode);
+                metrics.Mail(SlimMailKinds.TwoFactorCode, "throttled");
+            }
         }
 
         var lifetime = SlimIdentityDefaults.PreAuthTokenLifetime;

@@ -181,21 +181,26 @@ export const cookieAuth = {
 // 2. Bearer flow  (mobile apps, cross-domain SPAs)
 // =====================================================================================
 
-let accessToken: string | null = null;                 // memory only – never localStorage
+let accessToken: string | null = null;                 // memory only, per tab – never in storage
 let refreshPromise: Promise<boolean> | null = null;
-const REFRESH_KEY = "slim.refresh";                    // for mobile use secure storage instead
+// Shared by all tabs, so they use one refresh-token chain. (Same XSS exposure as sessionStorage – the real protection
+// is a strict CSP. Prefer the cookie flow for browser SPAs; mobile apps use the platform's secure storage instead.)
+const REFRESH_KEY = "slim.refresh";
 const REMEMBER_KEY = "slim.2fa-remember";              // "remember this device" – mobile: secure storage
 
 function storeTokens(auth: AuthResponse) {
   accessToken = auth.accessToken ?? null;
-  if (auth.refreshToken) sessionStorage.setItem(REFRESH_KEY, auth.refreshToken);
+  if (auth.refreshToken) localStorage.setItem(REFRESH_KEY, auth.refreshToken);
   if (auth.twoFactorRememberToken) localStorage.setItem(REMEMBER_KEY, auth.twoFactorRememberToken);
 }
 
+// Refresh tokens are single use: presenting one twice counts as theft and ends the session (RFC 9700 reuse
+// detection). Two tabs refreshing at the same moment would trigger exactly that. The Web Locks API serializes the
+// refresh across all tabs of the origin, and the token is read from the shared storage *inside* the lock – so no tab
+// ever sends a token another tab has already used. (Within one tab, parallel calls share one promise.)
 async function refresh(): Promise<boolean> {
-  // de-duplicate parallel refreshes: refresh tokens are single-use
-  refreshPromise ??= (async () => {
-    const refreshToken = sessionStorage.getItem(REFRESH_KEY);
+  refreshPromise ??= navigator.locks.request("slim-refresh", async () => {
+    const refreshToken = localStorage.getItem(REFRESH_KEY);
     if (!refreshToken) return false;
     const r = await fetch(`${AUTH}/refresh`, {
       method: "POST",
@@ -205,7 +210,7 @@ async function refresh(): Promise<boolean> {
     if (!r.ok) { bearerAuth.clear(); return false; }
     storeTokens(await r.json());
     return true;
-  })().finally(() => (refreshPromise = null));
+  }).finally(() => (refreshPromise = null));
   return refreshPromise;
 }
 
@@ -254,7 +259,7 @@ export const bearerAuth = {
   },
 
   async logout() {
-    const refreshToken = sessionStorage.getItem(REFRESH_KEY);
+    const refreshToken = localStorage.getItem(REFRESH_KEY);
     await fetch(`${AUTH}/logout`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -265,7 +270,7 @@ export const bearerAuth = {
 
   clear() {
     accessToken = null;
-    sessionStorage.removeItem(REFRESH_KEY);
+    localStorage.removeItem(REFRESH_KEY);
   },
 
   api: bearerFetch,

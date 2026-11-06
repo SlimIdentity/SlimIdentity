@@ -24,6 +24,8 @@ public sealed class TestAppOptions
     public Action<SlimIdentityBuilder>? Builder { get; init; }
     /// <summary>Additional host endpoints.</summary>
     public Action<WebApplication>? Map { get; init; }
+    /// <summary>Receives all log output (minimum level Trace) – e.g. to assert that no secret is ever logged.</summary>
+    public ILoggerProvider? LoggerProvider { get; init; }
 }
 
 /// <summary>An in-memory host with SlimIdentity, test stores, a fake clock and a few host endpoints.</summary>
@@ -55,6 +57,8 @@ public sealed class TestApp : IAsyncDisposable
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
         builder.WebHost.UseTestServer();
         builder.Logging.ClearProviders();
+        if (options.LoggerProvider is { } loggerProvider)
+            builder.Logging.AddProvider(loggerProvider).SetMinimumLevel(LogLevel.Trace);
 
         // starts at the real time: JWT / DataProtector validation use the system clock
         var time = new FakeTimeProvider(DateTimeOffset.UtcNow);

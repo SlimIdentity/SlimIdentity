@@ -8,6 +8,7 @@
 - [Configuration reference](configuration.md) – every option with its default
 - [Endpoint reference](endpoints.md) – routes, request/response bodies, status codes
 - [Security model](security.md) – what SlimIdentity protects against, and what remains your job
+- [Attack scenarios](attack-scenarios.md) – review checklist with the test that covers each scenario
 
 **Guides**
 

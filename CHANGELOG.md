@@ -44,6 +44,10 @@ First public release (1.0.0) in preparation.
 - Quality gates: .NET analyzers (`latest-recommended` plus selected rules, warnings fail CI), CodeQL
   `security-extended` (once the repository is public), property-based tests (FsCheck) for every parser of outside
   input – return URLs, origins, workflow tokens, claims, Base32/TOTP, rate-limit keys.
+- Abuse protection: pre-account hijacking defused (the first proof of the mailbox removes the registrant's password,
+  2FA and sessions), addresses Unicode-normalized (NFC), mail limit per recipient against mail bombing,
+  `AddNullEmailSender()` refuses to start in `Production`, no secrets or addresses in logs (tested).
+- [Attack scenarios](docs/attack-scenarios.md): review checklist with the covering test per scenario.
 - Native AOT and trimming compatibility.
 - Samples for EF Core, Dapper, MailKit, SendGrid, outbox delivery, LDAP, client certificates (mTLS), Data Protection
   key ring persistence, Have I Been Pwned, admin endpoints and a TypeScript client (incl. QR code for TOTP setup).

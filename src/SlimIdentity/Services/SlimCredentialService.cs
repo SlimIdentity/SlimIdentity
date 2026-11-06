@@ -104,7 +104,7 @@ internal sealed class SlimCredentialService(
         {
             var email = user.Email;
             var end = user.LockoutEndUtc.Value;
-            await mail.SendAsync("lockout-notification", (s, c) => s.SendLockoutNotificationEmailAsync(email, end, c), ct);
+            await mail.SendAsync(SlimMailKinds.LockoutNotification, email, (s, c) => s.SendLockoutNotificationEmailAsync(email, end, c), ct);
         }
         return true;
     }
