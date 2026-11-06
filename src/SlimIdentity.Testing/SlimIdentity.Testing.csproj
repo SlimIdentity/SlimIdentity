@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>SlimIdentity.Testing</RootNamespace>
+  </PropertyGroup>
+
+  <!-- NuGet package (shared metadata: src/Directory.Build.props) -->
+  <PropertyGroup>
+    <PackageId>SlimIdentity.Testing</PackageId>
+    <Description>Conformance checks for your SlimIdentity store implementations (ISlimUserStore, ISlimTwoFactorStore, ISlimRefreshTokenStore, ISlimSessionStore, ISlimExternalLoginStore): case-insensitive lookup, unique addresses, atomic counters and single-use consumption under parallel requests. One call from any test framework, against your real database. For test projects only.</Description>
+    <PackageTags>aspnetcore;authentication;slimidentity;testing;conformance</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="..\SlimIdentity\SlimIdentity.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>

@@ -38,8 +38,13 @@ First public release (1.0.0) in preparation.
   and `TrustedOrigins` (CSRF origin check and external-login return URLs in one list). Security-relevant protocol
   details (CSRF, refresh-token reuse detection, challenge and code lifetimes, TOTP tolerance, recovery codes) are fixed
   by design; passwords follow NIST SP 800-63B (length, no composition rules).
+- `SlimIdentity.Testing` package: `SlimStoreConformance.VerifyAsync(services)` checks store implementations against
+  their contracts – lookup, uniqueness, atomic counters and single-use consumption under parallel requests – with any
+  test framework and against the real database. CI runs it against the test stores and the EF Core templates (SQLite).
 - Native AOT and trimming compatibility.
 - Samples for EF Core, Dapper, MailKit, SendGrid, outbox delivery, LDAP, client certificates (mTLS), Data Protection
   key ring persistence, Have I Been Pwned, admin endpoints and a TypeScript client (incl. QR code for TOTP setup).
+
+All packages of the repository (`SlimIdentity`, `SlimIdentity.Testing`) are released together with the same version.
 
 [Unreleased]: https://github.com/timmkautz/slimidentity/commits/main

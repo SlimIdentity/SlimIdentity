@@ -42,7 +42,7 @@ jobs:
         run: dotnet list SlimIdentity.slnx package --vulnerable --include-transitive 2>&1 | tee vulnerable.txt && ! grep -q "has the following vulnerable packages" vulnerable.txt
 
       - name: Pack
-        run: dotnet pack src/SlimIdentity/SlimIdentity.csproj --configuration Release --no-build --output artifacts
+        run: for p in src/*/*.csproj; do dotnet pack "$p" --configuration Release --no-build --output artifacts || exit 1; done
 
       - uses: actions/upload-artifact@v4
         if: always()

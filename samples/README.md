@@ -6,8 +6,10 @@
 | [`templates/`](templates) | Copy-paste templates for your own project (below). |
 
 The templates are **not** NuGet dependencies and are not shipped. Copy them into your project and adapt them – this
-keeps the core package free of EF Core, Dapper, SMTP & co. CI compiles them against the current library
-(`tests/SlimIdentity.SamplesCompileCheck`), so they never drift from the API.
+keeps the core package free of EF Core, Dapper, SMTP & co. CI compiles them against the current library and runs the
+[`SlimIdentity.Testing`](../src/SlimIdentity.Testing/README.md) conformance checks against the EF Core stores
+(`tests/SlimIdentity.Samples.Tests`, SQLite), so they never drift from the API or the store contracts. The Dapper
+stores target PostgreSQL – run the checks against your own database after adapting them.
 
 | Template | Content | Packages in your host |
 | :--- | :--- | :--- |
@@ -20,6 +22,9 @@ keeps the core package free of EF Core, Dapper, SMTP & co. CI compiles them agai
 | `Frontend/` | `slimIdentityClient.ts` – cookie flow (`X-CSRF`, device list, invitations, TOTP setup with QR code, e-mail change) and bearer flow with refresh rotation | – |
 
 ## Rules for your own stores
+
+Verify them automatically with [`SlimIdentity.Testing`](../src/SlimIdentity.Testing/README.md) – one call in a test
+against your real database checks all of the following, including the parallel cases.
 
 - `FindByEmailAsync` must search **case-insensitively** (e.g. a normalized column with a unique index).
 - `CreateAsync` returns `null` if the address is already taken (unique index on the normalized address,

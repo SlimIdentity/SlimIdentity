@@ -48,6 +48,34 @@ The [samples](../samples) implement all of this for EF Core and Dapper – **cop
 scratch**. The complete rules are listed in the [samples README](../samples/README.md#rules-for-your-own-stores);
 each interface member documents its contract in IntelliSense.
 
+### Verify your stores
+
+Whether you copied or wrote them: check them with **`SlimIdentity.Testing`** – one call in your test project, against
+a real database of the production kind (a test instance or a container):
+
+```bash
+dotnet add package SlimIdentity.Testing --prerelease
+```
+
+```csharp
+await using var services = new ServiceCollection()
+    .AddDbContext<AppDbContext>(o => o.UseNpgsql(testDatabase))
+    .AddScoped<ISlimUserStore, MyUserStore>()          // every registered store is checked
+    .AddScoped<ISlimTwoFactorStore, MyTwoFactorStore>()
+    .BuildServiceProvider();
+
+await SlimStoreConformance.VerifyAsync(services);      // throws with one line per violated rule and a fix hint
+```
+
+It checks every rule above – including the parallel ones, by firing concurrent calls from separate DI scopes like
+separate HTTP requests – and runs with any test framework. In-memory database providers enforce neither unique
+indexes nor locks, so a green run there proves nothing; the checks create test users under `@conformance.invalid`
+and never belong anywhere near production data. Details: [package README](../src/SlimIdentity.Testing/README.md).
+
+The checks are not theory: run against the EF Core sample on SQLite, they found two bugs before 1.0 – a unique
+violation from `ExecuteUpdate` that escaped as an exception, and GUIDs converted to upper-case text by the database,
+which would have invalidated every session on SQL Server.
+
 ## Your part: the application
 
 - **Data Protection key ring** persisted and shared between instances ([guide](guides/data-protection.md)) – it

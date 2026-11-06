@@ -14,7 +14,9 @@ endpoints (easy to get wrong) and `Microsoft.AspNetCore.Identity` / `MapIdentity
 encryption and rate limiting are the ASP.NET Core building blocks you already trust. What it adds are the *flows* –
 the order of checks, uniform answers, single-use tokens, safe behaviour under parallel requests. The data stays in
 your database, behind small interfaces you implement; a few of their methods carry security guarantees, so start from
-the provided samples ([how it works](https://github.com/timmkautz/slimidentity/blob/main/docs/how-it-works.md)).
+the provided samples and verify your stores with the
+[`SlimIdentity.Testing`](https://www.nuget.org/packages/SlimIdentity.Testing) conformance checks
+([how it works](https://github.com/timmkautz/slimidentity/blob/main/docs/how-it-works.md)).
 
 > **Status: pre-release.** Working towards 1.0 – the API may still change until then, and the code has not been
 > independently audited yet. Please report security issues privately – see

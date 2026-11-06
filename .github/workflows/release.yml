@@ -7,6 +7,8 @@ name: Release
 #     Repository owner: timmkautz   Repository: slimidentity   Workflow file: release.yml   Environment: nuget
 # and in GitHub: Settings → Environments → "nuget" (optionally with required reviewers),
 # plus the repository/environment variable NUGET_USER = your nuget.org user name (not the e-mail).
+# Recommended: reserve the ID prefix "SlimIdentity.*" on nuget.org, so all packages of this repository carry the
+# verified checkmark and nobody else can publish under that prefix.
 
 on:
   push:
@@ -39,8 +41,9 @@ jobs:
       - name: Test
         run: dotnet test SlimIdentity.slnx --configuration Release --no-build
 
+      # every package in src/, all with the same version
       - name: Pack
-        run: dotnet pack src/SlimIdentity/SlimIdentity.csproj --configuration Release --no-build --output artifacts
+        run: for p in src/*/*.csproj; do dotnet pack "$p" --configuration Release --no-build --output artifacts || exit 1; done
 
       - name: Log in to nuget.org (Trusted Publishing)
         id: nuget

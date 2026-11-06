@@ -11,6 +11,7 @@
 //       .AddSessionStore<EfCoreSessionStore>()
 //       .AddEmailSender<MailKitEmailSender>();
 
+using System.Data.Common;
 using System.Security.Claims;
 using SlimIdentity;
 using Microsoft.EntityFrameworkCore;
@@ -49,12 +50,16 @@ public sealed class EfCoreUserStore(AppDbContext db) : ISlimUserStore
         }
         catch (DbUpdateException)
         {
-            // unique index on NormalizedEmail: a concurrent registration took the address
+            // unique index on NormalizedEmail: a concurrent registration took the address – any other error is rethrown
             db.Entry(user).State = EntityState.Detached;
-            return null;
+            if (await IsEmailTakenAsync(user.NormalizedEmail, null, ct)) return null;
+            throw;
         }
         return Map(user);
     }
+
+    private Task<bool> IsEmailTakenAsync(string normalizedEmail, Guid? exceptUserId, CancellationToken ct) =>
+        db.Users.AsNoTracking().AnyAsync(u => u.NormalizedEmail == normalizedEmail && u.Id != exceptUserId, ct);
 
     // ---- sign-in bookkeeping: narrow, atomic updates (never write back a whole, possibly outdated user)
 
@@ -117,9 +122,12 @@ public sealed class EfCoreUserStore(AppDbContext db) : ISlimUserStore
                 .SetProperty(u => u.Email, newEmail)
                 .SetProperty(u => u.NormalizedEmail, normalized), ct) == 1;
         }
-        catch (DbUpdateException)
+        catch (DbException)
         {
-            return false;
+            // ExecuteUpdate bypasses SaveChanges: the provider's own exception arrives (PostgresException, SqlException, …),
+            // not DbUpdateException. Report "taken" only if the unique index really is the reason.
+            if (await IsEmailTakenAsync(normalized, id, ct)) return false;
+            throw;
         }
     }
 
@@ -254,12 +262,12 @@ public sealed class EfCoreSessionStore(AppDbContext db) : ISlimSessionStore
     }
 
     public async Task<SlimSession?> FindAsync(string sessionId, CancellationToken ct) =>
-        await db.Sessions.AsNoTracking().Where(s => s.Id == sessionId).Select(ToSlim).FirstOrDefaultAsync(ct);
+        await db.Sessions.AsNoTracking().FirstOrDefaultAsync(s => s.Id == sessionId, ct) is { } s ? ToSlim(s) : null;
 
     public async Task<IReadOnlyCollection<SlimSession>> ListAsync(string userId, CancellationToken ct)
     {
         var id = Guid.Parse(userId);
-        return await db.Sessions.AsNoTracking().Where(s => s.UserId == id).Select(ToSlim).ToListAsync(ct);
+        return (await db.Sessions.AsNoTracking().Where(s => s.UserId == id).ToListAsync(ct)).Select(ToSlim).ToList();
     }
 
     public Task TouchAsync(string sessionId, DateTimeOffset lastSeenUtc, DateTimeOffset expiresUtc, CancellationToken ct) =>
@@ -276,7 +284,9 @@ public sealed class EfCoreSessionStore(AppDbContext db) : ISlimSessionStore
         return db.Sessions.Where(s => s.UserId == id && s.Id != exceptSessionId).ExecuteDeleteAsync(ct);
     }
 
-    private static readonly System.Linq.Expressions.Expression<Func<UserSession, SlimSession>> ToSlim = s => new SlimSession
+    // mapped in memory: Guid.ToString() inside a query is translated by the database – SQL Server and SQLite return
+    // upper case, which would no longer match the user id SlimIdentity compares with
+    private static SlimSession ToSlim(UserSession s) => new()
     {
         Id = s.Id, UserId = s.UserId.ToString(), Mode = s.Mode, AuthenticationMethod = s.AuthenticationMethod,
         ImpersonatorId = s.ImpersonatorId, CreatedUtc = s.CreatedUtc, LastSeenUtc = s.LastSeenUtc,

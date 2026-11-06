@@ -1,19 +1,23 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <!--
-    Compile check for the copy-paste templates in samples/templates (they are not shipped).
-    Part of the solution, so every build and CI run keeps them in sync with the library API.
+    Tests for the copy-paste templates in samples/templates (they are not shipped):
+    - compiles all of them against the current library API (every build / CI run),
+    - runs SlimIdentity.Testing against the EF Core stores on SQLite, so the templates provably honour the store contracts.
   -->
   <PropertyGroup>
     <OutputType>Library</OutputType>
+    <IsTestProject>true</IsTestProject>
   </PropertyGroup>
 
   <ItemGroup>
     <Compile Include="..\..\samples\templates\**\*.cs" Exclude="..\..\samples\templates\**\bin\**;..\..\samples\templates\**\obj\**" />
     <ProjectReference Include="..\..\src\SlimIdentity\SlimIdentity.csproj" />
+    <ProjectReference Include="..\..\src\SlimIdentity.Testing\SlimIdentity.Testing.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
     <PackageReference Include="Microsoft.AspNetCore.DataProtection.EntityFrameworkCore" />
     <PackageReference Include="Microsoft.AspNetCore.DataProtection.StackExchangeRedis" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.Certificate" />
@@ -22,5 +26,13 @@
     <PackageReference Include="MailKit" />
     <PackageReference Include="SendGrid" />
     <PackageReference Include="System.DirectoryServices.Protocols" />
+
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
   </ItemGroup>
 </Project>

@@ -1,0 +1,39 @@
+<Project>
+  <!-- Shared settings for all shipped packages (src/*). Imports the repository-wide settings first. -->
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <PropertyGroup>
+    <!-- every public member is documented (missing docs = warning = CI error) -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <IsAotCompatible>true</IsAotCompatible>
+
+    <IsPackable>true</IsPackable>
+    <Authors>Timm Kautz</Authors>
+    <Copyright>Copyright (c) 2026 Timm Kautz</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/timmkautz/slimidentity</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/timmkautz/slimidentity</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageIcon>icon.png</PackageIcon>
+    <PackageReleaseNotes>See https://github.com/timmkautz/slimidentity/blob/main/CHANGELOG.md</PackageReleaseNotes>
+
+    <!-- debugging into the package: SourceLink (built into the SDK) + symbol package -->
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+
+    <!-- validates the package layout now; add PackageValidationBaselineVersion=1.0.0 after the first release
+         to detect breaking API changes automatically -->
+    <EnablePackageValidation>true</EnablePackageValidation>
+
+    <!-- one version for all packages, from git tags (v1.0.0); untagged builds become 1.0.0-alpha.0.N -->
+    <MinVerTagPrefix>v</MinVerTagPrefix>
+    <MinVerMinimumMajorMinor>1.0</MinVerMinimumMajorMinor>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MinVer" PrivateAssets="all" />
+    <None Include="$(MSBuildThisFileDirectory)../assets/icon.png" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
+</Project>

@@ -100,9 +100,10 @@ app.MapSlimIdentityApi();
 
 ## 8. Repository layout
 ```
-src/SlimIdentity/                          the package
+src/SlimIdentity/                          the main package
+src/SlimIdentity.Testing/                  package: conformance checks for store implementations (test projects only)
 tests/SlimIdentity.Tests/                  unit and integration tests (in-memory host, fake clock, fake OAuth provider)
-tests/SlimIdentity.SamplesCompileCheck/    compiles the copy-paste templates against the current API
+tests/SlimIdentity.Samples.Tests/          compiles the copy-paste templates; conformance of the EF Core stores (SQLite)
 samples/SlimIdentity.Demo/                 runnable demo with in-memory stores (Native AOT) + .http file
 samples/templates/                         copy-paste templates (not shipped): EfCore, Dapper, Email, Enterprise,
                                            Security, DataProtection, Frontend
@@ -147,6 +148,7 @@ Deliberately not part of the package (extra dependency, highly deployment specif
 | Single-use challenges via a second "last used" value | Code times and challenge times cannot share one counter (a code from the current step may predate a new challenge); a second compare-and-set needs no token table. Of two open challenges only the newer one can still complete. |
 | Narrow store methods for sign-in bookkeeping | Sign-ins are slow (hashing) and parallel; writing back the whole user could undo a concurrent password change, and read-modify-write would lose failed attempts. One small statement each is easy to implement atomically in any database. |
 | Few options, secure behaviour fixed | Every switch is something to understand and a way to weaken the protection. JWT is enabled by its secret, all links derive from one `BaseUrl`, one `TrustedOrigins` list serves CSRF and redirects; CSRF, reuse detection and protocol lifetimes are not configurable. |
+| Store contracts are checked by a test kit, not just documented | The guarantees that matter (atomicity, uniqueness, single use) are invisible in normal operation; `SlimIdentity.Testing` makes them verifiable against the real database. Separate package, so test code never ships to production. |
 | No password composition rules | NIST SP 800-63B: length and a breached-password check beat character classes; classic rules remain possible as an `ISlimPasswordRule`. |
 | `CreateAsync` returns `null` for a taken address | The unique index decides, not a prior lookup – concurrent registrations get the uniform answer instead of an error. |
 | Metrics via `System.Diagnostics.Metrics` | Zero dependency, OpenTelemetry-ready, no cost when nobody listens. |

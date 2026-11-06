@@ -24,10 +24,14 @@ The solution contains:
 
 | Project | Purpose |
 | :--- | :--- |
-| `src/SlimIdentity` | the NuGet package |
-| `tests/SlimIdentity.Tests` | unit and integration tests (in-memory host, `FakeTimeProvider`) |
+| `src/SlimIdentity` | the main NuGet package |
+| `src/SlimIdentity.Testing` | NuGet package: conformance checks for store implementations |
+| `tests/SlimIdentity.Tests` | unit and integration tests (in-memory host, `FakeTimeProvider`), conformance of the test stores |
+| `tests/SlimIdentity.Samples.Tests` | compiles the copy-paste templates in `samples/` and runs the conformance checks against the EF Core stores (SQLite) |
 | `samples/SlimIdentity.Demo` | runnable demo (`dotnet run --project samples/SlimIdentity.Demo`, see the `.http` file) |
-| `tests/SlimIdentity.SamplesCompileCheck` | compiles the copy-paste templates in `samples/` against the current API |
+
+All packages in `src/` share their metadata (`src/Directory.Build.props`) and get the same version from the git tag.
+A change to a store contract needs a matching check in `SlimIdentity.Testing`.
 
 Native AOT check (needs the platform's native toolchain, see the
 [.NET docs](https://learn.microsoft.com/dotnet/core/deploying/native-aot/#prerequisites)):

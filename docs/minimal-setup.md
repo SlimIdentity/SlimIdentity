@@ -87,7 +87,8 @@ list. Using Dapper instead? Take `DapperUserStore` and the `users` table from
 
 > Copy the store rather than writing it from scratch: several of its methods must be **atomic single statements**
 > (e.g. `IncrementFailedLoginAttemptsAsync`), and the security guarantees depend on that – see
-> [How SlimIdentity works](how-it-works.md#your-part-the-stores).
+> [How SlimIdentity works](how-it-works.md#your-part-the-stores). Once adapted, verify it against your database with
+> one call from `SlimIdentity.Testing` ([how](how-it-works.md#verify-your-stores)).
 
 ## 4. Try it
 
