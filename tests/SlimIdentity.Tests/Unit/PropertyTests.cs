@@ -110,7 +110,7 @@ public sealed class PropertyTests
     // ------------------------------------------------------------------ workflow tokens
 
     private static readonly SlimWorkflowTokens Tokens =
-        new(new EphemeralDataProtectionProvider(), NullLogger<SlimWorkflowTokens>.Instance);
+        new(new EphemeralDataProtectionProvider(), TimeProvider.System, NullLogger<SlimWorkflowTokens>.Instance);
 
     [Property(MaxTest = Many)]
     public Property Arbitrary_strings_are_never_accepted_as_tokens() =>

@@ -40,7 +40,7 @@ internal sealed class SlimTwoFactorHandlers(
 
         var secret = SlimTotp.GenerateSecret();
         var setupToken = workflow.Protect(SlimWorkflowTokens.TwoFactorSetupPurpose,
-            new SlimTwoFactorSetupPayload(user.Id, secret), SlimIdentityDefaults.TwoFactorSetupTokenLifetime);
+            new SlimTwoFactorSetupPayload(user.Id, secret, user.SecurityStamp), SlimIdentityDefaults.TwoFactorSetupTokenLifetime);
 
         return Results.Ok(new SlimTwoFactorSetupResponse(
             SlimTotp.FormatSharedKey(secret),
@@ -48,14 +48,17 @@ internal sealed class SlimTwoFactorHandlers(
             setupToken));
     }
 
-    // POST /2fa/enable
+    // POST /2fa/enable – password required like every other 2FA change: a stolen session alone must not install or
+    // replace the second factor (that would lock the owner out for good)
     public async Task<IResult> EnableAuthenticatorAsync(SlimTwoFactorEnableRequest? request, CancellationToken ct)
     {
-        var (user, error) = await account.LoadCurrentUserAsync(forbidImpersonation: true, ct);
+        var (user, error) = await ConfirmPasswordAsync(new SlimPasswordConfirmationRequest(request?.Password ?? string.Empty), ct);
         if (user is null) return error!;
 
+        // the setup token belongs to this user and dies with the security stamp (logout-all, password change, …)
         if (!workflow.TryUnprotect<SlimTwoFactorSetupPayload>(SlimWorkflowTokens.TwoFactorSetupPurpose, request?.SetupToken, out var payload)
-            || !string.Equals(payload.Uid, user.Id, StringComparison.Ordinal))
+            || !string.Equals(payload.Uid, user.Id, StringComparison.Ordinal)
+            || !SlimHashing.FixedTimeEquals(payload.Stamp, user.SecurityStamp))
             return SlimResults.InvalidToken();
 
         // the first code is consumed as well – it cannot be replayed for a sign-in afterwards

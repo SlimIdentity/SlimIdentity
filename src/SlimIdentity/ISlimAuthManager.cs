@@ -30,8 +30,22 @@ public interface ISlimAuthManager
     /// <summary>
     /// Step-up authentication (sudo mode): re-issues the current session with additional temporary claims,
     /// e.g. <see cref="SlimClaims.SudoFor(TimeSpan, TimeProvider?)"/>. An active impersonation is preserved.
+    /// <paramref name="user"/> must be the signed-in user of the current request – anything else throws
+    /// <see cref="InvalidOperationException"/> (the session would otherwise switch to another account).
+    /// Confirm the password first with <see cref="ConfirmPasswordAsync"/>.
     /// </summary>
     Task<SlimAuthResult> ElevateSessionAsync(SlimUser user, IEnumerable<Claim> additionalClaims, bool useCookies, CancellationToken ct = default);
+
+    /// <summary>
+    /// Re-confirms the password of <paramref name="user"/> with the rules of the built-in endpoints: an active lockout
+    /// is honoured, failures count towards it (incl. the lockout notification), parallel attempts are serialized and
+    /// <see cref="ISlimCustomPasswordValidator"/> is used when registered. Returns <c>null</c> when the password is
+    /// correct, otherwise the result to return as-is: <c>400 invalid_password</c> or <c>423</c> with <c>Retry-After</c>.
+    /// </summary>
+    /// <example><code>
+    /// if (await auth.ConfirmPasswordAsync(user, request.Password, ct) is { } failure) return failure;
+    /// </code></example>
+    Task<IResult?> ConfirmPasswordAsync(SlimUser user, string? password, CancellationToken ct = default);
 
     /// <summary>
     /// Ends the current session: removes the auth cookie, consumes the refresh token (if given) and – with

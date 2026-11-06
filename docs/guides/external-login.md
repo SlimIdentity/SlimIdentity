@@ -27,17 +27,24 @@ Register the callback URL of the handler (e.g. `/signin-google`) at the provider
 ## Flow
 
 The front end **navigates** (not `fetch`) to `/auth/login/{provider}?returnUrl=…&useCookies=true|false`.
+Bearer clients add a PKCE challenge (RFC 7636): they create a random `code_verifier` (43–128 characters), keep it
+(e.g. in `sessionStorage`) and send `code_challenge=BASE64URL(SHA256(verifier))&code_challenge_method=S256` –
+without it the request is rejected with `400 code_challenge_required`.
 After the provider round trip SlimIdentity redirects to `returnUrl`:
 
 | Situation | Redirect |
 | :--- | :--- |
 | Cookie mode, success | `returnUrl` – the cookie is set |
-| Bearer mode, success | `returnUrl?code=…` → `POST /auth/login/external/exchange { code }` returns the token pair |
-| 2FA enabled | `returnUrl?slim_status=requires_two_factor&preAuthToken=…&method=…` → continue with `/auth/login/2fa` |
+| Cookie mode, 2FA enabled | `returnUrl#slim_status=requires_two_factor&preAuthToken=…&method=…` → continue with `/auth/login/2fa` |
+| Bearer mode | `returnUrl#code=…` → `POST /auth/login/external/exchange { code, codeVerifier, twoFactorRememberToken? }` returns the token pair – or, with 2FA, `401 requires_two_factor` with `preAuthToken` |
 | Error | `returnUrl?slim_error=<code>` |
 
-Tokens never appear in URLs; the exchange code is valid for 1 minute and works exactly once (registered in
-`ISlimRefreshTokenStore`, or in memory when no refresh-token store is registered – then per instance only).
+Secrets travel only in the URL **fragment**, which browsers never send to servers, logs or referrers; only error codes
+use the query. The exchange code is valid for 1 minute, works exactly once (registered in `ISlimRefreshTokenStore`,
+or in memory when no refresh-token store is registered – then per instance only) and only together with the
+verifier – an intercepted code (deep link, history, another app) is worthless. The front-end client
+(`samples/templates/Frontend/slimIdentityClient.ts`) does all of this: `loginWith(provider)` and
+`completeExternalLogin()`.
 
 ## Account matching
 
@@ -46,7 +53,10 @@ Tokens never appear in URLs; the exchange code is valid for 1 minute and works e
    - linked automatically if the e-mail is **verified** (`email_verified=true`, or the provider is listed in
      `TrustedEmailProviders`) and `AutoLinkVerifiedEmails` is on;
    - otherwise `slim_error=account_conflict` – the user signs in with the password and links the account in your app.
-3. Otherwise a new password-less user is created (`AllowAutoRegistration`), or `slim_error=registration_disabled`.
+   - If that account was never confirmed (someone registered the address without owning it), the verified owner
+     takes it over: the registrant's password, 2FA, sessions and external logins are removed.
+3. Otherwise a new password-less user is created (`AllowAutoRegistration`) – only for a **verified** e-mail, else
+   `slim_error=email_not_verified` –, or `slim_error=registration_disabled`.
 
 Inactive, locked and (with `RequireConfirmedEmail`) unconfirmed accounts are rejected with matching error codes.
 

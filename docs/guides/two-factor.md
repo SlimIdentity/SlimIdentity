@@ -33,7 +33,7 @@ EF Core and Dapper implementations are in [`samples/templates`](../../samples/te
    img.src = await QRCode.toDataURL(setup.authenticatorUri);
    ```
    (SlimIdentity deliberately ships no image generation – no dependency, and the front end controls size and styling.)
-3. The user enters the first 6-digit code: `POST /auth/2fa/enable` with `setupToken` and `code` → `recoveryCodes`
+3. The user enters the first 6-digit code: `POST /auth/2fa/enable` with `setupToken`, `code` and the current `password` → `recoveryCodes`
    (format `xxxx-xxxx-xxxx-xxxx`, **show them once**) and a refreshed `session`.
 
 **E-mail codes:** `POST /auth/2fa/enable-email` with the current `password`.

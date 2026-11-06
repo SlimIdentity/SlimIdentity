@@ -64,6 +64,9 @@ internal static partial class Log
     [LoggerMessage(3005, LogLevel.Debug, "SlimIdentity: rejected {Purpose} token.")]
     public static partial void TokenRejected(ILogger logger, Exception exception, string purpose);
 
+    [LoggerMessage(3006, LogLevel.Debug, "SlimIdentity: rejected expired {Purpose} token.")]
+    public static partial void TokenExpired(ILogger logger, string purpose);
+
     // ---------------------------------------------------------------- 4xxx account
     [LoggerMessage(4001, LogLevel.Information, "SlimIdentity: registration attempt for existing account {UserId}.")]
     public static partial void RegistrationForExistingAccount(ILogger logger, string userId);

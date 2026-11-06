@@ -11,7 +11,7 @@ namespace SlimIdentity;
 public static class SlimIdentityEndpointExtensions
 {
     private static readonly IAuthorizeData[] SlimAuthorize =
-        [new AuthorizeAttribute { AuthenticationSchemes = SlimIdentityDefaults.AuthenticationScheme }];
+        [new AuthorizeAttribute { AuthenticationSchemes = SlimIdentityDefaults.UserScheme }];   // never API keys
 
     /// <summary>
     /// Maps the hardened SlimIdentity JSON endpoints (default prefix <c>/auth</c>) incl. OpenAPI metadata.
@@ -358,7 +358,7 @@ public static class SlimIdentityEndpointExtensions
             group.MapPost("/login/external/exchange", static ([FromBody] SlimExternalExchangeRequest request,
                     [FromServices] SlimExternalLoginHandlers h, CancellationToken ct) => h.ExchangeAsync(request, ct))
                 .WithName("SlimIdentity_ExternalExchange")
-                .WithSummary("Exchange the one-time code from the external-login redirect for a JWT pair.")
+                .WithSummary("Exchange the one-time code from the external-login redirect (#code=…) and the PKCE verifier for a JWT pair – or a 2FA challenge.")
                 .Produces<SlimAuthResponse>()
                 .Produces<SlimStatusResponse>(StatusCodes.Status401Unauthorized)
                 .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
@@ -366,7 +366,8 @@ public static class SlimIdentityEndpointExtensions
         }
 
         group.MapGet("/login/{provider}", static (string provider, [FromQuery] string? returnUrl, [FromQuery] bool? useCookies,
-                [FromServices] SlimExternalLoginHandlers h) => h.ChallengeAsync(provider, returnUrl, useCookies))
+                [FromQuery(Name = "code_challenge")] string? codeChallenge, [FromQuery(Name = "code_challenge_method")] string? codeChallengeMethod,
+                [FromServices] SlimExternalLoginHandlers h) => h.ChallengeAsync(provider, returnUrl, useCookies, codeChallenge, codeChallengeMethod))
             .WithName("SlimIdentity_ExternalChallenge")
             .WithSummary("Start an OAuth / OIDC login (Google, Apple, Entra ID, Keycloak, …). Browser navigation, not fetch.")
             .Produces(StatusCodes.Status302Found)

@@ -201,6 +201,12 @@ public sealed class InMemoryExternalLoginStore(ISlimUserStore users) : ISlimExte
         _links[(provider, providerKey)] = userId;
         return Task.CompletedTask;
     }
+
+    public Task RemoveExternalLoginsAsync(string userId, CancellationToken ct)
+    {
+        foreach (var link in _links.Where(l => l.Value == userId).ToList()) _links.TryRemove(link.Key, out _);
+        return Task.CompletedTask;
+    }
 }
 
 public sealed class InMemorySessionStore : ISlimSessionStore

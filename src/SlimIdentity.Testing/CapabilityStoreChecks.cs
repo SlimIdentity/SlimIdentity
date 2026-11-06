@@ -277,5 +277,36 @@ internal static class ExternalLoginStoreChecks
                 Expect.True(await stores.UseAsync<ISlimExternalLoginStore, SlimUser?>(s => s.FindByExternalLoginAsync("SlimConformance", Guid.NewGuid().ToString("N"), ct)) is null,
                     "An unknown key found a user.");
             });
+
+        await run.CheckAsync(Store, "provider keys are compared case-sensitively",
+            "Subjects are opaque, case-sensitive strings. Compare them exactly – a case-insensitive database collation (SQL Server's default) would let \"Alice\" sign in as \"alice\"; re-check the key in memory or use a binary collation.",
+            async () =>
+            {
+                var user = await run.NewUserAsync();
+                var key = $"Subject-{Guid.NewGuid():N}";
+                await stores.UseAsync<ISlimExternalLoginStore>(s => s.LinkExternalLoginAsync(user.Id, "SlimConformance", key, ct));
+                Expect.True(await stores.UseAsync<ISlimExternalLoginStore, SlimUser?>(s => s.FindByExternalLoginAsync("SlimConformance", key.ToLowerInvariant(), ct)) is null,
+                    "A provider key differing only in case found the user.");
+            });
+
+        await run.CheckAsync(Store, "RemoveExternalLoginsAsync removes all links of one user only",
+            "DELETE … WHERE user_id = @userId.",
+            async () =>
+            {
+                var user = await run.NewUserAsync();
+                var other = await run.NewUserAsync();
+                string a = Guid.NewGuid().ToString("N"), b = Guid.NewGuid().ToString("N"), c = Guid.NewGuid().ToString("N");
+                await stores.UseAsync<ISlimExternalLoginStore>(s => s.LinkExternalLoginAsync(user.Id, "SlimConformanceA", a, ct));
+                await stores.UseAsync<ISlimExternalLoginStore>(s => s.LinkExternalLoginAsync(user.Id, "SlimConformanceB", b, ct));
+                await stores.UseAsync<ISlimExternalLoginStore>(s => s.LinkExternalLoginAsync(other.Id, "SlimConformanceA", c, ct));
+
+                await stores.UseAsync<ISlimExternalLoginStore>(s => s.RemoveExternalLoginsAsync(user.Id, ct));
+
+                Expect.True(await stores.UseAsync<ISlimExternalLoginStore, SlimUser?>(s => s.FindByExternalLoginAsync("SlimConformanceA", a, ct)) is null
+                    && await stores.UseAsync<ISlimExternalLoginStore, SlimUser?>(s => s.FindByExternalLoginAsync("SlimConformanceB", b, ct)) is null,
+                    "A link of the user survived RemoveExternalLoginsAsync.");
+                Expect.Equal(other.Id, (await stores.UseAsync<ISlimExternalLoginStore, SlimUser?>(s => s.FindByExternalLoginAsync("SlimConformanceA", c, ct)))?.Id,
+                    "the link of another user (must stay)");
+            });
     }
 }

@@ -61,6 +61,28 @@ First public release (1.0.0) in preparation.
 - Native AOT and trimming compatibility.
 - Samples for EF Core, Dapper, MailKit, SendGrid, outbox delivery, LDAP, client certificates (mTLS), Data Protection
   key ring persistence, Have I Been Pwned, admin endpoints and a TypeScript client (incl. QR code for TOTP setup).
+- `ISlimAuthManager.ConfirmPasswordAsync` – password confirmation for host endpoints (sudo mode) with the lockout
+  rules of the built-in endpoints.
+
+### Security (external review round 1)
+
+Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedContextTests`,
+`HostEndpoint.R7_*` / `Q3_*`); details in [attack scenarios](docs/attack-scenarios.md).
+
+- External login no longer creates an account for an e-mail address the provider has not verified
+  (`slim_error=email_not_verified`); the owner's first mailbox proof also removes external logins linked before.
+- Bearer external login uses PKCE (S256): `code_challenge` is required, the exchange needs the `codeVerifier`.
+  Exchange codes and 2FA challenges travel in the URL fragment, never in the query. **Breaking** for bearer clients.
+- `/2fa/enable` requires the current password, and its setup token dies with the security stamp. **Breaking.**
+- Parallel password and 2FA guesses beyond the lockout threshold are no longer evaluated (attempts of one account run
+  one after another per instance).
+- The account endpoints accept cookies and bearer tokens only; a user-bound API key can no longer act as the user or
+  mint a session there.
+- EF Core stores work on their own `DbContext` instance per request (`SlimEfContext<TContext>`) instead of the host's:
+  they no longer save the host's pending changes or detach its entities. The EF Core template uses `IdentityDb`.
+- `ElevateSessionAsync` refuses to elevate anyone but the signed-in user.
+- Workflow tokens (links, challenges, exchange codes, refresh tokens) carry their own expiry, checked against the
+  injected `TimeProvider`. Tokens issued before this change are no longer accepted.
 
 All packages of the repository (`SlimIdentity`, `SlimIdentity.EntityFrameworkCore`, `SlimIdentity.Testing`) are released
 together with the same version.

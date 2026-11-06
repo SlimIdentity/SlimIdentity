@@ -94,9 +94,19 @@ internal sealed class SlimAuthManager(
             null, null, issueRefreshToken: true, ct);
     }
 
+    public Task<IResult?> ConfirmPasswordAsync(SlimUser user, string? password, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+        return services.GetRequiredService<SlimCredentialService>().ConfirmPasswordAsync(user, password, Http, ct);
+    }
+
     public async Task<SlimAuthResult> ElevateSessionAsync(SlimUser user, IEnumerable<Claim> additionalClaims, bool useCookies, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(user);
         var current = Http.User;
+        // sid, act and auth_time are taken from the current session – they must not end up on another account
+        if (!string.Equals(current.GetSlimUserId(), user.Id, StringComparison.Ordinal))
+            throw new InvalidOperationException("SlimIdentity: ElevateSessionAsync elevates the signed-in user of the current request only.");
         var actor = SlimClaims.ParseActorClaim(current.FindFirst(SlimClaimTypes.Actor)?.Value) is { } a
             ? SlimClaims.SerializeActor(a.ToDictionary())
             : null;

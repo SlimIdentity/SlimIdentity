@@ -18,7 +18,7 @@ public sealed class ConcurrencyTests
 
         var setup = await client.PostJsonAsync("/auth/2fa/setup");
         var sharedKey = setup.Str("sharedKey");
-        var enabled = await client.PostJsonAsync("/auth/2fa/enable", new { setupToken = setup.Str("setupToken"), code = Code(app, sharedKey) });
+        var enabled = await client.PostJsonAsync("/auth/2fa/enable", new { setupToken = setup.Str("setupToken"), code = Code(app, sharedKey), password = TestApp.UserPassword });
         app.Time.Advance(TimeSpan.FromSeconds(30));   // next time step – the enable code is used
         return (sharedKey, enabled.GetProperty("recoveryCodes").EnumerateArray().Select(c => c.GetString()!).ToArray());
     }

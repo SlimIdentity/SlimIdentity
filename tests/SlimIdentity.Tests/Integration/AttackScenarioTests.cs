@@ -41,7 +41,7 @@ public sealed class AttackScenarioTests
         attacker.BearerToken = (await app.LoginBearerAsync(victim, "Attacker-Pass-123")).AccessToken;
         var setup = await attacker.PostJsonAsync("/auth/2fa/setup");
         var code = SlimTotp.Compute(SlimBase32.Decode(setup.Str("sharedKey")), app.Time.GetUtcNow().ToUnixTimeSeconds() / 30);
-        await attacker.PostJsonAsync("/auth/2fa/enable", new { setupToken = setup.Str("setupToken"), code });
+        await attacker.PostJsonAsync("/auth/2fa/enable", new { setupToken = setup.Str("setupToken"), code, password = "Attacker-Pass-123" });
 
         await app.CreateClient().PostAsync("/auth/forgot-password", new { email = victim });
         var link = (await app.Mail.WaitForAsync("password-reset", victim)).Payload;
@@ -88,7 +88,7 @@ public sealed class AttackScenarioTests
         me.BearerToken = (await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword)).AccessToken;
         var setup = await me.PostJsonAsync("/auth/2fa/setup");
         var code = SlimTotp.Compute(SlimBase32.Decode(setup.Str("sharedKey")), app.Time.GetUtcNow().ToUnixTimeSeconds() / 30);
-        await me.PostJsonAsync("/auth/2fa/enable", new { setupToken = setup.Str("setupToken"), code });
+        await me.PostJsonAsync("/auth/2fa/enable", new { setupToken = setup.Str("setupToken"), code, password = TestApp.UserPassword });
 
         await app.CreateClient().PostAsync("/auth/forgot-password", new { email = TestApp.UserEmail });
         var link = (await app.Mail.WaitForAsync("password-reset", TestApp.UserEmail)).Payload;

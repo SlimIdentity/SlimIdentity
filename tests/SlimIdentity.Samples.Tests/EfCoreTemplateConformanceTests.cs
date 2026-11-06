@@ -51,7 +51,8 @@ public sealed class EfCoreTemplateConformanceTests
     private static async Task VerifyAsync(Action<DbContextOptionsBuilder> provider, Func<AppDbContext, Task>? prepare = null)
     {
         await using var services = new ServiceCollection()
-            .AddDbContext<AppDbContext>(provider)
+            .AddDbContextFactory<AppDbContext>(provider)
+            .AddScoped<IdentityDb>()
             .AddSingleton(TimeProvider.System)
             .AddScoped<ISlimUserStore, EfCoreUserStore>()
             .AddScoped<ISlimTwoFactorStore, EfCoreTwoFactorStore>()

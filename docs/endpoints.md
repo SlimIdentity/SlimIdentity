@@ -32,13 +32,13 @@ with `ISlimTwoFactorStore`.
 
 | Endpoint | Description |
 | :--- | :--- |
-| `GET /login/{provider}?returnUrl=…&useCookies=…` ⏱ | Browser navigation (not `fetch`). Redirects to the identity provider. `404 unknown_provider`, `400 invalid_return_url`. |
+| `GET /login/{provider}?returnUrl=…&useCookies=…&code_challenge=…&code_challenge_method=S256` ⏱ | Browser navigation (not `fetch`). Redirects to the identity provider. Bearer mode requires the PKCE challenge. `404 unknown_provider`, `400 invalid_return_url`, `400 code_challenge_required`, `400 invalid_code_challenge`. |
 | `GET /login/{provider}/callback` | Handled internally; redirects to `returnUrl`. |
-| `POST /login/external/exchange` ⏱ | Bearer clients: `{ "code" }` from the redirect → token pair. `401 invalid_token`. |
+| `POST /login/external/exchange` ⏱ | Bearer clients: `{ "code", "codeVerifier", "twoFactorRememberToken"? }` – `code` from the redirect's fragment, `codeVerifier` from the PKCE challenge → token pair, or `401 requires_two_factor` with `preAuthToken`. `401 invalid_token`. |
 
-Redirect results on `returnUrl`: cookie mode – cookie set, no parameters; bearer mode – `?code=…`; 2FA required –
-`?slim_status=requires_two_factor&preAuthToken=…&method=…`; errors – `?slim_error=` one of `account_conflict`,
-`registration_disabled`, `email_required`, `account_disabled`, `account_locked`, `email_not_confirmed`,
+Redirect results on `returnUrl`: cookie mode – cookie set, no parameters; bearer mode – `#code=…` (fragment); 2FA
+required in cookie mode – `#slim_status=requires_two_factor&preAuthToken=…&method=…`; errors – `?slim_error=` one of
+`account_conflict`, `email_not_verified`, `registration_disabled`, `email_required`, `account_disabled`, `account_locked`, `email_not_confirmed`,
 `provider_mismatch`, `missing_provider_key`, `two_factor_unavailable`.
 
 ## Account
@@ -78,7 +78,7 @@ Links are created by the host with `ISlimAuthManager.CreateInvitationAsync` – 
 | :--- | :--- | :--- | :--- |
 | `GET /2fa` | – | `200` `enabled`, `method`, `hasAuthenticator` | – |
 | `POST /2fa/setup` | – | `200` `sharedKey`, `authenticatorUri`, `setupToken` (nothing stored yet) | `403` during impersonation |
-| `POST /2fa/enable` ⏱ | `setupToken`, `code` | `200` `recoveryCodes` + refreshed `session` | `400 invalid_token`, `400 invalid_two_factor_code` |
+| `POST /2fa/enable` ⏱ | `setupToken`, `code`, `password` | `200` `recoveryCodes` + refreshed `session` | `400 invalid_password`, `400 invalid_token`, `400 invalid_two_factor_code`, `423` |
 | `POST /2fa/enable-email` ⏱ | `password` | `200` `recoveryCodes` + `session` | `400 invalid_password`, `423` |
 | `POST /2fa/disable` ⏱ | `password` | `200` refreshed session | `400 invalid_password`, `423` |
 | `POST /2fa/recovery-codes` ⏱ | `password` | `200` new `recoveryCodes` | `400 two_factor_disabled`, `400 invalid_password`, `423` |
@@ -87,6 +87,7 @@ Links are created by the host with `ISlimAuthManager.CreateInvitationAsync` – 
 
 Enabling or disabling 2FA rotates the security stamp: all other devices are signed out, the calling device receives a
 new session. Every TOTP time step and e-mail code is accepted only once (replay protection) – including the code used
-for `/2fa/enable`.
+for `/2fa/enable`. Every 2FA change needs the current password – a stolen session alone cannot install or replace the
+second factor; a setup token dies with the security stamp (password change, logout-all).
 
-🔒 = requires authentication (cookie, bearer or API key via the `SlimIdentity` policy scheme).
+🔒 = requires authentication (cookie or bearer token via the `SlimIdentity.User` policy scheme – API keys are machine-to-machine credentials and are not accepted here).

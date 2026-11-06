@@ -132,7 +132,7 @@ const actions = {
 
   async enable2fa() {
     if (!state.setupToken) { alert("Set up the authenticator first."); return; }
-    const r = await call("POST", "/auth/2fa/enable", { setupToken: state.setupToken, code: await totp(state.totpSecret) });
+    const r = await call("POST", "/auth/2fa/enable", { setupToken: state.setupToken, code: await totp(state.totpSecret), password: password() });
     if (r.ok) { storeSession(r.json.session); showRecoveryCodes(r.json.recoveryCodes); }
   },
 

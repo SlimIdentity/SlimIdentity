@@ -58,6 +58,7 @@ public static class SlimIdentityServiceExtensions
         // ---------------------------------------------------------------- mail dispatch (enumeration-safe timing)
         services.TryAddSingleton<SlimEmailQueue>();
         services.TryAddSingleton<SlimMailThrottle>();
+        services.TryAddSingleton<SlimAttemptGate>();
         services.TryAddSingleton<Http.SlimDeploymentDiagnostics>();
         services.TryAddScoped<SlimEmailDispatcher>();
         services.AddHostedService<SlimEmailBackgroundService>();
@@ -95,6 +96,13 @@ public static class SlimIdentityServiceExtensions
                         return SlimIdentityDefaults.ApiKeyScheme;
                     return SlimIdentityDefaults.CookieScheme;
                 };
+            })
+            .AddPolicyScheme(SlimIdentityDefaults.UserScheme, "SlimIdentity (user)", o =>
+            {
+                o.ForwardDefaultSelector = context =>
+                    context.Request.Headers.Authorization.ToString().StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+                        ? SlimIdentityDefaults.BearerScheme
+                        : SlimIdentityDefaults.CookieScheme;
             })
             .AddCookie(SlimIdentityDefaults.CookieScheme)
             .AddCookie(SlimIdentityDefaults.ExternalScheme)

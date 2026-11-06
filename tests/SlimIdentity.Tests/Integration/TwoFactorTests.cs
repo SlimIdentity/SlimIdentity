@@ -18,7 +18,7 @@ public sealed class TwoFactorTests
 
         var setup = await client.PostJsonAsync("/auth/2fa/setup");
         var sharedKey = setup.Str("sharedKey");
-        var enabled = await client.PostJsonAsync("/auth/2fa/enable", new { setupToken = setup.Str("setupToken"), code = Code(app, sharedKey) });
+        var enabled = await client.PostJsonAsync("/auth/2fa/enable", new { setupToken = setup.Str("setupToken"), code = Code(app, sharedKey), password = TestApp.UserPassword });
         var codes = enabled.GetProperty("recoveryCodes").EnumerateArray().Select(c => c.GetString()!).ToArray();
         return (sharedKey, codes);
     }

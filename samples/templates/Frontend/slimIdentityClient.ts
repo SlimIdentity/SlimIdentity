@@ -98,9 +98,9 @@ export const cookieAuth = {
     return { ...setup, qrCode: await toQrDataUrl(setup.authenticatorUri) };   // e.g. (uri) => QRCode.toDataURL(uri)
   },
 
-  /** Confirms the first code; returns the recovery codes – show them exactly once. */
-  async enableAuthenticator(setupToken: string, code: string): Promise<string[]> {
-    const r = await cookieFetch("/auth/2fa/enable", { method: "POST", body: JSON.stringify({ setupToken, code }) });
+  /** Confirms the first code with the current password; returns the recovery codes – show them exactly once. */
+  async enableAuthenticator(setupToken: string, code: string, password: string): Promise<string[]> {
+    const r = await cookieFetch("/auth/2fa/enable", { method: "POST", body: JSON.stringify({ setupToken, code, password }) });
     return r.ok ? (await r.json()).recoveryCodes : [];
   },
 
@@ -174,6 +174,21 @@ export const cookieAuth = {
     window.location.href = `${AUTH}/login/${provider}?useCookies=true&returnUrl=${returnUrl}`;
   },
 
+  /**
+   * On the /after-login page: the session cookie is set – unless 2FA is required; then the challenge arrives in the
+   * URL fragment (#slim_status=requires_two_factor&preAuthToken=…), which is never sent to a server. Errors come as
+   * ?slim_error=….
+   */
+  readExternalLoginResult(): LoginResult {
+    const fragment = new URLSearchParams(window.location.hash.slice(1));
+    const error = new URLSearchParams(window.location.search).get("slim_error");
+    history.replaceState(null, "", window.location.pathname);   // remove secrets from the address bar / history
+    if (error) return { kind: "error", status: error };
+    if (fragment.get("slim_status") === "requires_two_factor")
+      return { kind: "two_factor", preAuthToken: fragment.get("preAuthToken") ?? "", method: fragment.get("method") === "totp" ? "totp" : "email" };
+    return { kind: "ok", auth: { status: "success", mode: "cookie" } as AuthResponse };
+  },
+
   api: cookieFetch,
 };
 
@@ -187,6 +202,13 @@ let refreshPromise: Promise<boolean> | null = null;
 // is a strict CSP. Prefer the cookie flow for browser SPAs; mobile apps use the platform's secure storage instead.)
 const REFRESH_KEY = "slim.refresh";
 const REMEMBER_KEY = "slim.2fa-remember";              // "remember this device" – mobile: secure storage
+const PKCE_KEY = "slim.pkce-verifier";                 // per tab, only between redirect and exchange
+
+function base64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
 
 function storeTokens(auth: AuthResponse) {
   accessToken = auth.accessToken ?? null;
@@ -247,15 +269,37 @@ export const bearerAuth = {
     return result;
   },
 
-  /** After the social-login redirect: /after-login?code=... */
-  async completeExternalLogin(code: string) {
+  /**
+   * Social login for bearer clients: full-page navigation with a PKCE challenge (RFC 7636, S256). The verifier stays
+   * in this tab; whoever intercepts the redirect gets a code that is worthless without it.
+   */
+  async loginWith(provider: string) {
+    const verifier = base64Url(crypto.getRandomValues(new Uint8Array(32)));
+    const challenge = base64Url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
+    sessionStorage.setItem(PKCE_KEY, verifier);
+    const returnUrl = encodeURIComponent(window.location.origin + "/after-login");
+    window.location.href = `${AUTH}/login/${provider}?useCookies=false&returnUrl=${returnUrl}`
+      + `&code_challenge=${challenge}&code_challenge_method=S256`;
+  },
+
+  /** On the /after-login page: the one-time code is in the fragment (#code=…); redeem it with the PKCE verifier. */
+  async completeExternalLogin(): Promise<LoginResult> {
+    const code = new URLSearchParams(window.location.hash.slice(1)).get("code");
+    const error = new URLSearchParams(window.location.search).get("slim_error");
+    const codeVerifier = sessionStorage.getItem(PKCE_KEY);
+    sessionStorage.removeItem(PKCE_KEY);
+    history.replaceState(null, "", window.location.pathname);   // remove the code from the address bar / history
+    if (error || !code || !codeVerifier) return { kind: "error", status: error ?? "missing_code" };
+
+    const twoFactorRememberToken = localStorage.getItem(REMEMBER_KEY) ?? undefined;
     const r = await fetch(`${AUTH}/login/external/exchange`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ code }),
+      body: JSON.stringify({ code, codeVerifier, twoFactorRememberToken }),
     });
-    if (r.ok) storeTokens(await r.json());
-    return r.ok;
+    const result = await toLoginResult(r);   // tokens – or a 2FA challenge (continue with loginTwoFactor)
+    if (result.kind === "ok") storeTokens(result.auth);
+    return result;
   },
 
   async logout() {

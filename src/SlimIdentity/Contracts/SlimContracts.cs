@@ -59,15 +59,18 @@ public sealed record SlimChangePasswordRequest(string CurrentPassword, string Ne
 /// <summary>Body of <c>POST /auth/2fa/enable</c>.</summary>
 /// <param name="SetupToken">Token from <c>POST /auth/2fa/setup</c>.</param>
 /// <param name="Code">First code from the authenticator app.</param>
-public sealed record SlimTwoFactorEnableRequest(string SetupToken, string Code);
+/// <param name="Password">The current password – a stolen session alone must not install or replace the second factor.</param>
+public sealed record SlimTwoFactorEnableRequest(string SetupToken, string Code, string? Password = null);
 
 /// <summary>Body of endpoints that require the current password (<c>/auth/2fa/disable</c>, …).</summary>
 /// <param name="Password">The current password.</param>
 public sealed record SlimPasswordConfirmationRequest(string Password);
 
 /// <summary>Body of <c>POST /auth/login/external/exchange</c>.</summary>
-/// <param name="Code">One-time code from the external-login redirect (<c>?code=</c>).</param>
-public sealed record SlimExternalExchangeRequest(string Code);
+/// <param name="Code">One-time code from the external-login redirect (fragment <c>#code=</c>).</param>
+/// <param name="CodeVerifier">PKCE verifier whose S256 hash was sent as <c>code_challenge</c> when the login started.</param>
+/// <param name="TwoFactorRememberToken">"Remember this device" token of a bearer client – skips the second factor like at <c>/auth/login</c>.</param>
+public sealed record SlimExternalExchangeRequest(string Code, string? CodeVerifier = null, string? TwoFactorRememberToken = null);
 
 /// <summary>Body of <c>POST /auth/invitation/info</c>.</summary>
 /// <param name="Token">Token from the invitation link.</param>

@@ -33,12 +33,11 @@ app.MapPost("/api/impersonation/stop", async (ISlimAuthManager auth, Cancellatio
 Re-confirm the password before dangerous actions:
 
 ```csharp
-app.MapPost("/api/sudo", async (SudoRequest req, ClaimsPrincipal me, ISlimUserStore store,
-        IPasswordHasher<SlimUser> hasher, ISlimAuthManager auth, CancellationToken ct) =>
+app.MapPost("/api/sudo", async (SudoRequest req, ClaimsPrincipal me, ISlimUserStore store, ISlimAuthManager auth, CancellationToken ct) =>
     {
         var user = await store.FindByIdAsync(me.GetSlimUserId()!, ct);
-        if (user is null || hasher.VerifyHashedPassword(user, user.PasswordHash, req.Password) == PasswordVerificationResult.Failed)
-            return Results.BadRequest();
+        if (user is null) return Results.Unauthorized();
+        if (await auth.ConfirmPasswordAsync(user, req.Password, ct) is { } failure) return failure;   // 400 / 423
         var result = await auth.ElevateSessionAsync(user, [SlimClaims.SudoFor(TimeSpan.FromMinutes(10))], me.IsSlimCookieSession(), ct);
         return Results.Ok(result.ToResponse(DateTimeOffset.UtcNow));
     })
@@ -46,6 +45,12 @@ app.MapPost("/api/sudo", async (SudoRequest req, ClaimsPrincipal me, ISlimUserSt
 
 app.MapDelete("/api/account", DeleteAccount).RequireAuthorization(SlimIdentityDefaults.SudoPolicy);
 ```
+
+`ConfirmPasswordAsync` applies the rules of the built-in endpoints: an active lockout is honoured, wrong passwords
+count towards it (with the lockout notification), parallel guesses are serialized and an
+`ISlimCustomPasswordValidator` (LDAP, legacy hashes) is used. Never verify the password with `IPasswordHasher`
+yourself – a stolen session could then guess it without limit. `ElevateSessionAsync` only accepts the signed-in user
+of the request.
 
 ## Banning a user
 

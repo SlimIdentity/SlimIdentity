@@ -6,10 +6,15 @@ namespace SlimIdentity.Services;
 
 /// <summary>
 /// Stateless, signed + encrypted workflow tokens via <see cref="IDataProtector"/> (no token table).
-/// Each token carries an expiry and is bound to the user's security stamp where relevant.
+/// Each token carries an expiry and is bound to the user's security stamp where relevant. The expiry is part of the
+/// protected payload and checked against the injected <see cref="TimeProvider"/> – not the system clock the
+/// time-limited protector would use – so every expiry follows the same clock (and is testable).
 /// </summary>
-internal sealed class SlimWorkflowTokens(IDataProtectionProvider provider, ILogger<SlimWorkflowTokens> logger)
+internal sealed class SlimWorkflowTokens(IDataProtectionProvider provider, TimeProvider time, ILogger<SlimWorkflowTokens> logger)
 {
+    /// <summary>Format version of the protected plaintext: <c>v2.{expires unix ms}.{json}</c>.</summary>
+    private const string FormatPrefix = "v2.";
+
     public const string EmailVerificationPurpose = "SlimIdentity.EmailVerification.v1";
     public const string PasswordResetPurpose = "SlimIdentity.PasswordReset.v1";
     public const string PreAuthPurpose = "SlimIdentity.PreAuth.v1";
@@ -31,8 +36,9 @@ internal sealed class SlimWorkflowTokens(IDataProtectionProvider provider, ILogg
 
     public string Protect<T>(string purpose, T payload, TimeSpan lifetime)
     {
-        var protector = provider.CreateProtector(purpose).ToTimeLimitedDataProtector();
-        return protector.Protect(JsonSerializer.Serialize(payload, TypeInfo<T>()), lifetime);
+        var expires = (time.GetUtcNow() + lifetime).ToUnixTimeMilliseconds();
+        return provider.CreateProtector(purpose).Protect(
+            string.Concat(FormatPrefix, expires.ToString(CultureInfo.InvariantCulture), ".", JsonSerializer.Serialize(payload, TypeInfo<T>())));
     }
 
     public bool TryUnprotect<T>(string purpose, string? token, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out T? payload) where T : class =>
@@ -45,9 +51,21 @@ internal sealed class SlimWorkflowTokens(IDataProtectionProvider provider, ILogg
         if (string.IsNullOrWhiteSpace(token) || token.Length > 8192) return false;
         try
         {
-            var protector = provider.CreateProtector(purpose).ToTimeLimitedDataProtector();
-            var json = protector.Unprotect(token, out expiresAt);
-            payload = JsonSerializer.Deserialize(json, TypeInfo<T>());
+            var plaintext = provider.CreateProtector(purpose).Unprotect(token);
+            var separator = plaintext.IndexOf('.', FormatPrefix.Length);
+            if (!plaintext.StartsWith(FormatPrefix, StringComparison.Ordinal) || separator < 0
+                || !long.TryParse(plaintext.AsSpan(FormatPrefix.Length, separator - FormatPrefix.Length), NumberStyles.None, CultureInfo.InvariantCulture, out var expires))
+                throw new FormatException("Unknown workflow token format.");
+
+            expiresAt = DateTimeOffset.FromUnixTimeMilliseconds(expires);
+            if (time.GetUtcNow() >= expiresAt)
+            {
+                Log.TokenExpired(logger, purpose);
+                expiresAt = default;
+                return false;
+            }
+
+            payload = JsonSerializer.Deserialize(plaintext.AsSpan(separator + 1), TypeInfo<T>());
             return payload is not null;
         }
         catch (Exception ex) when (ex is CryptographicException or JsonException or FormatException)
@@ -65,8 +83,9 @@ internal sealed record SlimPreAuthPayload(string Uid, string Stamp, bool UseCook
 /// <summary>"Remember this device" for 2FA; <c>ExpiresAt</c> (unix seconds) is checked against the injected clock.</summary>
 internal sealed record SlimRememberDevicePayload(string Uid, string Stamp, long ExpiresAt);
 internal sealed record SlimEmailChangePayload(string Uid, string OldEmail, string NewEmail, string Stamp);
-internal sealed record SlimTwoFactorSetupPayload(string Uid, string Secret);
-internal sealed record SlimExchangePayload(string Uid, string Stamp, string Provider, string Nonce);
+internal sealed record SlimTwoFactorSetupPayload(string Uid, string Secret, string Stamp);
+/// <summary><c>CodeChallenge</c>: PKCE S256 challenge – the code is redeemable only with the matching verifier.</summary>
+internal sealed record SlimExchangePayload(string Uid, string Stamp, string Provider, string Nonce, string CodeChallenge);
 /// <summary><c>AuthTime</c> = unix seconds of the original sign-in (absolute lifetime), <c>Sid</c> = server-side session (optional).</summary>
 internal sealed record SlimRefreshPayload(string Uid, string Stamp, string Amr, string Nonce, long AuthTime, string? Sid);
 internal sealed record SlimInvitationPayload(string Uid, string Email, string Stamp);

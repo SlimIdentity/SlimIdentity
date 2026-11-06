@@ -260,31 +260,35 @@ public sealed class OpenScenarioTests
         },
     };
 
-    private static async Task<string> ExchangeCodeAsync(TestApp app)
+    private static async Task<(string Code, string Verifier)> ExchangeCodeAsync(TestApp app)
     {
+        var (verifier, pkce) = ReviewRound1Tests.Pkce();
         var browser = app.CreateClient();
-        var challenge = await browser.GetAsync("/auth/login/Fake?useCookies=false&returnUrl=/done");
+        var challenge = await browser.GetAsync($"/auth/login/Fake?useCookies=false&returnUrl=/done&code_challenge={pkce}");
         var callback = await browser.GetAsync(challenge.Headers.Location!.OriginalString);
         var target = new Uri(new Uri("https://localhost"), callback.Headers.Location!);
-        return QueryHelpers.ParseQuery(target.Query)["code"].ToString();
+        return (QueryHelpers.ParseQuery(target.Fragment.TrimStart('#'))["code"].ToString(), verifier);
     }
 
     [Fact]
     public async Task F4_an_exchange_code_is_redeemed_once_even_in_parallel()
     {
         await using var app = await TestApp.StartAsync(WithProvider());
-        var code = await ExchangeCodeAsync(app);
+        var (code, verifier) = await ExchangeCodeAsync(app);
         var statuses = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(async () =>
-            (await app.CreateClient().PostAsync("/auth/login/external/exchange", new { code })).StatusCode)));
+            (await app.CreateClient().PostAsync("/auth/login/external/exchange", new { code, codeVerifier = verifier })).StatusCode)));
         Assert.Equal(1, statuses.Count(s => s == HttpStatusCode.OK));
     }
 
-    [Fact]
-    public async Task F4_an_exchange_code_expires()
+    [Theory]
+    [InlineData(true)]    // store path
+    [InlineData(false)]   // in-memory path (R8: expiry must follow the injected clock here, too)
+    public async Task F4_an_exchange_code_expires(bool refreshTokens)
     {
-        await using var app = await TestApp.StartAsync(WithProvider());
-        var code = await ExchangeCodeAsync(app);
+        var options = WithProvider();
+        await using var app = await TestApp.StartAsync(new TestAppOptions { RefreshTokens = refreshTokens, Builder = options.Builder });
+        var (code, verifier) = await ExchangeCodeAsync(app);
         app.Time.Advance(TimeSpan.FromMinutes(2));
-        await app.CreateClient().PostJsonAsync("/auth/login/external/exchange", new { code }, HttpStatusCode.Unauthorized);
+        await app.CreateClient().PostJsonAsync("/auth/login/external/exchange", new { code, codeVerifier = verifier }, HttpStatusCode.Unauthorized);
     }
 }

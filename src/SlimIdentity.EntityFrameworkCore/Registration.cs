@@ -1,3 +1,5 @@
+using Microsoft.Extensions.DependencyInjection.Extensions;
+
 namespace SlimIdentity.EntityFrameworkCore;
 
 /// <summary>Which stores <c>AddEntityFrameworkStores</c> registers (every registered store activates its endpoints).</summary>
@@ -19,7 +21,8 @@ public sealed class SlimEntityFrameworkOptions
 public static class SlimEntityFrameworkBuilderExtensions
 {
     /// <summary>
-    /// Registers the EF Core stores on <typeparamref name="TContext"/> (scoped, like the context). Requires
+    /// Registers the EF Core stores on <typeparamref name="TContext"/> (scoped). The stores work on their own context
+    /// instance per request (<see cref="SlimEfContext{TContext}"/>), never on the one the host's code resolves. Requires
     /// <c>modelBuilder.ApplySlimIdentity&lt;TUser, TKey&gt;()</c> in <c>OnModelCreating</c> and an
     /// <c>AddDbContext&lt;TContext&gt;</c> registration.
     /// </summary>
@@ -38,6 +41,7 @@ public static class SlimEntityFrameworkBuilderExtensions
         var options = new SlimEntityFrameworkOptions();
         configure?.Invoke(options);
         builder.Services.AddSingleton(options);
+        builder.Services.TryAddScoped<SlimEfContext<TContext>>();   // own context instance, never the host's scoped one
 
         builder.AddUserStore<SlimEfUserStore<TContext, TUser, TKey>>();
         if (options.TwoFactor) builder.AddTwoFactorStore<SlimEfTwoFactorStore<TContext, TUser, TKey>>();

@@ -55,7 +55,7 @@ public sealed class LogSecrecyTests
         var setup = await me.PostJsonAsync("/auth/2fa/setup");
         secrets.AddRange([setup.Str("sharedKey").Replace(" ", ""), setup.Str("setupToken")]);
         var code = SlimTotp.Compute(SlimBase32.Decode(setup.Str("sharedKey")), app.Time.GetUtcNow().ToUnixTimeSeconds() / 30);
-        var enabled = await me.PostJsonAsync("/auth/2fa/enable", new { setupToken = setup.Str("setupToken"), code });
+        var enabled = await me.PostJsonAsync("/auth/2fa/enable", new { setupToken = setup.Str("setupToken"), code, password = newPassword });
         var recovery = enabled.GetProperty("recoveryCodes").EnumerateArray().Select(c => c.GetString()!).ToArray();
         secrets.AddRange(recovery);
         var challenge = await client.PostJsonAsync("/auth/login", new { email, password = newPassword }, HttpStatusCode.Unauthorized);

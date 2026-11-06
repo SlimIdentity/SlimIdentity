@@ -42,11 +42,13 @@ internal static class SlimEf
 }
 
 /// <summary><see cref="ISlimUserStore"/> on your user entity.</summary>
-public class SlimEfUserStore<TContext, TUser, TKey>(TContext db, IServiceProvider services) : ISlimUserStore
+public class SlimEfUserStore<TContext, TUser, TKey>(SlimEfContext<TContext> context, IServiceProvider services) : ISlimUserStore
     where TContext : DbContext
     where TUser : class, ISlimUserEntity<TKey>, new()
     where TKey : IEquatable<TKey>, IParsable<TKey>
 {
+    private readonly TContext db = context.Db;
+
     private const string Failed = nameof(ISlimUserEntity<TKey>.FailedLoginAttempts);
 
     /// <summary>The users of the context.</summary>
@@ -200,11 +202,13 @@ public class SlimEfUserStore<TContext, TUser, TKey>(TContext db, IServiceProvide
 }
 
 /// <summary><see cref="ISlimTwoFactorStore"/>: secret and markers on the user entity, codes in <c>SlimRecoveryCodes</c>.</summary>
-public class SlimEfTwoFactorStore<TContext, TUser, TKey>(TContext db) : ISlimTwoFactorStore
+public class SlimEfTwoFactorStore<TContext, TUser, TKey>(SlimEfContext<TContext> context) : ISlimTwoFactorStore
     where TContext : DbContext
     where TUser : class, ISlimUserEntity<TKey>
     where TKey : IEquatable<TKey>, IParsable<TKey>
 {
+    private readonly TContext db = context.Db;
+
     private const string Secret = nameof(ISlimUserEntity<TKey>.TotpSecret);
     private const string CodeAt = nameof(ISlimUserEntity<TKey>.LastTwoFactorCodeAt);
     private const string ChallengeAt = nameof(ISlimUserEntity<TKey>.LastTwoFactorChallengeAt);
@@ -262,10 +266,12 @@ public class SlimEfTwoFactorStore<TContext, TUser, TKey>(TContext db) : ISlimTwo
 }
 
 /// <summary><see cref="ISlimRefreshTokenStore"/> on <c>SlimRefreshTokens</c>.</summary>
-public class SlimEfRefreshTokenStore<TContext, TKey>(TContext db, TimeProvider time) : ISlimRefreshTokenStore
+public class SlimEfRefreshTokenStore<TContext, TKey>(SlimEfContext<TContext> context, TimeProvider time) : ISlimRefreshTokenStore
     where TContext : DbContext
     where TKey : IEquatable<TKey>, IParsable<TKey>
 {
+    private readonly TContext db = context.Db;
+
     private DbSet<SlimRefreshTokenEntity<TKey>> Tokens => db.Set<SlimRefreshTokenEntity<TKey>>();
 
     /// <inheritdoc />
@@ -290,10 +296,12 @@ public class SlimEfRefreshTokenStore<TContext, TKey>(TContext db, TimeProvider t
 }
 
 /// <summary><see cref="ISlimSessionStore"/> on <c>SlimSessions</c>.</summary>
-public class SlimEfSessionStore<TContext, TKey>(TContext db, SlimEntityFrameworkOptions options) : ISlimSessionStore
+public class SlimEfSessionStore<TContext, TKey>(SlimEfContext<TContext> context, SlimEntityFrameworkOptions options) : ISlimSessionStore
     where TContext : DbContext
     where TKey : IEquatable<TKey>, IParsable<TKey>
 {
+    private readonly TContext db = context.Db;
+
     private DbSet<SlimSessionEntity<TKey>> Sessions => db.Set<SlimSessionEntity<TKey>>();
 
     /// <inheritdoc />
@@ -355,16 +363,21 @@ public class SlimEfSessionStore<TContext, TKey>(TContext db, SlimEntityFramework
 }
 
 /// <summary><see cref="ISlimExternalLoginStore"/> on <c>SlimExternalLogins</c>.</summary>
-public class SlimEfExternalLoginStore<TContext, TKey>(TContext db, ISlimUserStore users) : ISlimExternalLoginStore
+public class SlimEfExternalLoginStore<TContext, TKey>(SlimEfContext<TContext> context, ISlimUserStore users) : ISlimExternalLoginStore
     where TContext : DbContext
     where TKey : IEquatable<TKey>, IParsable<TKey>
 {
+    private readonly TContext db = context.Db;
+
     private DbSet<SlimExternalLoginEntity<TKey>> Logins => db.Set<SlimExternalLoginEntity<TKey>>();
 
     /// <inheritdoc />
     public async Task<SlimUser?> FindByExternalLoginAsync(string provider, string providerKey, CancellationToken ct)
     {
-        var link = await Logins.AsNoTracking().FirstOrDefaultAsync(l => l.Provider == provider && l.ProviderKey == providerKey, ct).ConfigureAwait(false);
+        var links = await Logins.AsNoTracking().Where(l => l.Provider == provider && l.ProviderKey == providerKey).ToListAsync(ct).ConfigureAwait(false);
+        // exact comparison in memory: a case-insensitive collation (SQL Server's default) must not match "Alice" for "alice"
+        var link = links.FirstOrDefault(l => string.Equals(l.Provider, provider, StringComparison.Ordinal)
+                                             && string.Equals(l.ProviderKey, providerKey, StringComparison.Ordinal));
         return link is null ? null : await users.FindByIdAsync(SlimEf.KeyToString(link.UserId), ct).ConfigureAwait(false);
     }
 
@@ -376,4 +389,10 @@ public class SlimEfExternalLoginStore<TContext, TKey>(TContext db, ISlimUserStor
         await db.SaveChangesAsync(ct).ConfigureAwait(false);
         db.ChangeTracker.Clear();
     }
+
+    /// <inheritdoc />
+    public Task RemoveExternalLoginsAsync(string userId, CancellationToken ct) =>
+        SlimEf.TryParseKey<TKey>(userId, out var key)
+            ? Logins.Where(SlimEf.Equal<SlimExternalLoginEntity<TKey>, TKey>(nameof(SlimExternalLoginEntity<TKey>.UserId), key)).ExecuteDeleteAsync(ct)
+            : Task.CompletedTask;
 }

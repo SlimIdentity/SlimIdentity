@@ -11,6 +11,11 @@ public static class SlimIdentityDefaults
     public const string BearerScheme = "SlimIdentity.Bearer";
     /// <summary><c>X-API-Key</c> authentication scheme (only with <see cref="ISlimApiKeyStore"/>).</summary>
     public const string ApiKeyScheme = "SlimIdentity.ApiKey";
+    /// <summary>
+    /// Policy scheme of the account endpoints (<c>/auth/*</c>): Bearer or Cookie, never an API key – keys are
+    /// machine-to-machine credentials and must not act as (or mint sessions for) the user they may be bound to.
+    /// </summary>
+    public const string UserScheme = "SlimIdentity.User";
     /// <summary>Temporary sign-in scheme for OAuth/OIDC handlers (set <c>SignInScheme</c> of your providers to this).</summary>
     public const string ExternalScheme = "SlimIdentity.External";
 

@@ -150,13 +150,12 @@ app.MapPost("/api/admin/impersonate/stop", async (ISlimAuthManager auth, Cancell
 
 // Step-up auth (sudo mode): confirm password → 5 minutes elevated session
 app.MapPost("/api/sudo", async (
-        SudoRequest request, ClaimsPrincipal principal, ISlimUserStore store,
-        IPasswordHasher<SlimUser> hasher, ISlimAuthManager auth, CancellationToken ct) =>
+        SudoRequest request, ClaimsPrincipal principal, ISlimUserStore store, ISlimAuthManager auth, CancellationToken ct) =>
     {
         var user = await store.FindByIdAsync(principal.GetSlimUserId()!, ct);
-        if (user is null || string.IsNullOrEmpty(user.PasswordHash)
-            || hasher.VerifyHashedPassword(user, user.PasswordHash, request.Password) == PasswordVerificationResult.Failed)
-            return Results.BadRequest(new SlimStatusResponse("invalid_password"));
+        if (user is null) return Results.Unauthorized();
+        // lockout + notification like the built-in endpoints (400 invalid_password / 423)
+        if (await auth.ConfirmPasswordAsync(user, request.Password, ct) is { } failure) return failure;
 
         var result = await auth.ElevateSessionAsync(user, [SlimClaims.SudoFor(TimeSpan.FromMinutes(5))], principal.IsSlimCookieSession(), ct);
         return Results.Ok(result.ToResponse(DateTimeOffset.UtcNow));

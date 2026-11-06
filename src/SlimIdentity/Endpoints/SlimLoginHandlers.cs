@@ -38,6 +38,9 @@ internal sealed class SlimLoginHandlers(
         // Oversized passwords are never hashed (DoS) – identical answer for known and unknown accounts.
         if (request.Password.Length > O.Password.MaximumLength) return Failed("invalid_password");
 
+        // lockout check, verification and counting form one step per account – parallel guesses queue up here instead
+        // of all passing the lockout check before the first failure is recorded (unknown accounts queue the same way)
+        using var attempt = await credentials.EnterAttemptAsync(email, ct);
         var user = await store.FindByEmailAsync(email, ct);
         if (user is null)
         {
@@ -177,6 +180,12 @@ internal sealed class SlimLoginHandlers(
         if (payload.UseCookies && SlimCsrfEndpointFilter.Validate(Http.Request, O, logger) is { } csrfError) return csrfError;
 
         var user = await store.FindByIdAsync(payload.Uid, ct);
+        if (user is null) return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
+
+        // one attempt per account at a time (shared with the password step); re-read inside the gate, a queued
+        // predecessor may just have locked the account
+        using var attempt = await credentials.EnterAttemptAsync(user.Email, ct);
+        user = await store.FindByIdAsync(payload.Uid, ct);
         if (user is null || !user.IsActive || !SlimHashing.FixedTimeEquals(user.SecurityStamp, payload.Stamp))
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
 

@@ -43,12 +43,13 @@ public sealed class ExternalLoginTests
             new Claim(ClaimTypes.NameIdentifier, "ext-123"), new Claim(ClaimTypes.Email, "social@test.local"), new Claim("email_verified", "true")));
         var browser = app.CreateClient();
 
-        var target = await NavigateAsync(browser, "useCookies=false&returnUrl=/done");
+        var (verifier, challenge) = ReviewRound1Tests.Pkce();
+        var target = await NavigateAsync(browser, $"useCookies=false&returnUrl=/done&code_challenge={challenge}");
         Assert.Equal("/done", target.AbsolutePath);
-        var code = QueryHelpers.ParseQuery(target.Query)["code"].ToString();
-        Assert.DoesNotContain("accessToken", target.Query);   // tokens never travel in URLs
+        var code = QueryHelpers.ParseQuery(target.Fragment.TrimStart('#'))["code"].ToString();
+        Assert.DoesNotContain("accessToken", target.ToString());   // tokens never travel in URLs
 
-        var tokens = await app.CreateClient().PostJsonAsync("/auth/login/external/exchange", new { code });
+        var tokens = await app.CreateClient().PostJsonAsync("/auth/login/external/exchange", new { code, codeVerifier = verifier });
         Assert.False(string.IsNullOrEmpty(tokens.Str("accessToken")));
         Assert.True(app.Users.Get("social@test.local").EmailConfirmed);
     }
@@ -61,11 +62,12 @@ public sealed class ExternalLoginTests
         await using var app = await TestApp.StartAsync(WithProvider(refreshTokens,
             new Claim(ClaimTypes.NameIdentifier, "ext-123"), new Claim(ClaimTypes.Email, "social@test.local"), new Claim("email_verified", "true")));
 
-        var target = await NavigateAsync(app.CreateClient(), "useCookies=false&returnUrl=/done");
-        var code = QueryHelpers.ParseQuery(target.Query)["code"].ToString();
+        var (verifier, challenge) = ReviewRound1Tests.Pkce();
+        var target = await NavigateAsync(app.CreateClient(), $"useCookies=false&returnUrl=/done&code_challenge={challenge}");
+        var code = QueryHelpers.ParseQuery(target.Fragment.TrimStart('#'))["code"].ToString();
 
-        await app.CreateClient().PostJsonAsync("/auth/login/external/exchange", new { code });
-        await app.CreateClient().PostJsonAsync("/auth/login/external/exchange", new { code }, HttpStatusCode.Unauthorized);
+        await app.CreateClient().PostJsonAsync("/auth/login/external/exchange", new { code, codeVerifier = verifier });
+        await app.CreateClient().PostJsonAsync("/auth/login/external/exchange", new { code, codeVerifier = verifier }, HttpStatusCode.Unauthorized);
     }
 
     [Fact]
@@ -156,14 +158,26 @@ public sealed class HostEndpointTests
 
             app.MapPost("/api/action", () => "done").RequireAuthorization().RequireSlimCsrf();
 
-            app.MapPost("/api/sudo", async (SudoRequest req, ClaimsPrincipal me, ISlimUserStore store,
-                    IPasswordHasher<SlimUser> hasher, ISlimAuthManager auth, CancellationToken ct) =>
+            app.MapPost("/api/sudo", async (SudoRequest req, ClaimsPrincipal me, ISlimUserStore store, ISlimAuthManager auth, CancellationToken ct) =>
                 {
                     var user = await store.FindByIdAsync(me.GetSlimUserId()!, ct);
-                    if (user is null || hasher.VerifyHashedPassword(user, user.PasswordHash, req.Password) == PasswordVerificationResult.Failed)
-                        return Results.BadRequest();
+                    if (user is null) return Results.Unauthorized();
+                    if (await auth.ConfirmPasswordAsync(user, req.Password, ct) is { } failure) return failure;   // lockout like the built-in endpoints
                     var result = await auth.ElevateSessionAsync(user, [SlimClaims.SudoFor(TimeSpan.FromMinutes(5))], me.IsSlimCookieSession(), ct);
                     return Results.Ok(result.ToResponse(DateTimeOffset.UtcNow));
+                })
+                .RequireAuthorization();
+
+            // a host bug: elevating someone else than the signed-in user
+            app.MapPost("/api/sudo-wrong-user", async (ClaimsPrincipal me, ISlimUserStore store, ISlimAuthManager auth, CancellationToken ct) =>
+                {
+                    var other = (await store.FindByEmailAsync(TestApp.AdminEmail, ct))!;
+                    try
+                    {
+                        await auth.ElevateSessionAsync(other, [SlimClaims.SudoFor(TimeSpan.FromMinutes(5))], me.IsSlimCookieSession(), ct);
+                        return Results.Ok("elevated");
+                    }
+                    catch (InvalidOperationException) { return Results.Ok("refused"); }
                 })
                 .RequireAuthorization();
 
@@ -215,6 +229,32 @@ public sealed class HostEndpointTests
         app.Time.Advance(TimeSpan.FromMinutes(6));
         Assert.Equal(HttpStatusCode.Forbidden, (await client.DeleteAsync("/api/danger")).StatusCode);
     }
+
+    [Fact]
+    public async Task R7_password_confirmation_on_host_endpoints_counts_towards_the_lockout()
+    {
+        await using var app = await TestApp.StartAsync(HostSetup());
+        var client = app.CreateClient();
+        client.BearerToken = (await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword)).AccessToken;
+
+        // a stolen session guesses the password on the host's sudo endpoint
+        for (var i = 0; i < 4; i++)
+            await client.PostJsonAsync("/api/sudo", new { password = $"guess-{i}" }, HttpStatusCode.BadRequest);
+        await client.PostJsonAsync("/api/sudo", new { password = "guess-4" }, (HttpStatusCode)423);
+
+        await app.Mail.WaitForAsync("lockout", TestApp.UserEmail);
+        await client.PostJsonAsync("/api/sudo", new { password = TestApp.UserPassword }, (HttpStatusCode)423);   // even the right one
+    }
+
+    [Fact]
+    public async Task Q3_a_session_is_never_elevated_to_another_account()
+    {
+        await using var app = await TestApp.StartAsync(HostSetup());
+        var client = app.CreateClient();
+        client.BearerToken = (await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword)).AccessToken;
+
+        Assert.Equal("\"refused\"", await (await client.PostAsync("/api/sudo-wrong-user")).Content.ReadAsStringAsync());
+    }
 }
 
 public sealed class MetricsTests
@@ -260,6 +300,12 @@ public sealed class TestExternalLoginStore(ISlimUserStore users) : ISlimExternal
     public Task LinkExternalLoginAsync(string userId, string provider, string providerKey, CancellationToken ct)
     {
         _links[(provider, providerKey)] = userId;
+        return Task.CompletedTask;
+    }
+
+    public Task RemoveExternalLoginsAsync(string userId, CancellationToken ct)
+    {
+        foreach (var link in _links.Where(l => l.Value == userId).ToList()) _links.TryRemove(link.Key, out _);
         return Task.CompletedTask;
     }
 }

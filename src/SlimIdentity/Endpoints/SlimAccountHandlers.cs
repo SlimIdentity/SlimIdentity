@@ -151,13 +151,15 @@ internal sealed class SlimAccountHandlers(
         if (!user.EmailConfirmed)
         {
             // First proof of the mailbox: whoever registered the address before (possibly an attacker – pre-account
-            // hijacking) must not keep a second factor that locks the real owner out.
+            // hijacking) must keep neither a second factor that locks the real owner out nor a linked external login.
             user.TwoFactorEnabled = false;
             if (services.GetService<SlimTwoFactorService>() is { } twoFactor)
             {
                 await twoFactor.RemoveSecretAsync(user, ct);
                 await twoFactor.RemoveRecoveryCodesAsync(user, ct);
             }
+            if (services.GetService<ISlimExternalLoginStore>() is { } externalLogins)
+                await externalLogins.RemoveExternalLoginsAsync(user.Id, ct);
             user.EmailConfirmed = true;
         }
         await store.UpdateSecurityStateAsync(user, ct);

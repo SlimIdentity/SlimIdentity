@@ -300,6 +300,13 @@ public sealed class DapperExternalLoginStore(NpgsqlDataSource db, ISlimUserStore
             "INSERT INTO external_logins (provider, provider_key, user_id) VALUES (@provider, @providerKey, @userId::uuid)",
             new { provider, providerKey, userId }, cancellationToken: ct));
     }
+
+    public async Task RemoveExternalLoginsAsync(string userId, CancellationToken ct)
+    {
+        await using var c = await db.OpenConnectionAsync(ct);
+        await c.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM external_logins WHERE user_id = @userId::uuid", new { userId }, cancellationToken: ct));
+    }
 }
 
 public sealed class DapperApiKeyStore(NpgsqlDataSource db) : ISlimApiKeyStore

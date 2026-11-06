@@ -1,7 +1,8 @@
 // SlimIdentity sample – EF Core implementations of all store interfaces.
 //
 // Registration:
-//   builder.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(cs));
+//   builder.Services.AddDbContextFactory<AppDbContext>(o => o.UseNpgsql(cs));   // also registers the scoped AppDbContext
+//   builder.Services.AddScoped<IdentityDb>();
 //   builder.Services.AddSlimIdentity(builder.Configuration.GetSection("SlimIdentity"))
 //       .AddUserStore<EfCoreUserStore>()
 //       .AddRefreshTokenStore<EfCoreRefreshTokenStore>()
@@ -18,8 +19,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace MyApp.Data;
 
-public sealed class EfCoreUserStore(AppDbContext db) : ISlimUserStore
+public sealed class EfCoreUserStore(IdentityDb identity) : ISlimUserStore
 {
+    private readonly AppDbContext db = identity.Db;
+
     public async Task<SlimUser?> FindByEmailAsync(string email, CancellationToken ct)
     {
         var normalized = email.Trim().ToUpperInvariant();
@@ -159,8 +162,10 @@ public sealed class EfCoreUserStore(AppDbContext db) : ISlimUserStore
     };
 }
 
-public sealed class EfCoreRefreshTokenStore(AppDbContext db, TimeProvider time) : ISlimRefreshTokenStore
+public sealed class EfCoreRefreshTokenStore(IdentityDb identity, TimeProvider time) : ISlimRefreshTokenStore
 {
+    private readonly AppDbContext db = identity.Db;
+
     public async Task StoreRefreshTokenAsync(string userId, string tokenHash, DateTimeOffset expiresAt, CancellationToken ct)
     {
         db.RefreshTokens.Add(new RefreshToken { TokenHash = tokenHash, UserId = Guid.Parse(userId), ExpiresAt = expiresAt });
@@ -178,8 +183,10 @@ public sealed class EfCoreRefreshTokenStore(AppDbContext db, TimeProvider time) 
     }
 }
 
-public sealed class EfCoreTwoFactorStore(AppDbContext db) : ISlimTwoFactorStore
+public sealed class EfCoreTwoFactorStore(IdentityDb identity) : ISlimTwoFactorStore
 {
+    private readonly AppDbContext db = identity.Db;
+
     public async Task<string?> GetTotpSecretAsync(SlimUser user, CancellationToken ct)
     {
         var id = Guid.Parse(user.Id);
@@ -229,12 +236,16 @@ public sealed class EfCoreTwoFactorStore(AppDbContext db) : ISlimTwoFactorStore
     }
 }
 
-public sealed class EfCoreExternalLoginStore(AppDbContext db, ISlimUserStore users) : ISlimExternalLoginStore
+public sealed class EfCoreExternalLoginStore(IdentityDb identity, ISlimUserStore users) : ISlimExternalLoginStore
 {
+    private readonly AppDbContext db = identity.Db;
+
     public async Task<SlimUser?> FindByExternalLoginAsync(string provider, string providerKey, CancellationToken ct)
     {
-        var link = await db.ExternalLogins.AsNoTracking()
-            .FirstOrDefaultAsync(l => l.Provider == provider && l.ProviderKey == providerKey, ct);
+        var links = await db.ExternalLogins.AsNoTracking()
+            .Where(l => l.Provider == provider && l.ProviderKey == providerKey).ToListAsync(ct);
+        // exact comparison in memory: a case-insensitive collation (SQL Server's default) must not match "Alice" for "alice"
+        var link = links.FirstOrDefault(l => l.Provider == provider && l.ProviderKey == providerKey);
         return link is null ? null : await users.FindByIdAsync(link.UserId.ToString(), ct);
     }
 
@@ -243,11 +254,19 @@ public sealed class EfCoreExternalLoginStore(AppDbContext db, ISlimUserStore use
         db.ExternalLogins.Add(new ExternalLogin { Provider = provider, ProviderKey = providerKey, UserId = Guid.Parse(userId) });
         await db.SaveChangesAsync(ct);
     }
+
+    public Task RemoveExternalLoginsAsync(string userId, CancellationToken ct)
+    {
+        var id = Guid.Parse(userId);
+        return db.ExternalLogins.Where(l => l.UserId == id).ExecuteDeleteAsync(ct);
+    }
 }
 
 /// <summary>Server-side sessions (per-device logout, "your devices" list). Clean up expired rows periodically.</summary>
-public sealed class EfCoreSessionStore(AppDbContext db) : ISlimSessionStore
+public sealed class EfCoreSessionStore(IdentityDb identity) : ISlimSessionStore
 {
+    private readonly AppDbContext db = identity.Db;
+
     public async Task CreateAsync(SlimSession session, CancellationToken ct)
     {
         db.Sessions.Add(new UserSession
@@ -294,8 +313,10 @@ public sealed class EfCoreSessionStore(AppDbContext db) : ISlimSessionStore
     };
 }
 
-public sealed class EfCoreApiKeyStore(AppDbContext db, TimeProvider time) : ISlimApiKeyStore
+public sealed class EfCoreApiKeyStore(IdentityDb identity, TimeProvider time) : ISlimApiKeyStore
 {
+    private readonly AppDbContext db = identity.Db;
+
     public async Task<IReadOnlyCollection<Claim>?> ValidateApiKeyAsync(string keyHash, CancellationToken ct)
     {
         var now = time.GetUtcNow();
@@ -307,4 +328,15 @@ public sealed class EfCoreApiKeyStore(AppDbContext db, TimeProvider time) : ISli
         claims.AddRange(key.Scopes.Select(s => new Claim("scope", s)));
         return claims;
     }
+}
+
+/// <summary>
+/// The stores' own AppDbContext per request – never the scoped one your endpoints use: a store's SaveChanges would
+/// otherwise save your pending changes along with its own.
+/// </summary>
+public sealed class IdentityDb(IDbContextFactory<AppDbContext> factory) : IDisposable
+{
+    private AppDbContext? _db;
+    public AppDbContext Db => _db ??= factory.CreateDbContext();
+    public void Dispose() => _db?.Dispose();
 }

@@ -15,7 +15,7 @@ Test names refer to `tests/SlimIdentity.Tests` (`Integration/…`, `Unit/Propert
 
 | ID | Attack → expected | Status |
 | :--- | :--- | :--- |
-| A1 | Many parallel wrong passwords → counter exact, lockout applies | covered – `Concurrency.Parallel_failed_logins_are_all_counted`, conformance (atomic increment) |
+| A1 | Many parallel wrong passwords → counter exact, lockout applies, no guess beyond the threshold is evaluated | covered – `Concurrency.Parallel_failed_logins_are_all_counted`, `ReviewRound1.R3_parallel_password_guesses_beyond_the_threshold_are_not_evaluated` (40 parallel), conformance (atomic increment). **Fixed** (review round 1): up to 14 of 40 parallel guesses were verified |
 | A2 | Locked account + correct password → not evaluated, answer identical to a wrong password | covered – `Login.Lockout_is_progressive_and_hidden_by_default` |
 | A3 | Unknown / known / inactive / locked → same answer and statistically same time | covered – `Login.Wrong_password_unknown_user_and_inactive_user_get_identical_answers`; timing `Timing.A3_…` (opt-in before a release: `SLIMIDENTITY_TIMING=1`, Mann-Whitney over interleaved requests). Last run: medians 47.8–47.9 ms, \|z\| ≤ 0.95 |
 | A4 | Address variants: case, Unicode normalization, whitespace, `+tag`, homoglyphs | covered – `AttackScenario.A4_*`. **Fixed:** NFC and NFD forms of one address created two accounts; addresses are now trimmed and NFC-normalized. `+tag` and homoglyphs are different addresses by design. |
@@ -57,7 +57,8 @@ Test names refer to `tests/SlimIdentity.Tests` (`Integration/…`, `Unit/Propert
 | :--- | :--- | :--- |
 | D1 | Same TOTP code twice, also in parallel → accepted once | covered – `TwoFactor.A_totp_code_is_accepted_only_once`, conformance (parallel) |
 | D2 | Older time step after a newer one → rejected | covered – `TwoFactor.A_totp_code_is_accepted_only_once` |
-| D3 | Brute force of the 6-digit code → counts towards lockout, rate limited | covered – `TwoFactor.Failed_second_factors_count_towards_the_lockout` |
+| D3 | Brute force of the 6-digit code → counts towards lockout, rate limited, parallel guesses beyond the threshold not evaluated | covered – `TwoFactor.Failed_second_factors_count_towards_the_lockout`, `ReviewRound1.R3_parallel_second_factor_guesses_beyond_the_threshold_are_not_evaluated`. **Fixed** (review round 1) |
+| D6 | Stolen session replaces the authenticator (locks the owner out) | covered – `ReviewRound1.R2_replacing_the_authenticator_needs_the_password`, `…R2_a_setup_token_dies_with_the_security_stamp`. **Fixed** (review round 1): `/2fa/enable` needed no password |
 | D4 | `preAuthToken` reused, parallel, expired, of another user | covered – `Concurrency.A_sign_in_challenge_completes_only_one_sign_in` (**fixed** in review), conformance (parallel); property tests for tampered tokens |
 | D5 | Recovery code reused, parallel, brute force, format variants | covered – `TwoFactor.Recovery_code_works_exactly_once`, conformance (parallel); 80-bit codes |
 | D6 | Mail bombing by requesting codes / links repeatedly | covered – `AttackScenario.D6_one_inbox_cannot_be_flooded_with_mails`. **Fixed:** at most 3 mails per recipient and kind in 15 minutes (5 for 2FA codes), silently, per instance |
@@ -77,7 +78,7 @@ Test names refer to `tests/SlimIdentity.Tests` (`Integration/…`, `Unit/Propert
 | E5 | Host-header injection into mail links | design – links come from `Links.BaseUrl`, never from request headers |
 | E6 | E-mail change to a taken address → uniform answer, no takeover | covered – `EmailChangeAndPasswordRule.Taken_address_answers_identically_and_informs_its_owner` |
 | E7 | Invitation for an existing / accepted account | covered – `InvitationAndImpersonation.Invitation_cannot_be_created_for_users_with_a_password` |
-| E8 | Pre-account hijacking: attacker registers the victim's address first | covered – `ExternalLogin.Pre_registered_unverified_account_is_taken_over_by_the_verified_owner_not_shared`, `AttackScenario.E8_*`. **Fixed:** the first proof of the mailbox (verified external login, password reset) removes the registrant's password, 2FA and sessions |
+| E8 | Pre-account hijacking: attacker registers the victim's address first | covered – `ExternalLogin.Pre_registered_unverified_account_is_taken_over_by_the_verified_owner_not_shared`, `AttackScenario.E8_*`. **Fixed:** the first proof of the mailbox (verified external login, password reset) removes the registrant's password, 2FA and sessions – and, since review round 1, external logins linked before (`ReviewRound1.R1_the_owners_mailbox_proof_removes_external_logins_linked_before`) |
 | E9 | HTML / header injection in mails via address or display name | host – mail templates must encode user data ([security model](security.md#host-responsibilities)) |
 
 ## F. External login
@@ -86,11 +87,13 @@ Test names refer to `tests/SlimIdentity.Tests` (`Integration/…`, `Unit/Propert
 | :--- | :--- | :--- |
 | F1 | Open redirect via `returnUrl` (`//evil`, `\\evil`, `https:evil`, user info, Unicode, control characters) | covered – `PropertyTests.Return_url_never_leaves_the_trusted_origins`, `…Known_open_redirect_tricks_are_rejected`. **Fixed:** `/\t/evil` passed (browsers strip the tab) |
 | F2 | Auto-linking with an unverified provider e-mail → `account_conflict` | covered – `ExternalLogin.Unverified_email_of_an_existing_account_is_not_linked` |
+| F2b | Auto-registration with an unverified provider e-mail (attacker's IdP account claims the victim's address) → no account, `email_not_verified` | covered – `ReviewRound1.R1_no_account_is_created_for_an_unverified_provider_address`. **Fixed** (review round 1) |
 | F3 | Same provider key at another provider → no mix-up | covered – conformance (external-login store) |
-| F4 | Exchange code reused, parallel, after expiry | covered – `ExternalLogin.The_exchange_code_works_only_once` (both modes), `OpenScenario.F4_*` (8 parallel redemptions, expiry) |
+| F4 | Exchange code reused, parallel, after expiry | covered – `ExternalLogin.The_exchange_code_works_only_once` (both modes), `OpenScenario.F4_*` (8 parallel redemptions, expiry with and without refresh-token store – **fixed** in review round 1: token expiry followed the system clock, not `TimeProvider`) |
+| F4b | Intercepted exchange code (deep link, history, malicious app) | covered – `ReviewRound1.C1_bearer_external_login_requires_a_pkce_challenge`, `…C1_the_exchange_code_travels_in_the_fragment_and_is_worthless_without_the_verifier`. **Fixed** (review round 1): the code is bound to a PKCE challenge (S256) and travels in the fragment |
 | F5 | Missing or forged `state` / correlation (OAuth CSRF) | design – handled by the ASP.NET Core remote handlers |
 | F6 | Several instances without a shared store → replay window | covered – with a refresh-token store the code is single-use across instances; without one, start-up warning `8004` ([several instances](guides/multiple-instances.md)), `DeploymentDiagnostics.External_login_without_refresh_store_is_reported_in_production` |
-| F7 | Credentials or codes in logs, referrers, URL history | covered – `ExternalLogin.New_external_user_…` (no tokens in URLs), `LogSecrecy.No_secret_or_address_is_ever_logged` |
+| F7 | Credentials or codes in logs, referrers, URL history | covered – `ExternalLogin.New_external_user_…`, `ReviewRound1.R6_no_pre_auth_token_in_the_query_after_external_login_with_2fa` (secrets only in the fragment – **fixed** in review round 1), `LogSecrecy.No_secret_or_address_is_ever_logged` |
 
 ## G. Admin, impersonation, API keys
 
@@ -101,14 +104,17 @@ Test names refer to `tests/SlimIdentity.Tests` (`Integration/…`, `Unit/Propert
 | G3 | Admin banned / signs out everywhere → impersonation ends | covered – `InvitationAndImpersonation.Impersonation_dies_when_the_admin_signs_out_everywhere` |
 | G4 | Impersonation + refresh token → none issued | covered – `OpenScenario.G4_impersonation_issues_no_refresh_token` |
 | G5 | Impersonating a more privileged user | host – rules belong in the host endpoint (documented in the template) |
-| G6 | Sudo window: expiry, transfer to another session | covered – `HostEndpoint.Sudo_policy_requires_an_elevated_session_that_expires` |
+| G6 | Sudo window: expiry, transfer to another session or account | covered – `HostEndpoint.Sudo_policy_requires_an_elevated_session_that_expires`, `HostEndpoint.Q3_a_session_is_never_elevated_to_another_account` |
+| G6b | Password guessing on the host's sudo endpoint with a stolen session | covered – `HostEndpoint.R7_password_confirmation_on_host_endpoints_counts_towards_the_lockout` (`ISlimAuthManager.ConfirmPasswordAsync`; **fixed** in review round 1: the template verified with `IPasswordHasher`, without lockout) |
 | G7 | API key: prefix brute force, timing, revoked / expired key, key in logs | covered in part – `HostEndpoint.Api_key_authenticates_machine_clients`; 256-bit keys, only hashes stored and compared by lookup |
+| G8 | User-bound API key acts as the user on `/auth/*` (mints a session, signs out everywhere) | covered – `ReviewRound1.R5_an_api_key_cannot_act_as_the_user_on_the_account_endpoints`. **Fixed** (review round 1): account endpoints accept cookies and bearer tokens only |
 
 ## H. Stores and infrastructure
 
 | ID | Attack → expected | Status |
 | :--- | :--- | :--- |
 | H1 | Non-atomic store (refresh, recovery, 2FA step) | covered – `SlimIdentity.Testing` conformance, incl. parallel checks |
+| H1b | EF stores and the host share one `DbContext` (host changes saved early or detached) | covered – `SharedContextTests` (EF Core package), template on its own context (`IdentityDb`). **Fixed** (review round 1) |
 | H2 | Non-unique / case-sensitive addresses in the templates | covered – conformance of the EF Core stores on SQLite, PostgreSQL and SQL Server and of the Dapper stores on PostgreSQL (service containers in CI; locally via `SLIMIDENTITY_TEST_POSTGRES` / `SLIMIDENTITY_TEST_SQLSERVER`) |
 | H3 | SQL injection in the Dapper template | covered – conformance check with quotes, comment characters and LIKE wildcards in addresses (all templates and any host store) |
 | H4 | Data Protection key ring lost / changed | design – documented failure modes ([guide](guides/data-protection.md)); TOTP secrets: recovery codes |

@@ -8,7 +8,6 @@ using SlimIdentity;
 using SlimIdentity.Security;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Logging;
@@ -64,12 +63,12 @@ public static class AdminEndpoints
             .RequireSlimCsrf();
 
         // Sudo: re-confirm password → 10 min elevated session
-        app.MapPost("/api/sudo", async (SudoRequest req, ClaimsPrincipal me, ISlimUserStore store,
-                IPasswordHasher<SlimUser> hasher, ISlimAuthManager auth, CancellationToken ct) =>
+        app.MapPost("/api/sudo", async (SudoRequest req, ClaimsPrincipal me, ISlimUserStore store, ISlimAuthManager auth, CancellationToken ct) =>
             {
                 var user = await store.FindByIdAsync(me.GetSlimUserId()!, ct);
-                if (user is null || hasher.VerifyHashedPassword(user, user.PasswordHash, req.Password) == PasswordVerificationResult.Failed)
-                    return Results.BadRequest(new { status = "invalid_password" });
+                if (user is null) return Results.Unauthorized();
+                // lockout, notification mail and ISlimCustomPasswordValidator – exactly like the built-in endpoints
+                if (await auth.ConfirmPasswordAsync(user, req.Password, ct) is { } failure) return failure;
 
                 var result = await auth.ElevateSessionAsync(user, [SlimClaims.SudoFor(TimeSpan.FromMinutes(10))], me.IsSlimCookieSession(), ct);
                 return Results.Ok(result.ToResponse(DateTimeOffset.UtcNow));

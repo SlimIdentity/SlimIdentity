@@ -137,7 +137,7 @@ public sealed class MultiInstanceTests
         var setup = await me.PostJsonAsync("/auth/2fa/setup");
         var key = SlimBase32.Decode(setup.Str("sharedKey"));
         string Code() => SlimTotp.Compute(key, cluster.Time.GetUtcNow().ToUnixTimeSeconds() / 30);
-        await cluster.On(cluster.B, takeOver: me).PostJsonAsync("/auth/2fa/enable", new { setupToken = setup.Str("setupToken"), code = Code() });
+        await cluster.On(cluster.B, takeOver: me).PostJsonAsync("/auth/2fa/enable", new { setupToken = setup.Str("setupToken"), code = Code(), password = TestApp.UserPassword });
         cluster.Time.Advance(TimeSpan.FromSeconds(30));
 
         var challenge = await cluster.On(cluster.A).PostJsonAsync("/auth/login", UserLogin, HttpStatusCode.Unauthorized);

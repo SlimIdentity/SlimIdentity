@@ -11,4 +11,10 @@ public interface ISlimExternalLoginStore
 
     /// <summary>Links an external identity to a user (unique per provider + key).</summary>
     Task LinkExternalLoginAsync(string userId, string provider, string providerKey, CancellationToken ct);
+
+    /// <summary>
+    /// Removes <b>all</b> external identities linked to the user. Called when the owner of an unconfirmed address proves
+    /// the mailbox for the first time: whatever was linked before (possibly by someone else) must not keep access.
+    /// </summary>
+    Task RemoveExternalLoginsAsync(string userId, CancellationToken ct);
 }
