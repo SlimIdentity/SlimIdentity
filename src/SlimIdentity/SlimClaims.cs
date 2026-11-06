@@ -45,8 +45,9 @@ public static class SlimClaims
 
             return new SlimActor(sub.GetString()!, GetString(root, SlimClaimTypes.SecurityStamp), GetString(root, SlimClaimTypes.AuthenticationMethod));
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or ArgumentException or InvalidOperationException)
         {
+            // malformed JSON, invalid UTF-16 (lone surrogates) or an unreadable string escape – never a valid actor
             return null;
         }
     }
@@ -68,33 +69,48 @@ internal sealed record SlimActor(string UserId, string? SecurityStamp, string? A
 public static class SlimClaimsPrincipalExtensions
 {
     /// <summary>User id (<c>sub</c>, falling back to <see cref="ClaimTypes.NameIdentifier"/>), or null if anonymous.</summary>
-    public static string? GetSlimUserId(this ClaimsPrincipal principal) =>
-        principal.FindFirst(SlimClaimTypes.UserId)?.Value
-        ?? principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+    public static string? GetSlimUserId(this ClaimsPrincipal principal)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        return principal.FindFirst(SlimClaimTypes.UserId)?.Value ?? principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+    }
 
     /// <summary>E-mail address (<c>email</c>, falling back to <see cref="ClaimTypes.Email"/>).</summary>
-    public static string? GetSlimEmail(this ClaimsPrincipal principal) =>
-        principal.FindFirst(SlimClaimTypes.Email)?.Value
-        ?? principal.FindFirst(ClaimTypes.Email)?.Value;
+    public static string? GetSlimEmail(this ClaimsPrincipal principal)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        return principal.FindFirst(SlimClaimTypes.Email)?.Value ?? principal.FindFirst(ClaimTypes.Email)?.Value;
+    }
 
     /// <summary>Id of the admin that impersonates the current user (<c>act</c> claim), or null.</summary>
-    public static string? GetImpersonatorId(this ClaimsPrincipal principal) =>
-        SlimClaims.ParseActor(principal.FindFirst(SlimClaimTypes.Actor)?.Value);
+    public static string? GetImpersonatorId(this ClaimsPrincipal principal)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        return SlimClaims.ParseActor(principal.FindFirst(SlimClaimTypes.Actor)?.Value);
+    }
 
     /// <summary>True during an impersonation session.</summary>
     public static bool IsImpersonating(this ClaimsPrincipal principal) => principal.GetImpersonatorId() is not null;
 
     /// <summary>End of the step-up ("sudo") mode (<c>sudo_until</c> claim), or null.</summary>
-    public static DateTimeOffset? GetSudoUntil(this ClaimsPrincipal principal) =>
-        long.TryParse(principal.FindFirst(SlimClaimTypes.SudoUntil)?.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var unix)
+    public static DateTimeOffset? GetSudoUntil(this ClaimsPrincipal principal)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        // range-checked: a forged or corrupt value must not throw from FromUnixTimeSeconds
+        return long.TryParse(principal.FindFirst(SlimClaimTypes.SudoUntil)?.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var unix)
+               && unix is >= 0 and <= 253_402_300_799   // up to 9999-12-31
             ? DateTimeOffset.FromUnixTimeSeconds(unix)
             : null;
+    }
 
     /// <summary>True while the step-up ("sudo") mode is active – the basis of <see cref="SlimIdentityDefaults.SudoPolicy"/>.</summary>
     public static bool IsInSudoMode(this ClaimsPrincipal principal, TimeProvider? timeProvider = null) =>
         principal.GetSudoUntil() is { } until && until > (timeProvider ?? TimeProvider.System).GetUtcNow();
 
     /// <summary>True if the current principal was issued by the SlimIdentity cookie handler.</summary>
-    public static bool IsSlimCookieSession(this ClaimsPrincipal principal) =>
-        string.Equals(principal.Identity?.AuthenticationType, SlimIdentityDefaults.CookieScheme, StringComparison.Ordinal);
+    public static bool IsSlimCookieSession(this ClaimsPrincipal principal)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+        return string.Equals(principal.Identity?.AuthenticationType, SlimIdentityDefaults.CookieScheme, StringComparison.Ordinal);
+    }
 }

@@ -47,7 +47,7 @@ internal static class SlimBase32
         int buffer = 0, bits = 0;
         foreach (var ch in clean)
         {
-            var v = Alphabet.IndexOf(ch);
+            var v = Alphabet.IndexOf(ch, StringComparison.Ordinal);
             if (v < 0) throw new FormatException("Invalid Base32 character.");
             buffer = (buffer << 5) | v;
             bits += 5;
@@ -113,7 +113,9 @@ internal static class SlimTotp
         Span<byte> counterBytes = stackalloc byte[8];
         BinaryPrimitives.WriteInt64BigEndian(counterBytes, counter);
         Span<byte> hash = stackalloc byte[20];
+#pragma warning disable CA5350 // RFC 6238 / every authenticator app uses HMAC-SHA1; as an HMAC it is not affected by SHA-1 collisions
         HMACSHA1.HashData(key, counterBytes, hash);
+#pragma warning restore CA5350
         var offset = hash[19] & 0x0F;
         var binary = ((hash[offset] & 0x7F) << 24) | (hash[offset + 1] << 16) | (hash[offset + 2] << 8) | hash[offset + 3];
         return (binary % 1_000_000).ToString("D6", CultureInfo.InvariantCulture);

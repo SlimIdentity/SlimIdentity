@@ -26,7 +26,9 @@ internal sealed class SlimMetrics
 
     public SlimMetrics(IMeterFactory meterFactory, SlimEmailQueue queue)
     {
+#pragma warning disable CA2000 // meters created by IMeterFactory are owned and disposed by the factory
         var meter = meterFactory.Create(SlimIdentityDefaults.MeterName);
+#pragma warning restore CA2000
         _logins = meter.CreateCounter<long>("slimidentity.logins", "{attempt}",
             "Password sign-in attempts by result (success, invalid_credentials, requires_two_factor, email_not_confirmed) and mode.");
         _twoFactor = meter.CreateCounter<long>("slimidentity.two_factor.verifications", "{attempt}",

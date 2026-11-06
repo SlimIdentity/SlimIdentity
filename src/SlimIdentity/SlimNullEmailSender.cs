@@ -9,49 +9,49 @@ public sealed class SlimNullEmailSender(ILogger<SlimNullEmailSender> logger) : I
     /// <inheritdoc />
     public Task SendVerificationEmailAsync(string email, string verificationTokenOrLink, CancellationToken ct)
     {
-        logger.LogWarning("[SlimIdentity:NullEmailSender] Verification for {Email}: {Link}", email, verificationTokenOrLink);
+        Log.NullMailVerification(logger, email, verificationTokenOrLink);
         return Task.CompletedTask;
     }
 
     /// <inheritdoc />
     public Task SendPasswordResetEmailAsync(string email, string resetTokenOrLink, CancellationToken ct)
     {
-        logger.LogWarning("[SlimIdentity:NullEmailSender] Password reset for {Email}: {Link}", email, resetTokenOrLink);
+        Log.NullMailPasswordReset(logger, email, resetTokenOrLink);
         return Task.CompletedTask;
     }
 
     /// <inheritdoc />
     public Task SendTwoFactorCodeAsync(string email, string code, CancellationToken ct)
     {
-        logger.LogWarning("[SlimIdentity:NullEmailSender] 2FA code for {Email}: {Code}", email, code);
+        Log.NullMailTwoFactorCode(logger, email, code);
         return Task.CompletedTask;
     }
 
     /// <inheritdoc />
     public Task SendEmailChangeConfirmationAsync(string newEmail, string confirmationTokenOrLink, CancellationToken ct)
     {
-        logger.LogWarning("[SlimIdentity:NullEmailSender] E-mail change confirmation for {Email}: {Link}", newEmail, confirmationTokenOrLink);
+        Log.NullMailEmailChange(logger, newEmail, confirmationTokenOrLink);
         return Task.CompletedTask;
     }
 
     /// <inheritdoc />
     public Task SendEmailChangedNotificationAsync(string oldEmail, string newEmail, CancellationToken ct)
     {
-        logger.LogWarning("[SlimIdentity:NullEmailSender] Address {OldEmail} was changed to {NewEmail}", oldEmail, newEmail);
+        Log.NullMailEmailChanged(logger, oldEmail, newEmail);
         return Task.CompletedTask;
     }
 
     /// <inheritdoc />
     public Task SendAccountExistsEmailAsync(string email, CancellationToken ct)
     {
-        logger.LogWarning("[SlimIdentity:NullEmailSender] Registration attempt for existing account {Email}", email);
+        Log.NullMailAccountExists(logger, email);
         return Task.CompletedTask;
     }
 
     /// <inheritdoc />
     public Task SendLockoutNotificationEmailAsync(string email, DateTimeOffset lockoutEndUtc, CancellationToken ct)
     {
-        logger.LogWarning("[SlimIdentity:NullEmailSender] Account {Email} locked until {LockoutEnd}", email, lockoutEndUtc);
+        Log.NullMailLockout(logger, email, lockoutEndUtc);
         return Task.CompletedTask;
     }
 }

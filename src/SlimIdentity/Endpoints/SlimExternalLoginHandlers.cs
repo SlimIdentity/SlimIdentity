@@ -219,19 +219,8 @@ internal sealed class SlimExternalLoginHandlers(
         return O.ExternalLogin.TrustedEmailProviders.Contains(provider, StringComparer.OrdinalIgnoreCase);
     }
 
-    /// <summary>Open-redirect protection: local paths or explicitly allowed origins only.</summary>
-    private string? ValidateReturnUrl(string? returnUrl)
-    {
-        if (string.IsNullOrWhiteSpace(returnUrl)) return O.ExternalLogin.DefaultReturnUrl;
-
-        if (returnUrl.StartsWith('/') && !returnUrl.StartsWith("//", StringComparison.Ordinal) && !returnUrl.StartsWith("/\\", StringComparison.Ordinal))
-            return returnUrl;
-
-        if (!Uri.TryCreate(returnUrl, UriKind.Absolute, out var uri) || (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
-            return null;
-
-        return O.IsTrustedOrigin(returnUrl) ? returnUrl : null;
-    }
+    /// <summary>Open-redirect protection: local paths or trusted origins only.</summary>
+    private string? ValidateReturnUrl(string? returnUrl) => SlimReturnUrl.Validate(returnUrl, O);
 
     private static IResult Redirect(string returnUrl, string key, string value) =>
         Results.Redirect(QueryHelpers.AddQueryString(returnUrl, key, value));

@@ -41,6 +41,9 @@ First public release (1.0.0) in preparation.
 - `SlimIdentity.Testing` package: `SlimStoreConformance.VerifyAsync(services)` checks store implementations against
   their contracts – lookup, uniqueness, atomic counters and single-use consumption under parallel requests – with any
   test framework and against the real database. CI runs it against the test stores and the EF Core templates (SQLite).
+- Quality gates: .NET analyzers (`latest-recommended` plus selected rules, warnings fail CI), CodeQL
+  `security-extended` (once the repository is public), property-based tests (FsCheck) for every parser of outside
+  input – return URLs, origins, workflow tokens, claims, Base32/TOTP, rate-limit keys.
 - Native AOT and trimming compatibility.
 - Samples for EF Core, Dapper, MailKit, SendGrid, outbox delivery, LDAP, client certificates (mTLS), Data Protection
   key ring persistence, Have I Been Pwned, admin endpoints and a TypeScript client (incl. QR code for TOTP setup).

@@ -126,7 +126,18 @@ public sealed class SlimConformanceReport
 public sealed class SlimStoreConformanceException : Exception
 {
     /// <summary>Creates the exception for a failed report.</summary>
-    public SlimStoreConformanceException(SlimConformanceReport report) : base(report?.ToString()) => Report = report!;
+    public SlimStoreConformanceException(SlimConformanceReport report) : base(report?.ToString()) =>
+        Report = report ?? throw new ArgumentNullException(nameof(report));
+
+    /// <summary>Creates the exception without a report.</summary>
+    public SlimStoreConformanceException() : this("SlimIdentity store conformance failed.") { }
+
+    /// <summary>Creates the exception with a message and without a report.</summary>
+    public SlimStoreConformanceException(string message) : base(message) => Report = new SlimConformanceReport([]);
+
+    /// <summary>Creates the exception with a message and an inner exception, without a report.</summary>
+    public SlimStoreConformanceException(string message, Exception innerException) : base(message, innerException) =>
+        Report = new SlimConformanceReport([]);
 
     /// <summary>The complete report, including the passed checks.</summary>
     public SlimConformanceReport Report { get; }

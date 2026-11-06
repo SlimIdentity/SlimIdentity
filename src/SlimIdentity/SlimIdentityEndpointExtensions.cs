@@ -19,6 +19,7 @@ public static class SlimIdentityEndpointExtensions
     /// </summary>
     public static RouteGroupBuilder MapSlimIdentityApi(this IEndpointRouteBuilder endpoints)
     {
+        ArgumentNullException.ThrowIfNull(endpoints);
         var sp = endpoints.ServiceProvider;
         var o = sp.GetRequiredService<IOptions<SlimIdentityOptions>>().Value; // triggers validation
         var isService = sp.GetRequiredService<IServiceProviderIsService>();

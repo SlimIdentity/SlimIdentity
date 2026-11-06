@@ -91,8 +91,10 @@ internal sealed class ConformanceRun(StoreAccess access, SlimConformanceOptions 
     }
 }
 
-/// <summary>A violated rule (expected outcome, not a crash).</summary>
+/// <summary>A violated rule (expected outcome, not a crash). Internal control flow – never leaves the package.</summary>
+#pragma warning disable CA1032, CA1064 // internal by design: caught inside ConformanceRun.CheckAsync, never thrown to callers
 internal sealed class ConformanceFailure(string message) : Exception(message);
+#pragma warning restore CA1032, CA1064
 
 internal static class Expect
 {

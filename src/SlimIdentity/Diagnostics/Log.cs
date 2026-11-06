@@ -115,4 +115,26 @@ internal static partial class Log
 
     [LoggerMessage(7004, LogLevel.Warning, "SlimIdentity: shutdown timeout reached with {Count} unsent mail(s) in the queue.")]
     public static partial void MailLost(ILogger logger, int count);
+
+    // SlimNullEmailSender (development only – these log live links and codes)
+    [LoggerMessage(7101, LogLevel.Warning, "[SlimIdentity:NullEmailSender] Verification for {Email}: {Link}")]
+    public static partial void NullMailVerification(ILogger logger, string email, string link);
+
+    [LoggerMessage(7102, LogLevel.Warning, "[SlimIdentity:NullEmailSender] Password reset for {Email}: {Link}")]
+    public static partial void NullMailPasswordReset(ILogger logger, string email, string link);
+
+    [LoggerMessage(7103, LogLevel.Warning, "[SlimIdentity:NullEmailSender] 2FA code for {Email}: {Code}")]
+    public static partial void NullMailTwoFactorCode(ILogger logger, string email, string code);
+
+    [LoggerMessage(7104, LogLevel.Warning, "[SlimIdentity:NullEmailSender] E-mail change confirmation for {Email}: {Link}")]
+    public static partial void NullMailEmailChange(ILogger logger, string email, string link);
+
+    [LoggerMessage(7105, LogLevel.Warning, "[SlimIdentity:NullEmailSender] Address {OldEmail} was changed to {NewEmail}")]
+    public static partial void NullMailEmailChanged(ILogger logger, string oldEmail, string newEmail);
+
+    [LoggerMessage(7106, LogLevel.Warning, "[SlimIdentity:NullEmailSender] Registration attempt for existing account {Email}")]
+    public static partial void NullMailAccountExists(ILogger logger, string email);
+
+    [LoggerMessage(7107, LogLevel.Warning, "[SlimIdentity:NullEmailSender] Account {Email} locked until {LockoutEnd}")]
+    public static partial void NullMailLockout(ILogger logger, string email, DateTimeOffset lockoutEnd);
 }

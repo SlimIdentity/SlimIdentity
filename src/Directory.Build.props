@@ -6,6 +6,8 @@
     <!-- every public member is documented (missing docs = warning = CI error) -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <IsAotCompatible>true</IsAotCompatible>
+    <!-- .NET analyzers: the recommended set, plus the rules selected in .editorconfig ([src/**.cs]) -->
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
 
     <IsPackable>true</IsPackable>
     <Authors>Timm Kautz</Authors>
@@ -23,8 +25,8 @@
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
 
-    <!-- validates the package layout now; add PackageValidationBaselineVersion=1.0.0 after the first release
-         to detect breaking API changes automatically -->
+    <!-- validates the package layout now; add <PackageValidationBaselineVersion>1.0.0</PackageValidationBaselineVersion>
+         after the first release to detect breaking API changes automatically -->
     <EnablePackageValidation>true</EnablePackageValidation>
 
     <!-- one version for all packages, from git tags (v1.0.0); untagged builds become 1.0.0-alpha.0.N -->

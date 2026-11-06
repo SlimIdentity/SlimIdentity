@@ -61,3 +61,28 @@ dotnet_naming_rule.static_readonly.style = pascal
 dotnet_naming_rule.static_readonly.severity = suggestion
 dotnet_naming_symbols.static_readonly.applicable_kinds = field
 dotnet_naming_symbols.static_readonly.required_modifiers = static, readonly
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Shipped packages: AnalysisLevel=latest-recommended (src/Directory.Build.props) plus these rules from AnalysisMode=All.
+# Warnings fail CI builds.
+[src/**.cs]
+dotnet_diagnostic.CA1062.severity = warning   # validate arguments of the public API
+dotnet_diagnostic.CA1307.severity = warning   # explicit StringComparison
+dotnet_diagnostic.CA1309.severity = warning   # ordinal comparison for identifiers
+dotnet_diagnostic.CA1032.severity = warning   # standard exception constructors
+dotnet_diagnostic.CA1064.severity = warning   # exceptions are public
+dotnet_diagnostic.CA2000.severity = warning   # dispose objects
+dotnet_diagnostic.CA5394.severity = warning   # no System.Random for security
+dotnet_diagnostic.CA2100.severity = warning   # no SQL from string concatenation
+
+# Deliberately off – evaluated with AnalysisMode=All:
+# CA2007 ConfigureAwait: ASP.NET Core has no SynchronizationContext (Microsoft guidance for ASP.NET Core libraries)
+dotnet_diagnostic.CA2007.severity = none
+# CA1056/CA1054 Uri instead of string: options and wire DTOs must bind from configuration and JSON as plain strings
+dotnet_diagnostic.CA1056.severity = none
+dotnet_diagnostic.CA1054.severity = none
+# CA1002/CA2227 List<T> with setter: required by the configuration binder for list options
+dotnet_diagnostic.CA1002.severity = none
+dotnet_diagnostic.CA2227.severity = none
+# CA1308 ToLowerInvariant: origins and Base32 codes are lower case by specification, not for comparison
+dotnet_diagnostic.CA1308.severity = none
