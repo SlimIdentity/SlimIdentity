@@ -8,8 +8,8 @@ no token handling in JavaScript, nothing for XSS to read.
 ```csharp
 builder.Services.AddSlimIdentity(o =>
 {
-    o.Endpoints.DefaultUseCookies = true;   // or pass ?useCookies=true
-    o.Endpoints.AllowJwtAuth = false;       // cookie-only: no JwtSecret needed
+    // no Tokens.JwtSecret → cookie-only, and cookie mode is the default (no ?useCookies=true needed)
+    o.Links.BaseUrl = "https://example.com";
 });
 ```
 
@@ -34,7 +34,7 @@ Both are the same *site*, but different *origins*:
 ```csharp
 o.Cookies.SameSite = SameSiteMode.Lax;            // the cookie must be sent on cross-origin requests within the site
 o.Cookies.Domain = ".example.com";                // optional: share the cookie between subdomains
-o.Csrf.AllowedOrigins.Add("https://app.example.com");
+o.Links.BaseUrl = "https://app.example.com";      // mail links – and this origin is trusted (CSRF Origin check)
 
 builder.Services.AddCors(c => c.AddDefaultPolicy(p => p
     .WithOrigins("https://app.example.com")

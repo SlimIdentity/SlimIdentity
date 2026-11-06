@@ -44,6 +44,6 @@ public sealed record SlimAuthResult
 
 /// <summary>Result of <see cref="ISlimAuthManager.CreateInvitationAsync"/>: send <see cref="Link"/> to the invited user.</summary>
 /// <param name="Token">Raw invitation token.</param>
-/// <param name="Link"><c>Links.InvitationUrl</c> with the token inserted, or the raw token if no template is configured.</param>
+/// <param name="Link">The invitation link (<c>Links.BaseUrl</c> + <c>/accept-invitation</c> or <c>Links.InvitationUrl</c>) with the token inserted, or the raw token if neither is configured.</param>
 /// <param name="ExpiresAt">End of validity.</param>
 public sealed record SlimInvitation(string Token, string Link, DateTimeOffset ExpiresAt);

@@ -34,6 +34,10 @@ First public release (1.0.0) in preparation.
   `UpdatePasswordHashAsync`) so parallel failures are all counted and never undo a password change; `CreateAsync`
   returns `null` for a taken address (uniform answer for concurrent registrations); CSRF check for the 2FA step of a
   cookie sign-in.
+- Lean configuration: most apps set only `Tokens.JwtSecret` (enables bearer tokens), `Links.BaseUrl` (all mail links)
+  and `TrustedOrigins` (CSRF origin check and external-login return URLs in one list). Security-relevant protocol
+  details (CSRF, refresh-token reuse detection, challenge and code lifetimes, TOTP tolerance, recovery codes) are fixed
+  by design; passwords follow NIST SP 800-63B (length, no composition rules).
 - Native AOT and trimming compatibility.
 - Samples for EF Core, Dapper, MailKit, SendGrid, outbox delivery, LDAP, client certificates (mTLS), Data Protection
   key ring persistence, Have I Been Pwned, admin endpoints and a TypeScript client (incl. QR code for TOTP setup).

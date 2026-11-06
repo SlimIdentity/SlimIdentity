@@ -15,8 +15,7 @@ internal sealed class SlimCsrfEndpointFilter(IOptions<SlimIdentityOptions> optio
         var o = options.Value;
         var request = context.HttpContext.Request;
 
-        if (!o.Csrf.Enabled
-            || HttpMethods.IsGet(request.Method)
+        if (HttpMethods.IsGet(request.Method)
             || HttpMethods.IsHead(request.Method)
             || HttpMethods.IsOptions(request.Method)
             || !IsCookieContext(request, o))
@@ -33,10 +32,8 @@ internal sealed class SlimCsrfEndpointFilter(IOptions<SlimIdentityOptions> optio
     /// </summary>
     internal static IResult? Validate(HttpRequest request, SlimIdentityOptions o, ILogger logger)
     {
-        if (!o.Csrf.Enabled) return null;
-
-        if (!request.Headers.ContainsKey(o.Csrf.HeaderName))
-            return SlimResults.Status("csrf_validation_failed", $"Missing anti-forgery header '{o.Csrf.HeaderName}'.", StatusCodes.Status403Forbidden);
+        if (!request.Headers.ContainsKey(SlimIdentityDefaults.CsrfHeaderName))
+            return SlimResults.Status("csrf_validation_failed", $"Missing anti-forgery header '{SlimIdentityDefaults.CsrfHeaderName}'.", StatusCodes.Status403Forbidden);
 
         var origin = request.Headers.Origin.ToString();
         if (!string.IsNullOrEmpty(origin) && !IsAllowedOrigin(origin, request, o))
@@ -66,14 +63,11 @@ internal sealed class SlimCsrfEndpointFilter(IOptions<SlimIdentityOptions> optio
 
         var query = request.Query["useCookies"].ToString();
         if (bool.TryParse(query, out var useCookies)) return useCookies;
-        return o.Endpoints.DefaultUseCookies;
+        return o.EffectiveDefaultUseCookies;
     }
 
-    private static bool IsAllowedOrigin(string origin, HttpRequest request, SlimIdentityOptions o)
-    {
-        if (string.Equals(origin.TrimEnd('/'), SelfOrigin(request), StringComparison.OrdinalIgnoreCase)) return true;
-        return o.Csrf.AllowedOrigins.Any(a => string.Equals(a.TrimEnd('/'), origin.TrimEnd('/'), StringComparison.OrdinalIgnoreCase));
-    }
+    private static bool IsAllowedOrigin(string origin, HttpRequest request, SlimIdentityOptions o) =>
+        string.Equals(origin.TrimEnd('/'), SelfOrigin(request), StringComparison.OrdinalIgnoreCase) || o.IsTrustedOrigin(origin);
 
     private static string SelfOrigin(HttpRequest request) => $"{request.Scheme}://{request.Host.Value}";
 }
@@ -84,7 +78,7 @@ internal sealed class SlimBruteForceRateLimiterPolicy(IOptions<SlimIdentityOptio
 
 /// <summary>Load guard for <c>/refresh</c>: own, more generous bucket per client.</summary>
 internal sealed class SlimRefreshRateLimiterPolicy(IOptions<SlimIdentityOptions> options, IServiceProvider services)
-    : SlimClientRateLimiterPolicy(options, services, o => (o.RefreshPermitLimit, o.RefreshWindow));
+    : SlimClientRateLimiterPolicy(options, services, o => (o.RefreshPermitLimit, o.Window));
 
 /// <summary>Custom partition key registered via <c>SlimIdentityBuilder.UseRateLimitPartitionKey</c>.</summary>
 internal sealed class SlimRateLimitPartitioner(Func<HttpContext, string?> keySelector)

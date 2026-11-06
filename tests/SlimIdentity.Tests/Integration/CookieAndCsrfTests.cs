@@ -39,7 +39,7 @@ public sealed class CookieAndCsrfTests
 
     [Theory]
     [InlineData("https://evil.example", HttpStatusCode.Forbidden)]
-    [InlineData("https://app.test.local", HttpStatusCode.OK)]   // Csrf.AllowedOrigins
+    [InlineData("https://app.test.local", HttpStatusCode.OK)]   // TrustedOrigins
     [InlineData("https://localhost", HttpStatusCode.OK)]        // the API itself
     public async Task Origin_is_checked_in_cookie_mode(string origin, HttpStatusCode expected)
     {

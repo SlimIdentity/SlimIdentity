@@ -167,7 +167,7 @@ internal sealed class SlimAuthManager(
         var token = workflow.Protect(SlimWorkflowTokens.InvitationPurpose,
             new SlimInvitationPayload(user.Id, user.Email, user.SecurityStamp), validity);
         metrics.Invitation("created");
-        return Task.FromResult(new SlimInvitation(token, SlimWorkflowTokens.BuildLink(o.Links.InvitationUrl, token), time.GetUtcNow() + validity));
+        return Task.FromResult(new SlimInvitation(token, SlimWorkflowTokens.BuildLink(o.Links.InvitationTemplate, token), time.GetUtcNow() + validity));
     }
 
     // ------------------------------------------------------------------ internal API
@@ -217,8 +217,8 @@ internal sealed class SlimAuthManager(
             return new SlimAuthResult { Succeeded = true, UsedCookies = true, Principal = principal, SessionId = sessionId };
         }
 
-        if (!o.Endpoints.AllowJwtAuth)
-            throw new InvalidOperationException("SlimIdentity: JWT authentication is disabled (Endpoints.AllowJwtAuth).");
+        if (!o.JwtEnabled)
+            throw new InvalidOperationException("SlimIdentity: JWT authentication is not configured (set Tokens.JwtSecret).");
 
         string? refreshToken = null;
         DateTimeOffset? refreshExpires = null;

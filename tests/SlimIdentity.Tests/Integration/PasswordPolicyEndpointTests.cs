@@ -16,7 +16,7 @@ public sealed class PasswordPolicyEndpointTests
     {
         await using var app = await TestApp.StartAsync(new TestAppOptions
         {
-            Configure = o => { o.Password.MinimumLength = 16; o.Password.RequireUppercase = false; o.Password.RequireNonAlphanumeric = true; },
+            Configure = o => o.Password.MinimumLength = 16,
         });
 
         var response = await app.CreateClient().GetAsync("/auth/password-policy");
@@ -25,10 +25,15 @@ public sealed class PasswordPolicyEndpointTests
 
         Assert.Equal(16, policy.GetProperty("minimumLength").GetInt32());
         Assert.Equal(256, policy.GetProperty("maximumLength").GetInt32());
-        Assert.True(policy.GetProperty("requireDigit").GetBoolean());
-        Assert.False(policy.GetProperty("requireUppercase").GetBoolean());
-        Assert.True(policy.GetProperty("requireNonAlphanumeric").GetBoolean());
         Assert.False(policy.GetProperty("hasAdditionalRules").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Long_passwords_need_no_character_classes()
+    {
+        await using var app = await TestApp.StartAsync();
+        var response = await app.CreateClient().PostAsync("/auth/register", new { email = "nist@test.local", password = "correct horse battery staple" });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
     [Fact]
@@ -39,12 +44,5 @@ public sealed class PasswordPolicyEndpointTests
         var policy = System.Text.Json.JsonDocument.Parse(await (await app.CreateClient().GetAsync("/auth/password-policy")).Content.ReadAsStringAsync()).RootElement;
 
         Assert.True(policy.GetProperty("hasAdditionalRules").GetBoolean());
-    }
-
-    [Fact]
-    public async Task Policy_endpoint_can_be_disabled()
-    {
-        await using var app = await TestApp.StartAsync(new TestAppOptions { Configure = o => o.Endpoints.EnablePasswordPolicy = false });
-        Assert.Equal(HttpStatusCode.NotFound, (await app.CreateClient().GetAsync("/auth/password-policy")).StatusCode);
     }
 }

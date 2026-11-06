@@ -4,6 +4,10 @@ namespace SlimIdentity;
 /// Root options. Bindable from <c>IConfiguration</c> (section <see cref="DefaultSectionName"/>) and/or code.
 /// Security-critical values are validated at startup (<c>ValidateOnStart</c>).
 /// </summary>
+/// <remarks>
+/// Most applications set only <see cref="SlimTokenOptions.JwtSecret"/> (for bearer clients), <see cref="SlimLinkOptions.BaseUrl"/>
+/// and – for a front end on another origin – <see cref="TrustedOrigins"/>. Everything else has secure defaults.
+/// </remarks>
 public sealed class SlimIdentityOptions
 {
     /// <summary>Conventional configuration section name: <c>SlimIdentity</c>.</summary>
@@ -11,6 +15,13 @@ public sealed class SlimIdentityOptions
 
     /// <summary>Route prefix of all endpoints. Default <c>/auth</c>.</summary>
     public string RoutePrefix { get; set; } = "/auth";
+
+    /// <summary>
+    /// Origins of your front ends (e.g. <c>https://app.example.com</c>) besides the API's own origin. Used for the CSRF
+    /// <c>Origin</c> check in cookie mode and as allowed <c>returnUrl</c> targets after external login. The origin of
+    /// <see cref="SlimLinkOptions.BaseUrl"/> is trusted automatically. Configure CORS for the same origins.
+    /// </summary>
+    public List<string> TrustedOrigins { get; set; } = [];
 
     /// <summary>Which endpoints are mapped and which authentication modes are allowed.</summary>
     public SlimEndpointOptions Endpoints { get; set; } = new();
@@ -22,7 +33,7 @@ public sealed class SlimIdentityOptions
     public SlimRateLimitOptions RateLimit { get; set; } = new();
     /// <summary>Password policy for new passwords.</summary>
     public SlimPasswordOptions Password { get; set; } = new();
-    /// <summary>JWT signing and lifetimes of all tokens and links.</summary>
+    /// <summary>JWT signing and lifetimes of tokens and links.</summary>
     public SlimTokenOptions Tokens { get; set; } = new();
     /// <summary>Auth cookie settings.</summary>
     public SlimCookieOptions Cookies { get; set; } = new();
@@ -30,15 +41,37 @@ public sealed class SlimIdentityOptions
     public SlimTwoFactorOptions TwoFactor { get; set; } = new();
     /// <summary>OAuth / OIDC logins.</summary>
     public SlimExternalLoginOptions ExternalLogin { get; set; } = new();
-    /// <summary>Link templates for mails.</summary>
+    /// <summary>Links in mails.</summary>
     public SlimLinkOptions Links { get; set; } = new();
-    /// <summary>CSRF protection in cookie mode.</summary>
-    public SlimCsrfOptions Csrf { get; set; } = new();
     /// <summary>Mail dispatch.</summary>
     public SlimEmailOptions Email { get; set; } = new();
+
+    /// <summary>JWT bearer authentication is active as soon as <see cref="SlimTokenOptions.JwtSecret"/> is set.</summary>
+    internal bool JwtEnabled => !string.IsNullOrEmpty(Tokens.JwtSecret);
+
+    /// <summary>Cookie mode is the default if requested, or if JWT is not configured.</summary>
+    internal bool EffectiveDefaultUseCookies => Endpoints.AllowCookieAuth && (Endpoints.DefaultUseCookies || !JwtEnabled);
+
+    /// <summary>True if <paramref name="origin"/> is one of <see cref="TrustedOrigins"/> or the origin of <see cref="SlimLinkOptions.BaseUrl"/>.</summary>
+    internal bool IsTrustedOrigin(string origin)
+    {
+        var candidate = NormalizeOrigin(origin);
+        if (candidate is null) return false;
+        if (NormalizeOrigin(Links.BaseUrl) == candidate) return true;
+        return TrustedOrigins.Any(t => NormalizeOrigin(t) == candidate);
+    }
+
+    internal static string? NormalizeOrigin(string? value) =>
+        Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https"
+            ? uri.GetLeftPart(UriPartial.Authority).ToLowerInvariant()
+            : null;
 }
 
 /// <summary>Which endpoints are mapped and which authentication modes are allowed.</summary>
+/// <remarks>
+/// <c>/login</c>, <c>/logout</c>, <c>/me</c>, <c>/password-policy</c> and the invitation endpoints are always mapped;
+/// the 2FA, session, refresh and external-login endpoints appear when the corresponding store is registered.
+/// </remarks>
 public sealed class SlimEndpointOptions
 {
     /// <summary><c>/register</c>. Disable for invite-only applications or custom registration endpoints.</summary>
@@ -51,21 +84,14 @@ public sealed class SlimEndpointOptions
     public bool EnableChangePassword { get; set; } = true;
     /// <summary><c>/change-email</c> and <c>/confirm-email-change</c>. Disable if the login identifier is managed elsewhere (LDAP, SSO).</summary>
     public bool EnableChangeEmail { get; set; } = true;
-    /// <summary><c>/logout</c> and <c>/logout-all</c>.</summary>
-    public bool EnableLogout { get; set; } = true;
-    /// <summary><c>/me</c>.</summary>
-    public bool EnableMe { get; set; } = true;
-    /// <summary><c>GET /password-policy</c> (anonymous): the password rules for front-end hints and validation.</summary>
-    public bool EnablePasswordPolicy { get; set; } = true;
-    /// <summary><c>/invitation/info</c> and <c>/invitation/accept</c> (links are created by the host via <c>ISlimAuthManager.CreateInvitationAsync</c>).</summary>
-    public bool EnableInvitations { get; set; } = true;
 
-    /// <summary>Allows cookie sessions (<c>?useCookies=true</c>).</summary>
+    /// <summary>Allows cookie sessions (<c>?useCookies=true</c>). JWT bearer tokens are allowed when <see cref="SlimTokenOptions.JwtSecret"/> is set.</summary>
     public bool AllowCookieAuth { get; set; } = true;
-    /// <summary>Allows JWT access/refresh tokens. Requires <see cref="SlimTokenOptions.JwtSecret"/>.</summary>
-    public bool AllowJwtAuth { get; set; } = true;
 
-    /// <summary>Mode used when the request has no <c>?useCookies=</c> query parameter.</summary>
+    /// <summary>
+    /// Mode used when the request has no <c>?useCookies=</c> query parameter. Without a <see cref="SlimTokenOptions.JwtSecret"/>
+    /// cookie mode is the default anyway.
+    /// </summary>
     public bool DefaultUseCookies { get; set; }
 
     /// <summary>
@@ -96,9 +122,7 @@ public sealed class SlimSignInOptions
 /// </summary>
 public sealed class SlimLockoutOptions
 {
-    /// <summary>Enables the account lockout. Default <c>true</c>.</summary>
-    public bool Enabled { get; set; } = true;
-    /// <summary>Failed attempts per lockout step. Default 5.</summary>
+    /// <summary>Failed attempts per lockout step. <c>0</c> disables the lockout (not recommended). Default 5.</summary>
     public int MaxFailedAttempts { get; set; } = 5;
     /// <summary>Duration of the first lockout. Default 1 minute.</summary>
     public TimeSpan Duration { get; set; } = TimeSpan.FromMinutes(1);
@@ -115,7 +139,7 @@ public sealed class SlimRateLimitOptions
 {
     /// <summary>Requests per client and window on login, 2FA, register, reset, invitation, … Default 10.</summary>
     public int PermitLimit { get; set; } = 10;
-    /// <summary>Window of <see cref="PermitLimit"/>. Default 1 minute.</summary>
+    /// <summary>Window of both limits. Default 1 minute.</summary>
     public TimeSpan Window { get; set; } = TimeSpan.FromMinutes(1);
 
     /// <summary>
@@ -123,8 +147,6 @@ public sealed class SlimRateLimitOptions
     /// detection), so this is only a load guard and deliberately generous. Default 60.
     /// </summary>
     public int RefreshPermitLimit { get; set; } = 60;
-    /// <summary>Window of <see cref="RefreshPermitLimit"/>. Default 1 minute.</summary>
-    public TimeSpan RefreshWindow { get; set; } = TimeSpan.FromMinutes(1);
 
     /// <summary>
     /// IPv6 clients are grouped by this prefix length, because a single customer usually owns a whole /64 network and
@@ -133,27 +155,26 @@ public sealed class SlimRateLimitOptions
     public int IPv6PrefixLength { get; set; } = 64;
 }
 
-/// <summary>Password policy for new passwords (register, reset, change, invitation).</summary>
+/// <summary>
+/// Password policy for new passwords (register, reset, change, invitation). Following NIST SP 800-63B there are no
+/// composition rules (digits, upper case, …) – length matters. Add checks with <c>AddPasswordRule&lt;T&gt;()</c>,
+/// e.g. the breached-password sample.
+/// </summary>
 public sealed class SlimPasswordOptions
 {
-    /// <summary>Minimum length. Default 8 (at least 6).</summary>
+    /// <summary>Minimum length. Default 8 (at least 6); 12 or more is recommended without 2FA.</summary>
     public int MinimumLength { get; set; } = 8;
     /// <summary>Upper bound to prevent hashing-based DoS with huge inputs. Default 256.</summary>
     public int MaximumLength { get; set; } = 256;
-    /// <summary>Requires a digit. Default <c>true</c>.</summary>
-    public bool RequireDigit { get; set; } = true;
-    /// <summary>Requires a lowercase letter. Default <c>true</c>.</summary>
-    public bool RequireLowercase { get; set; } = true;
-    /// <summary>Requires an uppercase letter. Default <c>true</c>.</summary>
-    public bool RequireUppercase { get; set; } = true;
-    /// <summary>Requires a non-alphanumeric character. Default <c>false</c>.</summary>
-    public bool RequireNonAlphanumeric { get; set; }
 }
 
-/// <summary>JWT signing and lifetimes of all tokens and links.</summary>
+/// <summary>JWT signing and lifetimes of tokens and links.</summary>
 public sealed class SlimTokenOptions
 {
-    /// <summary>HMAC-SHA256 signing key, at least 32 bytes (UTF-8). Required when JWT auth is allowed. Keep it secret.</summary>
+    /// <summary>
+    /// HMAC-SHA256 signing key, at least 32 bytes (UTF-8). Setting it enables JWT bearer authentication; without it only
+    /// cookie sessions are available. Keep it secret.
+    /// </summary>
     public string JwtSecret { get; set; } = string.Empty;
     /// <summary>JWT <c>iss</c>. Default <c>SlimIdentity</c>.</summary>
     public string Issuer { get; set; } = "SlimIdentity";
@@ -165,11 +186,6 @@ public sealed class SlimTokenOptions
     public TimeSpan RefreshTokenLifetime { get; set; } = TimeSpan.FromDays(7);
     /// <summary>Hard upper bound of a refresh-token chain, counted from the original sign-in. Then the user must sign in again. Default 30 days.</summary>
     public TimeSpan RefreshTokenAbsoluteLifetime { get; set; } = TimeSpan.FromDays(30);
-    /// <summary>
-    /// RFC 9700 reuse detection: an already consumed refresh token is treated as stolen. With <c>ISlimSessionStore</c> the
-    /// affected session is revoked, otherwise the security stamp is rotated (all sessions of the user end). Default <c>true</c>.
-    /// </summary>
-    public bool RevokeSessionsOnRefreshTokenReuse { get; set; } = true;
     /// <summary>Tolerated clock difference for JWT validation (0–5 minutes). Default 30 seconds.</summary>
     public TimeSpan ClockSkew { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -180,8 +196,6 @@ public sealed class SlimTokenOptions
     public TimeSpan EmailVerificationTokenLifetime { get; set; } = TimeSpan.FromHours(24);
     /// <summary>Validity of password reset links (max. 24 hours). Default 1 hour.</summary>
     public TimeSpan PasswordResetTokenLifetime { get; set; } = TimeSpan.FromHours(1);
-    /// <summary>Validity of the <c>preAuthToken</c> between password and second factor (max. 30 minutes). Default 5 minutes.</summary>
-    public TimeSpan PreAuthTokenLifetime { get; set; } = TimeSpan.FromMinutes(5);
     /// <summary>Default validity of invitation / "complete your registration" links (max. 30 days). Default 7 days.</summary>
     public TimeSpan InvitationTokenLifetime { get; set; } = TimeSpan.FromDays(7);
 }
@@ -206,17 +220,11 @@ public sealed class SlimCookieOptions
     public TimeSpan SecurityStampValidationInterval { get; set; } = TimeSpan.FromMinutes(1);
 }
 
-/// <summary>Two-factor authentication.</summary>
+/// <summary>Two-factor authentication (TOTP per RFC 6238 with ±1 time step, 10 recovery codes).</summary>
 public sealed class SlimTwoFactorOptions
 {
     /// <summary>Issuer shown in authenticator apps. Default <c>SlimIdentity</c> – set your product name.</summary>
     public string AuthenticatorIssuer { get; set; } = "SlimIdentity";
-    /// <summary>Number of recovery codes (1–50). Default 10.</summary>
-    public int RecoveryCodeCount { get; set; } = 10;
-    /// <summary>Accepted TOTP time steps before/after now (30 s each, 0–3). Default 1.</summary>
-    public int TotpTimeStepTolerance { get; set; } = 1;
-    /// <summary>Time between <c>/2fa/setup</c> and <c>/2fa/enable</c>. Default 10 minutes.</summary>
-    public TimeSpan SetupTokenLifetime { get; set; } = TimeSpan.FromMinutes(10);
 
     /// <summary>
     /// "Remember this device": after a successful second factor with <c>rememberDevice: true</c>, this device skips the
@@ -227,7 +235,7 @@ public sealed class SlimTwoFactorOptions
     public TimeSpan? RememberDeviceLifetime { get; set; }
 }
 
-/// <summary>OAuth / OIDC logins.</summary>
+/// <summary>OAuth / OIDC logins. Allowed <c>returnUrl</c> origins are the <see cref="SlimIdentityOptions.TrustedOrigins"/>.</summary>
 public sealed class SlimExternalLoginOptions
 {
     /// <summary>Automatically links an external login to an existing account with the same, verified e-mail. Default <c>true</c>.</summary>
@@ -236,36 +244,39 @@ public sealed class SlimExternalLoginOptions
     public bool AllowAutoRegistration { get; set; } = true;
     /// <summary>Providers whose e-mail claim is trusted as verified even without <c>email_verified=true</c> (e.g. "Google").</summary>
     public List<string> TrustedEmailProviders { get; set; } = [];
-    /// <summary>Absolute origins (e.g. <c>https://app.example.com</c>) allowed as <c>returnUrl</c>. Local paths are always allowed.</summary>
-    public List<string> AllowedReturnUrls { get; set; } = [];
     /// <summary>Redirect target when no <c>returnUrl</c> is given. Default <c>/</c>.</summary>
     public string DefaultReturnUrl { get; set; } = "/";
-    /// <summary>Lifetime of the one-time code that bearer clients exchange for tokens after the redirect (max. 10 minutes). Default 1 minute.</summary>
-    public TimeSpan ExchangeCodeLifetime { get; set; } = TimeSpan.FromMinutes(1);
 }
 
-/// <summary>Link templates for mails. Each must contain <c>{token}</c>. Without a template the raw token is passed to the sender.</summary>
+/// <summary>
+/// Links in mails. Usually only <see cref="BaseUrl"/> is set; the individual templates override single links and must
+/// contain <c>{token}</c>. Without both the raw token is passed to the sender.
+/// </summary>
 public sealed class SlimLinkOptions
 {
-    /// <summary>e.g. <c>https://app.example.com/verify-email?token={token}</c>.</summary>
-    public string? EmailVerificationUrl { get; set; }
-    /// <summary>e.g. <c>https://app.example.com/reset-password?token={token}</c>.</summary>
-    public string? PasswordResetUrl { get; set; }
-    /// <summary>e.g. <c>https://app.example.com/accept-invitation?token={token}</c>.</summary>
-    public string? InvitationUrl { get; set; }
-    /// <summary>e.g. <c>https://app.example.com/confirm-email-change?token={token}</c> (sent to the new address).</summary>
-    public string? EmailChangeUrl { get; set; }
-}
+    /// <summary>
+    /// Base address of your front end, e.g. <c>https://app.example.com</c>. Links then point to
+    /// <c>/verify-email</c>, <c>/reset-password</c>, <c>/accept-invitation</c> and <c>/confirm-email-change</c>
+    /// (each with <c>?token=…</c>). Its origin is trusted like an entry in <see cref="SlimIdentityOptions.TrustedOrigins"/>.
+    /// </summary>
+    public string? BaseUrl { get; set; }
 
-/// <summary>CSRF protection for state-changing requests in cookie mode.</summary>
-public sealed class SlimCsrfOptions
-{
-    /// <summary>Requires <see cref="HeaderName"/> on state-changing requests in cookie mode. Default <c>true</c>.</summary>
-    public bool Enabled { get; set; } = true;
-    /// <summary>Custom header (any value) – cannot be set cross-origin without a CORS preflight. Default <c>X-CSRF</c>.</summary>
-    public string HeaderName { get; set; } = "X-CSRF";
-    /// <summary>Additional allowed <c>Origin</c> values besides the API's own origin (e.g. <c>https://app.example.com</c>).</summary>
-    public List<string> AllowedOrigins { get; set; } = [];
+    /// <summary>Overrides the verification link, e.g. <c>https://app.example.com/verify?token={token}</c>.</summary>
+    public string? EmailVerificationUrl { get; set; }
+    /// <summary>Overrides the password reset link, e.g. <c>https://app.example.com/reset?token={token}</c>.</summary>
+    public string? PasswordResetUrl { get; set; }
+    /// <summary>Overrides the invitation link, e.g. <c>https://app.example.com/invite?token={token}</c>.</summary>
+    public string? InvitationUrl { get; set; }
+    /// <summary>Overrides the e-mail change link (sent to the new address), e.g. <c>https://app.example.com/change-email?token={token}</c>.</summary>
+    public string? EmailChangeUrl { get; set; }
+
+    internal string? EmailVerificationTemplate => EmailVerificationUrl ?? FromBase("/verify-email");
+    internal string? PasswordResetTemplate => PasswordResetUrl ?? FromBase("/reset-password");
+    internal string? InvitationTemplate => InvitationUrl ?? FromBase("/accept-invitation");
+    internal string? EmailChangeTemplate => EmailChangeUrl ?? FromBase("/confirm-email-change");
+
+    private string? FromBase(string path) =>
+        string.IsNullOrWhiteSpace(BaseUrl) ? null : $"{BaseUrl.TrimEnd('/')}{path}?token={{token}}";
 }
 
 /// <summary>Mail dispatch.</summary>

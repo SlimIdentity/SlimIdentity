@@ -91,7 +91,7 @@ SlimIdentity offers "forget this device" and "forget all devices".
 
 ## Notes
 
-- TOTP: RFC 6238, SHA-1, 6 digits, 30 s, ±1 step tolerance (`TwoFactor.TotpTimeStepTolerance`) – works with all common
+- TOTP: RFC 6238, SHA-1, 6 digits, 30 s, ±1 step tolerance – works with all common
   authenticator apps.
 - External logins (Google, …) also require the second factor if the user has 2FA enabled.
 - Migrating authenticator keys from another system: encrypt them once with

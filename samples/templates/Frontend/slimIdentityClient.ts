@@ -40,10 +40,6 @@ export interface SessionInfo {
 export interface PasswordPolicy {
   minimumLength: number;
   maximumLength: number;
-  requireDigit: boolean;
-  requireLowercase: boolean;
-  requireUppercase: boolean;
-  requireNonAlphanumeric: boolean;
   /** Server-side rules (e.g. breached-password check) – only reported on submit. */
   hasAdditionalRules: boolean;
 }
@@ -58,11 +54,7 @@ export function checkPassword(password: string, p: PasswordPolicy): string[] {
   const errors: string[] = [];
   if (password.length < p.minimumLength) errors.push(`At least ${p.minimumLength} characters`);
   if (password.length > p.maximumLength) errors.push(`At most ${p.maximumLength} characters`);
-  // same character classes as the server (.NET char.IsDigit / IsLower / IsUpper / IsLetterOrDigit)
-  if (p.requireDigit && !/\p{Nd}/u.test(password)) errors.push("A digit");
-  if (p.requireLowercase && !/\p{Ll}/u.test(password)) errors.push("A lowercase letter");
-  if (p.requireUppercase && !/\p{Lu}/u.test(password)) errors.push("An uppercase letter");
-  if (p.requireNonAlphanumeric && !/[^\p{L}\p{N}]/u.test(password)) errors.push("A special character");
+  // no character-class rules (NIST SP 800-63B) – encourage long passphrases instead
   return errors;
 }
 

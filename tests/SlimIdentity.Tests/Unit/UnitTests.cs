@@ -122,20 +122,45 @@ public sealed class OptionsValidatorTests
     [Fact]
     public void Defaults_with_a_jwt_secret_are_valid() => Assert.Empty(Validate(_ => { }));
 
-    [Theory]
-    [InlineData("short-secret")]
-    [InlineData("")]
-    public void Jwt_secret_must_have_32_bytes(string secret) =>
-        Assert.Contains(Validate(o => o.Tokens.JwtSecret = secret), f => f.Contains("JwtSecret"));
+    [Fact]
+    public void A_jwt_secret_must_have_32_bytes() =>
+        Assert.Contains(Validate(o => o.Tokens.JwtSecret = "short-secret"), f => f.Contains("JwtSecret"));
 
     [Fact]
-    public void Jwt_secret_is_not_required_for_cookie_only_setups() =>
-        Assert.Empty(Validate(o => { o.Tokens.JwtSecret = ""; o.Endpoints.AllowJwtAuth = false; o.Endpoints.DefaultUseCookies = true; }));
+    public void Without_a_jwt_secret_the_setup_is_cookie_only()
+    {
+        var options = new SlimIdentityOptions();
+        Assert.Empty(new SlimIdentityOptionsValidator().Validate(null, options).Failures ?? []);
+        Assert.False(options.JwtEnabled);
+        Assert.True(options.EffectiveDefaultUseCookies);
+    }
 
     [Fact]
-    public void SameSite_none_requires_csrf_protection() =>
-        Assert.Contains(Validate(o => { o.Cookies.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.None; o.Csrf.Enabled = false; }),
-            f => f.Contains("SameSite"));
+    public void Something_must_be_able_to_sign_in() =>
+        Assert.Contains(Validate(o => { o.Tokens.JwtSecret = ""; o.Endpoints.AllowCookieAuth = false; }), f => f.Contains("Nothing to sign in with"));
+
+    [Fact]
+    public void Trusted_origins_include_the_link_base_url()
+    {
+        var options = new SlimIdentityOptions { TrustedOrigins = { "https://admin.example.com/" }, Links = { BaseUrl = "https://app.example.com/start" } };
+        Assert.True(options.IsTrustedOrigin("https://app.example.com"));
+        Assert.True(options.IsTrustedOrigin("https://ADMIN.example.com/some/path"));
+        Assert.False(options.IsTrustedOrigin("https://app.example.com:8443"));
+        Assert.False(options.IsTrustedOrigin("http://app.example.com"));
+        Assert.False(options.IsTrustedOrigin("https://evil.example"));
+        Assert.Contains(Validate(o => o.TrustedOrigins.Add("app.example.com")), f => f.Contains("TrustedOrigins"));
+    }
+
+    [Fact]
+    public void Link_base_url_yields_all_link_templates_and_single_links_override_it()
+    {
+        var links = new SlimLinkOptions { BaseUrl = "https://app.example.com/", PasswordResetUrl = "https://app.example.com/pw?t={token}" };
+        Assert.Equal("https://app.example.com/verify-email?token={token}", links.EmailVerificationTemplate);
+        Assert.Equal("https://app.example.com/pw?t={token}", links.PasswordResetTemplate);
+        Assert.Equal("https://app.example.com/accept-invitation?token={token}", links.InvitationTemplate);
+        Assert.Equal("https://app.example.com/confirm-email-change?token={token}", links.EmailChangeTemplate);
+        Assert.Null(new SlimLinkOptions().InvitationTemplate);
+    }
 
     [Fact]
     public void Lockout_cap_must_not_be_below_the_first_duration() =>

@@ -35,7 +35,7 @@ app.UseForwardedHeaders();      // first – before UseHttpsRedirection, UseRate
   reachable exclusively through the proxy.
 - The proxy must pass the original host (nginx: `proxy_set_header Host $host;`) or set `X-Forwarded-Host`, and set
   `X-Forwarded-For` / `X-Forwarded-Proto` (nginx: `proxy_set_header X-Forwarded-Proto $scheme;`).
-- For the CSRF check alone, adding the public origin to `Csrf.AllowedOrigins` also works.
+- For the CSRF check alone, adding the public origin to `TrustedOrigins` also works.
 - The demo reads `ReverseProxy:KnownProxies`, `ReverseProxy:KnownNetworks` and `ReverseProxy:AllowedHosts` from
   configuration ([`samples/SlimIdentity.Demo/Program.cs`](../../samples/SlimIdentity.Demo/Program.cs)).
 

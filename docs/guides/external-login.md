@@ -6,7 +6,7 @@ external identity to your users.
 ```csharp
 var slim = builder.Services.AddSlimIdentity(o =>
     {
-        o.ExternalLogin.AllowedReturnUrls.Add("https://app.example.com");
+        o.TrustedOrigins.Add("https://app.example.com");   // allowed returnUrl targets (besides local paths)
         o.ExternalLogin.TrustedEmailProviders.Add("Google");
     })
     .AddUserStore<MyUserStore>()

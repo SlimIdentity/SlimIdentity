@@ -192,20 +192,12 @@ public sealed record SlimTwoFactorSetupResponse(string SharedKey, string Authent
 /// </summary>
 /// <param name="MinimumLength">Minimum number of characters.</param>
 /// <param name="MaximumLength">Maximum number of characters.</param>
-/// <param name="RequireDigit">At least one digit.</param>
-/// <param name="RequireLowercase">At least one lowercase letter.</param>
-/// <param name="RequireUppercase">At least one uppercase letter.</param>
-/// <param name="RequireNonAlphanumeric">At least one character that is neither letter nor digit.</param>
 /// <param name="HasAdditionalRules">
 /// True if the server applies further rules (e.g. a breached-password check) that can only be checked on submit.
 /// </param>
 public sealed record SlimPasswordPolicyResponse(
     int MinimumLength,
     int MaximumLength,
-    bool RequireDigit,
-    bool RequireLowercase,
-    bool RequireUppercase,
-    bool RequireNonAlphanumeric,
     bool HasAdditionalRules);
 
 /// <summary>Body of <c>POST /auth/invitation/info</c>.</summary>

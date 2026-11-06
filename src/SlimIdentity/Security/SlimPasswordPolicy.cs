@@ -12,10 +12,7 @@ internal sealed class SlimPasswordPolicy(IOptions<SlimIdentityOptions> options, 
 
         if (password.Length < p.MinimumLength) errors.Add($"Password must be at least {p.MinimumLength} characters long.");
         if (password.Length > p.MaximumLength) errors.Add($"Password must be at most {p.MaximumLength} characters long.");
-        if (p.RequireDigit && !password.Any(char.IsDigit)) errors.Add("Password must contain a digit.");
-        if (p.RequireLowercase && !password.Any(char.IsLower)) errors.Add("Password must contain a lowercase letter.");
-        if (p.RequireUppercase && !password.Any(char.IsUpper)) errors.Add("Password must contain an uppercase letter.");
-        if (p.RequireNonAlphanumeric && password.All(char.IsLetterOrDigit)) errors.Add("Password must contain a non-alphanumeric character.");
+        // no composition rules (NIST SP 800-63B) – they make passwords harder to remember, not harder to guess
 
         // custom rules (breached-password checks, blocklists, …) only for otherwise valid, reasonably sized input
         if (errors.Count == 0)

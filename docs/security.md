@@ -24,7 +24,7 @@ If you find a gap, please report it privately ([SECURITY.md](../SECURITY.md)).
 | :--- | :--- |
 | Online password guessing | Per-client rate limit (IPv6 grouped by /64) + progressive account lockout (1 min, 2, 4, … ≤ 1 h). Attempts during a lockout are not evaluated. |
 | Credential stuffing (one attempt per account from many IPs) | Lockout counts per account; optional lockout notification mail; optional breached-password rule for new passwords. A botnet with fresh IPs remains a residual risk – combine with 2FA or a WAF if you are a target. |
-| Weak or breached new passwords | Password policy + pluggable `ISlimPasswordRule`s (sample: Have I Been Pwned with k-anonymity). |
+| Weak or breached new passwords | Minimum length (NIST SP 800-63B, no composition rules) + pluggable `ISlimPasswordRule`s (sample: Have I Been Pwned with k-anonymity). |
 | Locking out a victim on purpose | Lockouts are short and grow slowly; the counter only matters after `MaxFailedAttempts` failures. (Device cookies are not implemented.) |
 | Account enumeration | Identical answers for `/register`, `/forgot-password`, `/resend-verification`, `/change-email`; mails sent in the background; dummy hashing for unknown, inactive and locked accounts; `/login` hides inactive/locked state by default. |
 | Timing attacks on secrets | Constant-time comparison of tokens, stamps, TOTP codes; passwords via `PasswordHasher` (PBKDF2). |
@@ -54,7 +54,7 @@ If you find a gap, please report it privately ([SECURITY.md](../SECURITY.md)).
   invalidates all sessions and links, and TOTP secrets can no longer be decrypted – affected users sign in with a
   recovery code and set up their authenticator again.
 - Store implementations: atomic deletes / compare-and-set, case-insensitive and unique e-mail, cleanup of expired rows.
-- CORS configuration that matches `Csrf.AllowedOrigins` (credentials only for trusted origins).
+- CORS configuration that matches `TrustedOrigins` (credentials only for trusted origins).
 - Protecting your own endpoints: `.RequireAuthorization()`, `.RequireSlimCsrf()` for cookie-authenticated
   state-changing endpoints, `.RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)` for login-like endpoints.
 - Secure mail templates (HTML-encode user-controlled data such as e-mail addresses) and a trustworthy sender domain (SPF/DKIM).

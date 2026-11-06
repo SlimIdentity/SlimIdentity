@@ -20,7 +20,7 @@ internal static partial class Log
     [LoggerMessage(1004, LogLevel.Warning, "SlimIdentity: CSRF origin check failed – request origin {Origin} vs. API origin {Self}. Behind a TLS-terminating reverse proxy call app.UseForwardedHeaders() (X-Forwarded-Proto) with KnownProxies/KnownIPNetworks.")]
     public static partial void CsrfSchemeMismatch(ILogger logger, string origin, string self);
 
-    [LoggerMessage(1005, LogLevel.Information, "SlimIdentity: CSRF origin {Origin} rejected (API origin {Self}, not in Csrf.AllowedOrigins).")]
+    [LoggerMessage(1005, LogLevel.Information, "SlimIdentity: CSRF origin {Origin} rejected (API origin {Self}, not in TrustedOrigins).")]
     public static partial void CsrfOriginRejected(ILogger logger, string origin, string self);
 
     // ---------------------------------------------------------------- 2xxx two-factor

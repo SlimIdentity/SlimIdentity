@@ -77,15 +77,16 @@ app.Run();
       "Audience": "MyAppClients"
     },
     "Links": {
-      "EmailVerificationUrl": "https://app.example.com/verify-email?token={token}",
-      "PasswordResetUrl": "https://app.example.com/reset-password?token={token}"
+      "BaseUrl": "https://app.example.com"
     }
   }
 }
 ```
 
-The options are validated at startup – a missing or too short `JwtSecret`, for example, stops the application with
-a clear message instead of failing later.
+That is the whole configuration for most apps: the `JwtSecret` enables bearer tokens (leave it out for a cookie-only
+app), `Links.BaseUrl` makes mail links point to `/verify-email`, `/reset-password`, … of your front end. Everything else
+has secure defaults ([configuration reference](configuration.md)). The options are validated at startup – a too short
+`JwtSecret`, for example, stops the application with a clear message instead of failing later.
 
 ## 5. Try it
 

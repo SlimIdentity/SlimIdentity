@@ -102,7 +102,7 @@ internal sealed class SlimTwoFactorService(
     /// <summary>Verifies a TOTP code and consumes its time step (a code is accepted only once).</summary>
     public async Task<bool> VerifyTotpAsync(SlimUser user, string secret, string? code, CancellationToken ct)
     {
-        if (!SlimTotp.TryVerify(secret, code, time.GetUtcNow(), options.Value.TwoFactor.TotpTimeStepTolerance, out var step))
+        if (!SlimTotp.TryVerify(secret, code, time.GetUtcNow(), SlimIdentityDefaults.TotpTimeStepTolerance, out var step))
             return false;
         if (await store.TryMarkCodeUsedAsync(user, SlimTotp.StepStart(step), ct)) return true;
 
@@ -129,7 +129,7 @@ internal sealed class SlimTwoFactorService(
     /// <summary>Generates new recovery codes, replaces the stored hashes and returns the codes (shown once).</summary>
     public async Task<IReadOnlyList<string>> RegenerateRecoveryCodesAsync(SlimUser user, CancellationToken ct)
     {
-        var codes = SlimRecoveryCodes.Generate(options.Value.TwoFactor.RecoveryCodeCount);
+        var codes = SlimRecoveryCodes.Generate(SlimIdentityDefaults.RecoveryCodeCount);
         await store.StoreRecoveryCodesAsync(user, codes.Select(c => SlimRecoveryCodes.Hash(user.Id, c)).ToList(), ct);
         return codes;
     }

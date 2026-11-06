@@ -40,7 +40,7 @@ internal sealed class SlimTwoFactorHandlers(
 
         var secret = SlimTotp.GenerateSecret();
         var setupToken = workflow.Protect(SlimWorkflowTokens.TwoFactorSetupPurpose,
-            new SlimTwoFactorSetupPayload(user.Id, secret), O.TwoFactor.SetupTokenLifetime);
+            new SlimTwoFactorSetupPayload(user.Id, secret), SlimIdentityDefaults.TwoFactorSetupTokenLifetime);
 
         return Results.Ok(new SlimTwoFactorSetupResponse(
             SlimTotp.FormatSharedKey(secret),

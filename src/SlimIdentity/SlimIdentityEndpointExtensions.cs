@@ -34,7 +34,7 @@ public static class SlimIdentityEndpointExtensions
             .AddEndpointFilter<RouteGroupBuilder, SlimCsrfEndpointFilter>();
 
         // OpenAPI: every state-changing endpoint can answer 403 csrf_validation_failed in cookie mode
-        if (o.Csrf.Enabled) ((IEndpointConventionBuilder)group).Finally(AddCsrfResponseMetadata);
+        ((IEndpointConventionBuilder)group).Finally(AddCsrfResponseMetadata);
 
         MapLogin(group, o, Has<ISlimTwoFactorStore>(), Has<ISlimRefreshTokenStore>());
         MapAccount(group, o);
@@ -89,7 +89,7 @@ public static class SlimIdentityEndpointExtensions
                 .AllowAnonymous();
         }
 
-        if (refresh && o.Endpoints.AllowJwtAuth)
+        if (refresh && o.JwtEnabled)
         {
             group.MapPost("/refresh", static ([FromBody] SlimRefreshRequest request,
                     [FromServices] SlimLoginHandlers h, CancellationToken ct) => h.RefreshAsync(request, ct))
@@ -102,22 +102,19 @@ public static class SlimIdentityEndpointExtensions
                 .AllowAnonymous();
         }
 
-        if (o.Endpoints.EnableLogout)
-        {
-            group.MapPost("/logout", static ([FromBody] SlimLogoutRequest? request,
-                    [FromServices] SlimLoginHandlers h, CancellationToken ct) => h.LogoutAsync(request, ct))
-                .WithName("SlimIdentity_Logout")
-                .WithSummary("End the current session: delete the cookie, consume the refresh token, revoke the server-side session.")
-                .Produces<SlimStatusResponse>()
-                .AllowAnonymous();
+        group.MapPost("/logout", static ([FromBody] SlimLogoutRequest? request,
+                [FromServices] SlimLoginHandlers h, CancellationToken ct) => h.LogoutAsync(request, ct))
+            .WithName("SlimIdentity_Logout")
+            .WithSummary("End the current session: delete the cookie, consume the refresh token, revoke the server-side session.")
+            .Produces<SlimStatusResponse>()
+            .AllowAnonymous();
 
-            group.MapPost("/logout-all", static ([FromServices] SlimLoginHandlers h, CancellationToken ct) => h.LogoutAllAsync(ct))
-                .WithName("SlimIdentity_LogoutAll")
-                .WithSummary("Sign out on all devices (rotates the security stamp, revokes all sessions).")
-                .Produces<SlimStatusResponse>()
-                .Produces(StatusCodes.Status401Unauthorized)
-                .RequireAuthorization(SlimAuthorize);
-        }
+        group.MapPost("/logout-all", static ([FromServices] SlimLoginHandlers h, CancellationToken ct) => h.LogoutAllAsync(ct))
+            .WithName("SlimIdentity_LogoutAll")
+            .WithSummary("Sign out on all devices (rotates the security stamp, revokes all sessions).")
+            .Produces<SlimStatusResponse>()
+            .Produces(StatusCodes.Status401Unauthorized)
+            .RequireAuthorization(SlimAuthorize);
     }
 
     // ------------------------------------------------------------------ account
@@ -180,28 +177,26 @@ public static class SlimIdentityEndpointExtensions
                 .AllowAnonymous();
         }
 
-        if (e.EnableInvitations)
-        {
-            group.MapPost("/invitation/info", static ([FromBody] SlimInvitationInfoRequest request,
-                    [FromServices] SlimAccountHandlers h, CancellationToken ct) => h.InvitationInfoAsync(request, ct))
-                .WithName("SlimIdentity_InvitationInfo")
-                .WithSummary("Check an invitation link and return the invited e-mail address (for the \"set your password\" form).")
-                .Produces<SlimInvitationInfoResponse>()
-                .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
-                .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
-                .AllowAnonymous();
+        // invitations: harmless without links – only the host can create them (ISlimAuthManager.CreateInvitationAsync)
+        group.MapPost("/invitation/info", static ([FromBody] SlimInvitationInfoRequest request,
+                [FromServices] SlimAccountHandlers h, CancellationToken ct) => h.InvitationInfoAsync(request, ct))
+            .WithName("SlimIdentity_InvitationInfo")
+            .WithSummary("Check an invitation link and return the invited e-mail address (for the \"set your password\" form).")
+            .Produces<SlimInvitationInfoResponse>()
+            .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
+            .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
+            .AllowAnonymous();
 
-            group.MapPost("/invitation/accept", static ([FromBody] SlimAcceptInvitationRequest request, [FromQuery] bool? useCookies,
-                    [FromServices] SlimAccountHandlers h, CancellationToken ct) => h.AcceptInvitationAsync(request, useCookies, ct))
-                .WithName("SlimIdentity_AcceptInvitation")
-                .WithSummary("Accept an invitation: set the password, confirm the e-mail and sign in (cookie or JWT, see ?useCookies).")
-                .Produces<SlimAuthResponse>()
-                .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
-                .ProducesValidationProblem()
-                .Produces(StatusCodes.Status429TooManyRequests)
-                .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
-                .AllowAnonymous();
-        }
+        group.MapPost("/invitation/accept", static ([FromBody] SlimAcceptInvitationRequest request, [FromQuery] bool? useCookies,
+                [FromServices] SlimAccountHandlers h, CancellationToken ct) => h.AcceptInvitationAsync(request, useCookies, ct))
+            .WithName("SlimIdentity_AcceptInvitation")
+            .WithSummary("Accept an invitation: set the password, confirm the e-mail and sign in (cookie or JWT, see ?useCookies).")
+            .Produces<SlimAuthResponse>()
+            .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
+            .ProducesValidationProblem()
+            .Produces(StatusCodes.Status429TooManyRequests)
+            .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
+            .AllowAnonymous();
 
         if (e.EnableChangePassword)
         {
@@ -242,30 +237,23 @@ public static class SlimIdentityEndpointExtensions
                 .AllowAnonymous();
         }
 
-        if (e.EnablePasswordPolicy)
-        {
-            group.MapGet("/password-policy", static ([FromServices] IOptions<SlimIdentityOptions> options,
-                    [FromServices] IEnumerable<ISlimPasswordRule> rules) =>
-                {
-                    var p = options.Value.Password;
-                    return Results.Ok(new SlimPasswordPolicyResponse(p.MinimumLength, p.MaximumLength, p.RequireDigit,
-                        p.RequireLowercase, p.RequireUppercase, p.RequireNonAlphanumeric, rules.Any()));
-                })
-                .WithName("SlimIdentity_PasswordPolicy")
-                .WithSummary("Rules for new passwords – for hints and live validation in the front end.")
-                .Produces<SlimPasswordPolicyResponse>()
-                .AllowAnonymous();
-        }
+        group.MapGet("/password-policy", static ([FromServices] IOptions<SlimIdentityOptions> options,
+                [FromServices] IEnumerable<ISlimPasswordRule> rules) =>
+            {
+                var p = options.Value.Password;
+                return Results.Ok(new SlimPasswordPolicyResponse(p.MinimumLength, p.MaximumLength, rules.Any()));
+            })
+            .WithName("SlimIdentity_PasswordPolicy")
+            .WithSummary("Rules for new passwords – for hints and live validation in the front end.")
+            .Produces<SlimPasswordPolicyResponse>()
+            .AllowAnonymous();
 
-        if (e.EnableMe)
-        {
-            group.MapGet("/me", static ([FromServices] SlimAccountHandlers h) => h.Me())
-                .WithName("SlimIdentity_Me")
-                .WithSummary("Current user, impersonation info and claims (for SPA state after reload).")
-                .Produces<SlimMeResponse>()
-                .Produces(StatusCodes.Status401Unauthorized)
-                .RequireAuthorization(SlimAuthorize);
-        }
+        group.MapGet("/me", static ([FromServices] SlimAccountHandlers h) => h.Me())
+            .WithName("SlimIdentity_Me")
+            .WithSummary("Current user, impersonation info and claims (for SPA state after reload).")
+            .Produces<SlimMeResponse>()
+            .Produces(StatusCodes.Status401Unauthorized)
+            .RequireAuthorization(SlimAuthorize);
     }
 
     // ------------------------------------------------------------------ sessions (ISlimSessionStore)
@@ -356,7 +344,7 @@ public static class SlimIdentityEndpointExtensions
     private static void MapExternal(RouteGroupBuilder group, SlimIdentityOptions o)
     {
         // literal route first so it never collides with /login/{provider}
-        if (o.Endpoints.AllowJwtAuth)
+        if (o.JwtEnabled)
         {
             group.MapPost("/login/external/exchange", static ([FromBody] SlimExternalExchangeRequest request,
                     [FromServices] SlimExternalLoginHandlers h, CancellationToken ct) => h.ExchangeAsync(request, ct))

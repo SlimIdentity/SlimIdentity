@@ -138,7 +138,7 @@ internal sealed class SlimLoginHandlers(
             await emailSender.SendTwoFactorCodeAsync(user.Email, code, ct);
         }
 
-        var lifetime = O.Tokens.PreAuthTokenLifetime;
+        var lifetime = SlimIdentityDefaults.PreAuthTokenLifetime;
         var token = workflow.Protect(SlimWorkflowTokens.PreAuthPurpose,
             new SlimPreAuthPayload(user.Id, user.SecurityStamp, useCookies, rememberMe, method, codeHash, issuedAt), lifetime);
 
@@ -248,7 +248,7 @@ internal sealed class SlimLoginHandlers(
             // Tokens at the very end of their lifetime are excluded – the store may already have expired them
             // (clock drift between app and database), which is not a replay.
             var clearlyUnexpired = tokenExpiresAt - time.GetUtcNow() > O.Tokens.ClockSkew;
-            if (stampValid && clearlyUnexpired && O.Tokens.RevokeSessionsOnRefreshTokenReuse)
+            if (stampValid && clearlyUnexpired)
             {
                 await HandleRefreshTokenReuseAsync(user!, payload, ct);
                 return RefreshFailed("reuse_detected");
@@ -341,12 +341,12 @@ internal static class SlimModes
 {
     public static bool TryResolve(SlimIdentityOptions o, bool? requested, out bool useCookies, out IResult? error)
     {
-        useCookies = requested ?? o.Endpoints.DefaultUseCookies;
+        useCookies = requested ?? o.EffectiveDefaultUseCookies;
         error = null;
         if (useCookies && !o.Endpoints.AllowCookieAuth)
             error = SlimResults.BadRequest("cookie_auth_disabled", "Cookie authentication is disabled.");
-        else if (!useCookies && !o.Endpoints.AllowJwtAuth)
-            error = SlimResults.BadRequest("jwt_auth_disabled", "JWT authentication is disabled.");
+        else if (!useCookies && !o.JwtEnabled)
+            error = SlimResults.BadRequest("jwt_auth_disabled", "JWT authentication is not configured (Tokens.JwtSecret).");
         return error is null;
     }
 }

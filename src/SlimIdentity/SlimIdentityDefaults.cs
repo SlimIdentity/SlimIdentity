@@ -23,6 +23,18 @@ public static class SlimIdentityDefaults
 
     /// <summary>Header carrying API keys.</summary>
     public const string ApiKeyHeaderName = "X-API-Key";
+    /// <summary>
+    /// Anti-forgery header required on state-changing cookie requests (any value). Browsers cannot send it cross-origin
+    /// without a CORS preflight.
+    /// </summary>
+    public const string CsrfHeaderName = "X-CSRF";
+
+    // fixed protocol parameters (deliberately not configurable)
+    internal static readonly TimeSpan PreAuthTokenLifetime = TimeSpan.FromMinutes(5);
+    internal static readonly TimeSpan TwoFactorSetupTokenLifetime = TimeSpan.FromMinutes(10);
+    internal static readonly TimeSpan ExternalExchangeCodeLifetime = TimeSpan.FromMinutes(1);
+    internal const int RecoveryCodeCount = 10;
+    internal const int TotpTimeStepTolerance = 1;
     /// <summary>OpenAPI tag of all SlimIdentity endpoints.</summary>
     public const string OpenApiTag = "SlimIdentity";
 

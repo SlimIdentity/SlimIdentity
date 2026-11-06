@@ -98,7 +98,7 @@ public static class AdminEndpoints
                 if (await store.CreateAsync(req.Email, passwordHash: string.Empty, ct) is not { } user)
                     return Results.Conflict(new { status = "already_exists" });
                 // TODO: business profile (DisplayName, tenant, roles …) for user.Id
-                var invitation = await auth.CreateInvitationAsync(user, TimeSpan.FromDays(14), ct); // needs Links.InvitationUrl
+                var invitation = await auth.CreateInvitationAsync(user, TimeSpan.FromDays(14), ct); // link from Links.BaseUrl (or Links.InvitationUrl)
                 await mailer.SendInvitationAsync(req.Email, req.DisplayName, me.GetSlimEmail(), invitation.Link, invitation.ExpiresAt, ct);
                 return Results.Ok(new { status = "invited", user.Id, invitation.ExpiresAt });
             });

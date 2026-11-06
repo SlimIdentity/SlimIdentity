@@ -166,12 +166,12 @@ internal sealed class SlimExternalLoginHandlers(
         // Bearer clients: never put tokens into URLs – hand out a short-lived one-time code instead.
         var code = workflow.Protect(SlimWorkflowTokens.ExternalExchangePurpose,
             new SlimExchangePayload(user.Id, user.SecurityStamp, provider, Convert.ToHexString(RandomNumberGenerator.GetBytes(16))),
-            O.ExternalLogin.ExchangeCodeLifetime);
+            SlimIdentityDefaults.ExternalExchangeCodeLifetime);
 
         // Single use: with a refresh-token store the code is registered there and consumed atomically (works across
         // instances); otherwise the nonce is tracked in memory on exchange.
         if (services.GetService<ISlimRefreshTokenStore>() is { } refreshStore)
-            await refreshStore.StoreRefreshTokenAsync(user.Id, ExchangeCodeHash(code), time.GetUtcNow() + O.ExternalLogin.ExchangeCodeLifetime, ct);
+            await refreshStore.StoreRefreshTokenAsync(user.Id, ExchangeCodeHash(code), time.GetUtcNow() + SlimIdentityDefaults.ExternalExchangeCodeLifetime, ct);
 
         return Redirect(returnUrl, "code", code);
     }
@@ -230,15 +230,7 @@ internal sealed class SlimExternalLoginHandlers(
         if (!Uri.TryCreate(returnUrl, UriKind.Absolute, out var uri) || (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
             return null;
 
-        foreach (var allowed in O.ExternalLogin.AllowedReturnUrls)
-        {
-            if (Uri.TryCreate(allowed, UriKind.Absolute, out var a)
-                && string.Equals(a.Scheme, uri.Scheme, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(a.Host, uri.Host, StringComparison.OrdinalIgnoreCase)
-                && a.Port == uri.Port)
-                return returnUrl;
-        }
-        return null;
+        return O.IsTrustedOrigin(returnUrl) ? returnUrl : null;
     }
 
     private static IResult Redirect(string returnUrl, string key, string value) =>

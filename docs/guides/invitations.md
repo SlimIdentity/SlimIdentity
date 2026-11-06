@@ -7,7 +7,7 @@ sets the password themselves.
 builder.Services.AddSlimIdentity(o =>
 {
     o.Endpoints.EnableRegistration = false;                                    // no self-registration
-    o.Links.InvitationUrl = "https://app.example.com/accept-invitation?token={token}";
+    o.Links.BaseUrl = "https://app.example.com";   // link: /accept-invitation?token=… (or set Links.InvitationUrl)
     o.Tokens.InvitationTokenLifetime = TimeSpan.FromDays(14);
 });
 ```
@@ -34,7 +34,7 @@ The invitation mail is yours (sender, wording, inviter's name, branding) – it 
 
 ## Accepting (front end)
 
-1. The page behind `InvitationUrl` calls `POST /auth/invitation/info { token }` → `{ email, expiresAt }` to show the
+1. The page behind the link (`/accept-invitation`) calls `POST /auth/invitation/info { token }` → `{ email, expiresAt }` to show the
    address (or `400 invalid_token` → "link expired or already used").
 2. The user chooses a password; `POST /auth/invitation/accept?useCookies=true { token, password }` sets it (password
    policy applies), confirms the e-mail and signs the user in.

@@ -86,7 +86,7 @@ internal sealed class SlimCredentialService(
     public async Task<bool> RegisterFailureAsync(SlimUser user, CancellationToken ct)
     {
         var lockout = options.Value.Lockout;
-        if (!lockout.Enabled) return false;
+        if (lockout.MaxFailedAttempts == 0) return false;   // lockout disabled
 
         // atomic in the store: parallel failures are all counted, and exactly one of them reaches the next multiple
         user.FailedLoginAttempts = await store.IncrementFailedLoginAttemptsAsync(user, ct);

@@ -43,4 +43,5 @@ again. This is the intended trade-off of rotation.
 An attacker who steals a refresh token and uses it first gets a new pair; the legitimate client then presents the old
 token. SlimIdentity recognizes this replay and revokes the whole token family (the session) – the attacker's tokens
 included. Without a session store the family cannot be identified, so all sessions of the user end (security stamp
-rotation). Disable with `Tokens.RevokeSessionsOnRefreshTokenReuse = false` only if you have a good reason.
+rotation). This is always on – a client that legitimately reuses refresh tokens has a bug (e.g. two parallel refresh
+calls; serialize them, as the sample client does).

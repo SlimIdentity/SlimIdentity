@@ -19,7 +19,7 @@ public interface ISlimEmailSender
 
     /// <summary>
     /// Confirmation link for a requested e-mail change, sent to the <b>new</b> address
-    /// (<c>/change-email</c>, link template <c>Links.EmailChangeUrl</c>). The address changes only when the link is confirmed.
+    /// (<c>/change-email</c>, link from <c>Links.BaseUrl</c> or <c>Links.EmailChangeUrl</c>). The address changes only when the link is confirmed.
     /// </summary>
     Task SendEmailChangeConfirmationAsync(string newEmail, string confirmationTokenOrLink, CancellationToken ct);
 

@@ -65,7 +65,7 @@ public sealed class TestApp : IAsyncDisposable
                 o.Tokens.JwtSecret = "test-secret-0123456789-abcdefghijklmnopqrstuvwxyz";
                 o.RateLimit.PermitLimit = 10_000;
                 o.Cookies.SecurityStampValidationInterval = TimeSpan.Zero;
-                o.Csrf.AllowedOrigins.Add("https://app.test.local");
+                o.TrustedOrigins.Add("https://app.test.local");
                 options.Configure?.Invoke(o);
             })
             .AddUserStore<TestUserStore>(ServiceLifetime.Singleton)

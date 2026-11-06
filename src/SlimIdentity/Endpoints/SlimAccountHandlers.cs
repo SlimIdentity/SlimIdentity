@@ -110,7 +110,7 @@ internal sealed class SlimAccountHandlers(
         var token = workflow.Protect(SlimWorkflowTokens.EmailVerificationPurpose,
             new SlimEmailTokenPayload(user.Id, user.Email, user.SecurityStamp), O.Tokens.EmailVerificationTokenLifetime);
         var email = user.Email;
-        var link = SlimWorkflowTokens.BuildLink(O.Links.EmailVerificationUrl, token);
+        var link = SlimWorkflowTokens.BuildLink(O.Links.EmailVerificationTemplate, token);
         await mail.SendAsync("verification", (s, c) => s.SendVerificationEmailAsync(email, link, c), ct);
     }
 
@@ -127,7 +127,7 @@ internal sealed class SlimAccountHandlers(
                 var token = workflow.Protect(SlimWorkflowTokens.PasswordResetPurpose,
                     new SlimResetTokenPayload(user.Id, user.SecurityStamp), O.Tokens.PasswordResetTokenLifetime);
                 var address = user.Email;
-                var link = SlimWorkflowTokens.BuildLink(O.Links.PasswordResetUrl, token);
+                var link = SlimWorkflowTokens.BuildLink(O.Links.PasswordResetTemplate, token);
                 await mail.SendAsync("password-reset", (s, c) => s.SendPasswordResetEmailAsync(address, link, c), ct);
                 metrics.PasswordReset("requested");
             }
@@ -179,7 +179,7 @@ internal sealed class SlimAccountHandlers(
         {
             var token = workflow.Protect(SlimWorkflowTokens.EmailChangePurpose,
                 new SlimEmailChangePayload(user.Id, user.Email, target, user.SecurityStamp), O.Tokens.EmailVerificationTokenLifetime);
-            var link = SlimWorkflowTokens.BuildLink(O.Links.EmailChangeUrl, token);
+            var link = SlimWorkflowTokens.BuildLink(O.Links.EmailChangeTemplate, token);
             await mail.SendAsync("email-change", (s, c) => s.SendEmailChangeConfirmationAsync(target, link, c), ct);
         }
         else

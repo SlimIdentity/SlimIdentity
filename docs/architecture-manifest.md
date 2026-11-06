@@ -22,8 +22,9 @@ mobile apps, while leaving databases, ORMs (EF Core, Dapper) and domain models e
 5. **Opt-in complexity (capability pattern):** refresh tokens, server-side sessions, 2FA, external logins, API keys and
    custom password validation are inactive until the corresponding interface is registered.
 6. **OpenAPI first:** every endpoint carries complete OpenAPI metadata, so clients can be generated.
-7. **Secure by default:** where security and convenience conflict, the secure value is the default and the convenient
-   one an explicit opt-in (e.g. `SignIn.RevealAccountState`).
+7. **Secure by default, few knobs:** where security and convenience conflict, the secure value is the default and the
+   convenient one an explicit opt-in (e.g. `SignIn.RevealAccountState`). Protections that should never be off (CSRF,
+   refresh-token reuse detection, protocol lifetimes) are not configurable at all.
 8. **Native AOT compatible:** source-generated JSON, request delegates and configuration binding; CI publishes an AOT app.
 9. **Observable without dependencies:** metrics via `System.Diagnostics.Metrics`, logs with stable event ids – never
    personal data in tags.
@@ -145,6 +146,8 @@ Deliberately not part of the package (extra dependency, highly deployment specif
 | Replay protection via one "last used" value per user | RFC 6238 §5.2; a single atomic compare-and-set covers TOTP steps and e-mail codes. |
 | Single-use challenges via a second "last used" value | Code times and challenge times cannot share one counter (a code from the current step may predate a new challenge); a second compare-and-set needs no token table. Of two open challenges only the newer one can still complete. |
 | Narrow store methods for sign-in bookkeeping | Sign-ins are slow (hashing) and parallel; writing back the whole user could undo a concurrent password change, and read-modify-write would lose failed attempts. One small statement each is easy to implement atomically in any database. |
+| Few options, secure behaviour fixed | Every switch is something to understand and a way to weaken the protection. JWT is enabled by its secret, all links derive from one `BaseUrl`, one `TrustedOrigins` list serves CSRF and redirects; CSRF, reuse detection and protocol lifetimes are not configurable. |
+| No password composition rules | NIST SP 800-63B: length and a breached-password check beat character classes; classic rules remain possible as an `ISlimPasswordRule`. |
 | `CreateAsync` returns `null` for a taken address | The unique index decides, not a prior lookup – concurrent registrations get the uniform answer instead of an error. |
 | Metrics via `System.Diagnostics.Metrics` | Zero dependency, OpenTelemetry-ready, no cost when nobody listens. |
 | "Remember this device" is stateless and off by default | Signed token bound to the security stamp: no table, revoked by every security event; "forget all" rotates the stamp (other sessions end, too). |
