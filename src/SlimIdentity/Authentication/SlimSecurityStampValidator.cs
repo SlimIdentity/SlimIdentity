@@ -78,6 +78,13 @@ internal static class SlimSecurityStampValidator
                 return false;
         }
 
+        // the host's sign-in guards decide about running sessions, too (suspended tenant, IP allow-list, …)
+        var amr = principal.FindFirst(SlimClaimTypes.AuthenticationMethod)?.Value ?? "pwd";
+        var actorId = SlimClaims.ParseActorClaim(principal.FindFirst(SlimClaimTypes.Actor)?.Value)?.UserId;
+        if (await http.RequestServices.GetRequiredService<Services.SlimHookRunner>()
+                .CheckSignInAsync(user, amr, SlimSignInStage.Revalidation, actorId, http.RequestAborted) is not null)
+            return false;
+
         // Impersonation: the impersonator must still be active with an unchanged stamp.
         var actorClaim = principal.FindFirst(SlimClaimTypes.Actor)?.Value;
         if (actorClaim is null) return true;

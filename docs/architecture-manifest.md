@@ -62,6 +62,9 @@ No profile or business data – that stays in the host's own user model.
 | `ISlimApiKeyStore` | – | `X-API-Key` authentication (key hashes only) |
 | `ISlimCustomPasswordValidator` | – | LDAP / legacy password verification |
 | `ISlimPasswordRule` (any number) | – | additional rules for new passwords (e.g. breached-password check) |
+| `ISlimSignInGuard` (any number) | – | veto before and during every session (tenants, IP allow-lists) – [hooks](guides/hooks.md) |
+| `ISlimRegistrationGuard` (any number) | – | veto against new accounts (company domains, captcha) |
+| `ISlimEventObserver` (any number) | – | security events for audit trails and alerts (observe only) |
 
 `ISlimAuthManager` is the service for host endpoints: `SignInAsync`, `ImpersonateAsync` / `EndImpersonationAsync`,
 `ElevateSessionAsync` (sudo), `SignOutAsync`, `SignOutEverywhereAsync`, `CreateInvitationAsync`.

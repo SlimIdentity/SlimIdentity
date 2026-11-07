@@ -64,9 +64,14 @@ internal sealed class SlimAuthManager(
         var currentAmr = httpContextAccessor.HttpContext?.User.FindFirst(SlimClaimTypes.AuthenticationMethod)?.Value;
         var actor = SlimClaims.SerializeActor(SlimClaims.CreateActor(impersonator.Id, impersonator.SecurityStamp, currentAmr));
 
-        Log.ImpersonationStarted(logger, impersonator.Id, targetUser.Id);
-        metrics.Impersonation("started");
-        return await SignInCoreAsync(targetUser, useCookies, isPersistent: false, MethodImpersonation, null, actor, issueRefreshToken: false, ct);
+        var started = await SignInCoreAsync(targetUser, useCookies, isPersistent: false, MethodImpersonation, null, actor, issueRefreshToken: false, ct);
+        if (started.Succeeded)
+        {
+            Log.ImpersonationStarted(logger, impersonator.Id, targetUser.Id);
+            metrics.Impersonation("started");
+            await Hooks.RaiseAsync(SlimEventTypes.ImpersonationStarted, targetUser.Id, actorId: impersonator.Id, ct: ct);
+        }
+        return started;
     }
 
     public async Task<SlimAuthResult> EndImpersonationAsync(CancellationToken ct = default)
@@ -90,6 +95,7 @@ internal sealed class SlimAuthManager(
 
         Log.ImpersonationEnded(logger, impersonator.Id, current.GetSlimUserId());
         metrics.Impersonation("ended");
+        await Hooks.RaiseAsync(SlimEventTypes.ImpersonationEnded, current.GetSlimUserId(), actorId: impersonator.Id, ct: ct);
         return await SignInCoreAsync(impersonator, useCookies, isPersistent: false, actor.AuthenticationMethod ?? MethodPassword,
             null, null, issueRefreshToken: true, ct);
     }
@@ -105,6 +111,7 @@ internal sealed class SlimAuthManager(
         await store.UpdateSecurityStateAsync(user, ct);
         await RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
         Log.AdminPasswordSet(logger, user.Id, mustChange);
+        await Hooks.RaiseAsync(SlimEventTypes.PasswordChanged, user.Id, reason: "set_by_administrator", ct: ct);
         return null;
     }
 
@@ -135,6 +142,7 @@ internal sealed class SlimAuthManager(
         await store.UpdateSecurityStateAsync(user, ct);
         await RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
         Log.AdminTwoFactorReset(logger, user.Id);
+        await Hooks.RaiseAsync(SlimEventTypes.TwoFactorDisabled, user.Id, reason: "administrator", ct: ct);
     }
 
     public async Task UnlockAsync(SlimUser user, CancellationToken ct = default)
@@ -144,6 +152,7 @@ internal sealed class SlimAuthManager(
         user.LockoutEndUtc = null;
         await store.ResetFailedLoginAttemptsAsync(user, ct);
         Log.AdminUnlocked(logger, user.Id);
+        await Hooks.RaiseAsync(SlimEventTypes.Unlocked, user.Id, ct: ct);
     }
 
     public Task<IResult?> ConfirmPasswordAsync(SlimUser user, string? password, CancellationToken ct = default)
@@ -211,6 +220,7 @@ internal sealed class SlimAuthManager(
         await RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
         Log.AllSessionsRevoked(logger, user.Id);
         metrics.SignOut("everywhere");
+        await Hooks.RaiseAsync(SlimEventTypes.SessionsRevoked, user.Id, ct: ct);
     }
 
     public Task<SlimInvitation> CreateInvitationAsync(SlimUser user, TimeSpan? lifetime = null, CancellationToken ct = default)
@@ -234,6 +244,12 @@ internal sealed class SlimAuthManager(
 
     // ------------------------------------------------------------------ internal API
 
+    private SlimHookRunner Hooks => services.GetRequiredService<SlimHookRunner>();
+
+    /// <summary>
+    /// Issues or renews a session – the only place sessions come from, so every path passes the host's sign-in guards
+    /// (unless the current, just re-validated session is only re-issued) and reports new sessions.
+    /// </summary>
     internal async Task<SlimAuthResult> SignInCoreAsync(
         SlimUser user,
         bool useCookies,
@@ -244,7 +260,34 @@ internal sealed class SlimAuthManager(
         bool issueRefreshToken,
         CancellationToken ct,
         string? sessionId = null,
-        DateTimeOffset? authTime = null)
+        DateTimeOffset? authTime = null,
+        bool checkGuards = true)
+    {
+        var stage = sessionId is null ? SlimSignInStage.SignIn : SlimSignInStage.Renewal;
+        var impersonatorId = SlimClaims.ParseActorClaim(actorJson)?.UserId;
+        if (user.IsActive && checkGuards && await Hooks.CheckSignInAsync(user, authMethod, stage, impersonatorId, ct) is { } veto)
+        {
+            await Hooks.RaiseAsync(SlimEventTypes.SignInFailed, user.Id, authMethod, veto.Error, impersonatorId, ct);
+            return SlimAuthResult.Veto(veto);
+        }
+
+        var result = await IssueSessionAsync(user, useCookies, isPersistent, authMethod, additionalClaims, actorJson, issueRefreshToken, sessionId, authTime, ct);
+        if (result.Succeeded && stage == SlimSignInStage.SignIn)
+            await Hooks.RaiseAsync(SlimEventTypes.SignedIn, user.Id, authMethod, null, impersonatorId, ct);
+        return result;
+    }
+
+    private async Task<SlimAuthResult> IssueSessionAsync(
+        SlimUser user,
+        bool useCookies,
+        bool isPersistent,
+        string authMethod,
+        IEnumerable<Claim>? additionalClaims,
+        string? actorJson,
+        bool issueRefreshToken,
+        string? sessionId,
+        DateTimeOffset? authTime,
+        CancellationToken ct)
     {
         if (!user.IsActive) return SlimAuthResult.Failed("account_inactive");
 
@@ -331,10 +374,10 @@ internal sealed class SlimAuthManager(
         {
             var existing = await Http.AuthenticateAsync(SlimIdentityDefaults.CookieScheme);
             var persistent = existing.Properties?.IsPersistent ?? false;
-            return await SignInCoreAsync(user, true, persistent, amr, null, null, issueRefreshToken: false, ct, sid, authTime);
+            return await SignInCoreAsync(user, true, persistent, amr, null, null, issueRefreshToken: false, ct, sid, authTime, checkGuards: false);
         }
 
-        return await SignInCoreAsync(user, false, false, amr, null, null, issueRefreshToken: true, ct, sid, authTime);
+        return await SignInCoreAsync(user, false, false, amr, null, null, issueRefreshToken: true, ct, sid, authTime, checkGuards: false);
     }
 
     /// <summary>Revokes server-side sessions after a security-stamp rotation (no-op without <see cref="ISlimSessionStore"/>).</summary>

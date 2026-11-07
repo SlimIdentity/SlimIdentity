@@ -150,6 +150,8 @@ If the old secret leaked, do not list it in `PreviousJwtSecrets` – every token
 | `AddConfigurationApiKeys(section)` | `X-API-Key` authentication for a fixed set of clients from configuration (hashes, scopes, roles, expiry) – no database. |
 | `AddCustomPasswordValidator<T>()` | LDAP / legacy password check. |
 | `AddPasswordRule<T>()` | Additional rule for new passwords (can be called several times). |
+| `AddSignInGuard<T>()` / `AddRegistrationGuard<T>()` | Vetoes for sessions and new accounts – [hooks](guides/hooks.md). |
+| `AddEventObserver<T>()` | Security events for audit trails and alerts. |
 | `UseRateLimitPartitionKey(Func<HttpContext, string?>)` | Custom rate-limit client key. |
 | `.Authentication` | The `AuthenticationBuilder` – add OAuth/OIDC handlers here. |
 

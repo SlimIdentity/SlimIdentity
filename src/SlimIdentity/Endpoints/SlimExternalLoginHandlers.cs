@@ -18,6 +18,7 @@ internal sealed class SlimExternalLoginHandlers(
     SlimLoginHandlers login,
     SlimAuthManager authManager,
     SlimWorkflowTokens workflow,
+    SlimHookRunner hooks,
     SlimMetrics metrics,
     SlimLocalNonceRegistry nonces,
     IServiceProvider services,
@@ -132,6 +133,7 @@ internal sealed class SlimExternalLoginHandlers(
                 }
                 await externalStore.LinkExternalLoginAsync(existing.Id, provider, providerKey, ct);
                 Log.ExternalLoginLinked(logger, provider, existing.Id);
+                await hooks.RaiseAsync(SlimEventTypes.ExternalLoginLinked, existing.Id, provider, ct: ct);
                 metrics.ExternalLogin(provider, "linked");
                 user = existing;
             }
@@ -145,6 +147,12 @@ internal sealed class SlimExternalLoginHandlers(
                 {
                     metrics.ExternalLogin(provider, "rejected");
                     return Redirect(returnUrl, "slim_error", "email_not_verified");
+                }
+
+                if (await hooks.CheckRegistrationAsync(email, provider, ct) is { } veto)
+                {
+                    metrics.ExternalLogin(provider, "rejected");
+                    return Redirect(returnUrl, "slim_error", veto.Error);
                 }
 
                 user = await store.CreateAsync(email, string.Empty, ct);
@@ -161,6 +169,7 @@ internal sealed class SlimExternalLoginHandlers(
                 }
                 await externalStore.LinkExternalLoginAsync(user.Id, provider, providerKey, ct);
                 Log.ExternalUserCreated(logger, user.Id, provider);
+                await hooks.RaiseAsync(SlimEventTypes.UserCreated, user.Id, provider, "external", ct: ct);
                 metrics.ExternalLogin(provider, "created");
             }
         }
@@ -211,8 +220,8 @@ internal sealed class SlimExternalLoginHandlers(
             });
         }
 
-        await authManager.SignInCoreAsync(user, true, false, remembered ? SlimAuthManager.MethodRememberedDevice : SlimAuthManager.MethodExternal, null, null, false, ct);
-        return Results.Redirect(returnUrl);
+        var signedIn = await authManager.SignInCoreAsync(user, true, false, remembered ? SlimAuthManager.MethodRememberedDevice : SlimAuthManager.MethodExternal, null, null, false, ct);
+        return signedIn.Succeeded ? Results.Redirect(returnUrl) : Redirect(returnUrl, "slim_error", signedIn.Error ?? "sign_in_failed");
     }
 
     // ------------------------------------------------------------------ POST /login/external/exchange

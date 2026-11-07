@@ -77,6 +77,10 @@ First public release (1.0.0) in preparation.
 - `TwoFactor.AllowEmailCodes` – switch off e-mail as second factor; affected accounts sign in with a recovery code.
 - Administration in `ISlimAuthManager`: `SetPasswordAsync` (start password, forced change by default),
   `CreatePasswordResetAsync` (reset link to hand over – no proof of the mailbox), `ResetTwoFactorAsync`, `UnlockAsync`.
+- Hooks that only tighten: `ISlimSignInGuard` (veto before every session, at renewals and for running sessions),
+  `ISlimRegistrationGuard` (veto against new accounts, also external auto-registration), `ISlimEventObserver`
+  (security events: sign-ins, failures, lockouts, password and 2FA changes, impersonation, …). `SlimAuthResult`
+  carries `Vetoed` / `ErrorMessage`.
 - Forced password change: `SlimUser.PasswordChangeRequired` (new column for stores, checked by the conformance kit),
   `401 password_change_required` at `/login` and `POST /auth/login/password-change`; TypeScript client support.
 

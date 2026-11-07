@@ -13,6 +13,7 @@ internal sealed class SlimTwoFactorHandlers(
     SlimCredentialService credentials,
     SlimAuthManager authManager,
     SlimWorkflowTokens workflow,
+    SlimHookRunner hooks,
     IOptions<SlimIdentityOptions> options,
     TimeProvider time,
     IHttpContextAccessor httpContextAccessor,
@@ -66,7 +67,7 @@ internal sealed class SlimTwoFactorHandlers(
             return SlimResults.BadRequest("invalid_two_factor_code", "The code is invalid.");
 
         await twoFactor.SetSecretAsync(user, payload.Secret, ct);
-        return await ActivateAsync(user, ct);
+        return await ActivateAsync(user, SlimLoginHandlers.MethodTotp, ct);
     }
 
     // POST /2fa/enable-email
@@ -76,7 +77,7 @@ internal sealed class SlimTwoFactorHandlers(
         if (user is null) return error!;
 
         await twoFactor.RemoveSecretAsync(user, ct);
-        return await ActivateAsync(user, ct);
+        return await ActivateAsync(user, SlimLoginHandlers.MethodEmail, ct);
     }
 
     // POST /2fa/disable
@@ -92,6 +93,7 @@ internal sealed class SlimTwoFactorHandlers(
         await store.UpdateSecurityStateAsync(user, ct);
         await authManager.RevokeSessionsAsync(user.Id, SlimAuthManager.CurrentSessionId(Http.User), ct);
         Log.TwoFactorDisabled(logger, user.Id);
+        await hooks.RaiseAsync(SlimEventTypes.TwoFactorDisabled, user.Id, reason: "user", ct: ct);
 
         var session = await authManager.RefreshCurrentSessionAsync(user, ct);
         return Results.Ok(session.ToResponse(time.GetUtcNow()));
@@ -134,7 +136,7 @@ internal sealed class SlimTwoFactorHandlers(
 
     // ------------------------------------------------------------------ helpers
 
-    private async Task<IResult> ActivateAsync(SlimUser user, CancellationToken ct)
+    private async Task<IResult> ActivateAsync(SlimUser user, string method, CancellationToken ct)
     {
         var codes = await twoFactor.RegenerateRecoveryCodesAsync(user, ct);
 
@@ -143,6 +145,7 @@ internal sealed class SlimTwoFactorHandlers(
         await store.UpdateSecurityStateAsync(user, ct);
         await authManager.RevokeSessionsAsync(user.Id, SlimAuthManager.CurrentSessionId(Http.User), ct);
         Log.TwoFactorEnabled(logger, user.Id);
+        await hooks.RaiseAsync(SlimEventTypes.TwoFactorEnabled, user.Id, method, ct: ct);
 
         var session = await authManager.RefreshCurrentSessionAsync(user, ct);
         return Results.Ok(new SlimRecoveryCodesResponse(codes, session.ToResponse(time.GetUtcNow())));

@@ -21,10 +21,15 @@ public sealed record SlimAuthResult
     public ClaimsPrincipal? Principal { get; init; }
     /// <summary>Server-side session id (only with <see cref="ISlimSessionStore"/>).</summary>
     public string? SessionId { get; init; }
-    /// <summary>Machine-readable error code, e.g. <c>account_inactive</c>, <c>impersonator_invalid</c>.</summary>
+    /// <summary>Machine-readable error code, e.g. <c>account_inactive</c>, <c>impersonator_invalid</c> or a sign-in guard's veto.</summary>
     public string? Error { get; init; }
+    /// <summary>Message of a sign-in guard's veto, else <c>null</c>.</summary>
+    public string? ErrorMessage { get; init; }
+    /// <summary>A <see cref="ISlimSignInGuard"/> refused the session.</summary>
+    public bool Vetoed { get; init; }
 
     internal static SlimAuthResult Failed(string error) => new() { Succeeded = false, Error = error };
+    internal static SlimAuthResult Veto(SlimVeto veto) => new() { Succeeded = false, Error = veto.Error, ErrorMessage = veto.Message, Vetoed = true };
 
     /// <summary>Maps the result to the JSON DTO returned by the built-in endpoints.</summary>
     public SlimAuthResponse ToResponse(DateTimeOffset utcNow) => UsedCookies

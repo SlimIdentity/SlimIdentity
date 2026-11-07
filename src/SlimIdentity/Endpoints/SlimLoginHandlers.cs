@@ -11,6 +11,7 @@ internal sealed class SlimLoginHandlers(
     SlimMailThrottle mailThrottle,
     SlimEmailDispatcher mailDispatcher,
     SlimPasswordPolicy passwordPolicy,
+    SlimHookRunner hooks,
     SlimCredentialService credentials,
     SlimAuthManager authManager,
     SlimWorkflowTokens workflow,
@@ -44,6 +45,7 @@ internal sealed class SlimLoginHandlers(
         if (found is null)
         {
             credentials.BurnDummyHash(request.Password); // timing-attack mitigation
+            await hooks.RaiseAsync(SlimEventTypes.SignInFailed, null, SlimAuthManager.MethodPassword, "unknown_user", ct: ct);
             return Failed("unknown_user");
         }
 
@@ -57,6 +59,7 @@ internal sealed class SlimLoginHandlers(
             if (attempt is null)
             {
                 metrics.Login("attempts_queued", cookies);
+                await hooks.RaiseAsync(SlimEventTypes.SignInFailed, found.Id, SlimAuthManager.MethodPassword, "attempts_queued", ct: ct);
                 (result, burnDummyHash) = (SlimResults.InvalidCredentials(), true);
             }
             else
@@ -86,6 +89,7 @@ internal sealed class SlimLoginHandlers(
         if (user is null)
         {
             metrics.Login("unknown_user", cookies);
+            await hooks.RaiseAsync(SlimEventTypes.SignInFailed, null, SlimAuthManager.MethodPassword, "unknown_user", ct: ct);
             return (SlimResults.InvalidCredentials(), true);
         }
 
@@ -96,6 +100,7 @@ internal sealed class SlimLoginHandlers(
         if (!user.IsActive)
         {
             metrics.Login("inactive", cookies);
+            await hooks.RaiseAsync(SlimEventTypes.SignInFailed, user.Id, SlimAuthManager.MethodPassword, "inactive", ct: ct);
             return reveal
                 ? (SlimResults.Status("account_disabled", "The account is disabled.", StatusCodes.Status403Forbidden), false)
                 : (SlimResults.InvalidCredentials(), true);
@@ -103,6 +108,7 @@ internal sealed class SlimLoginHandlers(
         if (user.IsLockedOut(now))
         {
             metrics.Login("locked_out", cookies);
+            await hooks.RaiseAsync(SlimEventTypes.SignInFailed, user.Id, SlimAuthManager.MethodPassword, "locked_out", ct: ct);
             return reveal ? (SlimResults.Locked(Http, user.LockoutEndUtc!.Value, now), false) : (SlimResults.InvalidCredentials(), true);
         }
 
@@ -110,6 +116,7 @@ internal sealed class SlimLoginHandlers(
         if (check == SlimPasswordCheck.Failed)
         {
             metrics.Login("invalid_password", cookies);
+            await hooks.RaiseAsync(SlimEventTypes.SignInFailed, user.Id, SlimAuthManager.MethodPassword, "invalid_password", ct: ct);
             var locked = await credentials.RegisterFailureAsync(user, ct);
             return (locked && reveal ? SlimResults.Locked(Http, user.LockoutEndUtc!.Value, now) : SlimResults.InvalidCredentials(), false);
         }
@@ -250,6 +257,7 @@ internal sealed class SlimLoginHandlers(
         await store.UpdateSecurityStateAsync(user, ct);
         await authManager.RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
         Log.ForcedPasswordChangeCompleted(logger, user.Id);
+        await hooks.RaiseAsync(SlimEventTypes.PasswordChanged, user.Id, reason: "forced_change", ct: ct);
 
         if (!SlimModes.TryResolve(O, payload.UseCookies, out var cookies, out var modeError)) return modeError!;
         if (user.TwoFactorEnabled)
@@ -322,6 +330,7 @@ internal sealed class SlimLoginHandlers(
         if (!valid)
         {
             metrics.TwoFactor(method, "failure");
+            await hooks.RaiseAsync(SlimEventTypes.SignInFailed, user.Id, method, "invalid_two_factor_code", ct: ct);
             var locked = await credentials.RegisterFailureAsync(user, ct);
             return locked
                 ? SlimResults.Locked(Http, user.LockoutEndUtc!.Value, now)
@@ -418,12 +427,14 @@ internal sealed class SlimLoginHandlers(
             // revoke the token family: the session and therefore every access / refresh token issued for it
             await sessions.RevokeAsync(payload.Sid, ct);
             Log.RefreshTokenReuseSession(logger, user.Id, payload.Sid);
+            await hooks.RaiseAsync(SlimEventTypes.RefreshTokenReuse, user.Id, payload.Amr, ct: ct);
             return;
         }
 
         // stateless: the family cannot be identified, so all sessions of the user end
         await authManager.SignOutEverywhereAsync(user, ct);
         Log.RefreshTokenReuseAll(logger, user.Id);
+        await hooks.RaiseAsync(SlimEventTypes.RefreshTokenReuse, user.Id, payload.Amr, ct: ct);
     }
 
     // ------------------------------------------------------------------ POST /logout & /logout-all
@@ -453,7 +464,11 @@ internal sealed class SlimLoginHandlers(
 
     internal IResult ToResult(SlimAuthResult result, string? twoFactorRememberToken = null)
     {
-        if (!result.Succeeded) return SlimResults.InvalidCredentials();
+        // a guard's veto follows a correct sign-in – its reason can be told; anything else stays uniform
+        if (!result.Succeeded)
+            return result.Vetoed
+                ? SlimResults.Status(result.Error!, result.ErrorMessage ?? "The sign-in was refused.", StatusCodes.Status403Forbidden)
+                : SlimResults.InvalidCredentials();
         var response = result.ToResponse(time.GetUtcNow());
         return Results.Ok(twoFactorRememberToken is null ? response : response.WithTwoFactorRememberToken(twoFactorRememberToken));
     }

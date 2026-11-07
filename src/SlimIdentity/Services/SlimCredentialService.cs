@@ -14,6 +14,7 @@ internal sealed class SlimCredentialService(
     SlimEmailDispatcher mail,
     SlimMetrics metrics,
     SlimAttemptGate gate,
+    SlimHookRunner hooks,
     IOptions<SlimIdentityOptions> options,
     TimeProvider time,
     IServiceProvider services,
@@ -110,6 +111,7 @@ internal sealed class SlimCredentialService(
         await store.SetLockoutEndAsync(user, user.LockoutEndUtc, ct);
         Log.LockedOut(logger, user.Id, user.LockoutEndUtc, lockoutNumber);
         metrics.Lockout();
+        await hooks.RaiseAsync(SlimEventTypes.LockedOut, user.Id, ct: ct);
 
         // inform the owner once per attack (first lockout since the last successful sign-in)
         if (lockoutNumber == 1)

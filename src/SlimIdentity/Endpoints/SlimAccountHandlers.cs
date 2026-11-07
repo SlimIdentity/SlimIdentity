@@ -14,6 +14,7 @@ internal sealed class SlimAccountHandlers(
     SlimPasswordPolicy passwordPolicy,
     SlimAuthManager authManager,
     SlimWorkflowTokens workflow,
+    SlimHookRunner hooks,
     SlimMetrics metrics,
     IOptions<SlimIdentityOptions> options,
     TimeProvider time,
@@ -35,6 +36,10 @@ internal sealed class SlimAccountHandlers(
 
         if (await passwordPolicy.ValidateAsync(request!.Password, email!, ct) is { } errors)
             return SlimResults.Validation(errors);
+
+        // the host's veto – decided from the request alone, before anything is looked up (no enumeration)
+        if (await hooks.CheckRegistrationAsync(email!, null, ct) is { } veto)
+            return SlimResults.Status(veto.Error, veto.Message ?? "Registration is not allowed.", StatusCodes.Status403Forbidden);
 
         var accepted = SlimResults.Status("registration_accepted",
             "If the address can be used, a confirmation e-mail has been sent.");
@@ -58,6 +63,7 @@ internal sealed class SlimAccountHandlers(
             return await AccountExistsAsync(email!, null);   // the winner of the race is not loaded
         }
         metrics.Registration("created");
+        await hooks.RaiseAsync(SlimEventTypes.UserCreated, user.Id, reason: "registration", ct: ct);
 
         if (O.Endpoints.EnableEmailVerification && !user.EmailConfirmed)
             await SendVerificationAsync(user, ct);
@@ -89,6 +95,7 @@ internal sealed class SlimAccountHandlers(
         {
             user.EmailConfirmed = true;
             await store.UpdateSecurityStateAsync(user, ct);
+            await hooks.RaiseAsync(SlimEventTypes.EmailConfirmed, user.Id, ct: ct);
         }
         return SlimResults.Status("email_confirmed");
     }
@@ -166,6 +173,7 @@ internal sealed class SlimAccountHandlers(
         await authManager.RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
 
         Log.PasswordReset(logger, user.Id);
+        await hooks.RaiseAsync(SlimEventTypes.PasswordChanged, user.Id, reason: "reset", ct: ct);
         metrics.PasswordReset("completed");
         return SlimResults.Status("password_reset");
     }
@@ -232,6 +240,7 @@ internal sealed class SlimAccountHandlers(
         await mail.SendAsync(SlimEmailKinds.EmailChanged, oldEmail, user.Id, (s, x, c) => s.SendEmailChangedNotificationAsync(x, oldEmail, newEmail, c), ct);
 
         Log.EmailChanged(logger, user.Id);
+        await hooks.RaiseAsync(SlimEventTypes.EmailChanged, user.Id, ct: ct);
         metrics.EmailChange("completed");
         return SlimResults.Status("email_changed", "The e-mail address has been changed. Please sign in again.");
     }
@@ -264,6 +273,7 @@ internal sealed class SlimAccountHandlers(
         await store.UpdateSecurityStateAsync(user, ct);
         await authManager.RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
         Log.InvitationAccepted(logger, user.Id);
+        await hooks.RaiseAsync(SlimEventTypes.PasswordChanged, user.Id, reason: "invitation", ct: ct);
         metrics.Invitation("accepted");
 
         // 2FA users (pre-provisioned by the host) sign in normally to pass the second factor
@@ -271,6 +281,7 @@ internal sealed class SlimAccountHandlers(
             return SlimResults.Status("invitation_accepted", "Password set. Please sign in.");
 
         var result = await authManager.SignInCoreAsync(user, cookies, false, SlimAuthManager.MethodPassword, null, null, true, ct);
+        if (result.Vetoed) return SlimResults.Status(result.Error!, result.ErrorMessage ?? "The sign-in was refused.", StatusCodes.Status403Forbidden);
         return result.Succeeded ? Results.Ok(result.ToResponse(time.GetUtcNow())) : SlimResults.InvalidToken();
     }
 
@@ -345,6 +356,7 @@ internal sealed class SlimAccountHandlers(
         credentials.ApplyNewPassword(user, request.NewPassword); // rotates stamp → other devices are signed out
         await store.UpdateSecurityStateAsync(user, ct);
         await authManager.RevokeSessionsAsync(user.Id, SlimAuthManager.CurrentSessionId(Http.User), ct);
+        await hooks.RaiseAsync(SlimEventTypes.PasswordChanged, user.Id, reason: "changed", ct: ct);
 
         // keep the calling device signed in
         var session = await authManager.RefreshCurrentSessionAsync(user, ct);

@@ -53,7 +53,7 @@ answer does not (enumeration protection). Keep metrics internal.
 | :--- | :--- | :--- |
 | 1xxx | Sign-in | 1001 lockout, 1002 password rehashed, 1004 CSRF scheme mismatch (proxy misconfiguration) |
 | 2xxx | Two-factor | 2002 recovery code used, 2005 replayed code rejected, 2006 TOTP secret cannot be decrypted, 2007 all remembered devices forgotten, 2008 reused sign-in challenge rejected |
-| 3xxx | Tokens and sessions | 3002/3003 refresh-token reuse, 3004 all sessions revoked |
+| 3xxx | Tokens and sessions | 3002/3003 refresh-token reuse, 3004 all sessions revoked, 3007/3008 guard vetoes, 3009 failing event observer |
 | 4xxx | Account | 4002 password reset, 4004/4005 e-mail change, 4003 invitation accepted, 4006 registration race lost |
 | 5xxx | External login | 5001 account conflict, 5002 linked, 5003 user created |
 | 6xxx | Impersonation | 6001 started, 6002 ended, 6003 return denied |

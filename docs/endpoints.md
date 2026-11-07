@@ -19,7 +19,7 @@ metadata (tag `SlimIdentity`), so typed clients can be generated from `/openapi/
 
 | Endpoint | Body | Success | Errors |
 | :--- | :--- | :--- | :--- |
-| `POST /login` ⏱ | `email`, `password`, `rememberMe`, `twoFactorRememberToken` (bearer, optional) | `200` session | `400 invalid_request`; `401 invalid_credentials`; `401 requires_two_factor` (+ `preAuthToken`, `twoFactorMethod` `totp`/`email`/`recovery`); `401 password_change_required` (+ `passwordChangeToken`); `403 email_not_confirmed`; with `RevealAccountState`: `403 account_disabled`, `423 locked_out` |
+| `POST /login` ⏱ | `email`, `password`, `rememberMe`, `twoFactorRememberToken` (bearer, optional) | `200` session | `400 invalid_request`; `401 invalid_credentials`; `401 requires_two_factor` (+ `preAuthToken`, `twoFactorMethod` `totp`/`email`/`recovery`); `401 password_change_required` (+ `passwordChangeToken`); `403 email_not_confirmed`; `403 <veto>` of a sign-in guard; with `RevealAccountState`: `403 account_disabled`, `423 locked_out` |
 | `POST /login/2fa` ⏱ | `preAuthToken` + `code` or `recoveryCode`, `rememberDevice` | `200` session (+ `twoFactorRememberToken` in bearer mode / cookie `SlimAuth.2fa` in cookie mode when remembered) | `401 invalid_token`, `401 invalid_two_factor_code`, `423 locked_out` |
 | `POST /login/password-change` ⏱ | `token` (`passwordChangeToken`), `newPassword` | `200` session, or `401 requires_two_factor` | `400 password_unchanged`, `400` validation, `401 invalid_token` |
 | `POST /refresh` | `refreshToken` | `200` new token pair | `400 invalid_request`, `401 invalid_token`, `401 session_expired` |
@@ -48,7 +48,7 @@ required in cookie mode – `#slim_status=requires_two_factor&preAuthToken=…&m
 
 | Endpoint | Body | Success | Errors |
 | :--- | :--- | :--- | :--- |
-| `POST /register` ⏱ | `email`, `password` | `200 registration_accepted` (always, also for existing addresses) | `400` validation |
+| `POST /register` ⏱ | `email`, `password` | `200 registration_accepted` (always, also for existing addresses) | `400` validation, `403 <veto>` of a registration guard |
 | `POST /verify-email` ⏱ | `token` | `200 email_confirmed` | `400 invalid_token` |
 | `POST /resend-verification` ⏱ | `email` | `200 verification_sent` (always) | – |
 | `POST /forgot-password` ⏱ | `email` | `200 reset_requested` (always) | – |

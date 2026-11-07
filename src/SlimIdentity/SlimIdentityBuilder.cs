@@ -88,6 +88,32 @@ public sealed class SlimIdentityBuilder
         return this;
     }
 
+    // ---------------------------------------------------------------- hooks (they can only tighten)
+
+    /// <summary>Adds a veto before every new session and while it runs (see <see cref="ISlimSignInGuard"/>). Can be called several times.</summary>
+    public SlimIdentityBuilder AddSignInGuard<[DynamicallyAccessedMembers(Ctors)] TGuard>(ServiceLifetime lifetime = ServiceLifetime.Scoped)
+        where TGuard : class, ISlimSignInGuard
+    {
+        Services.TryAddEnumerable(ServiceDescriptor.Describe(typeof(ISlimSignInGuard), typeof(TGuard), lifetime));
+        return this;
+    }
+
+    /// <summary>Adds a veto against new accounts (see <see cref="ISlimRegistrationGuard"/>). Can be called several times.</summary>
+    public SlimIdentityBuilder AddRegistrationGuard<[DynamicallyAccessedMembers(Ctors)] TGuard>(ServiceLifetime lifetime = ServiceLifetime.Scoped)
+        where TGuard : class, ISlimRegistrationGuard
+    {
+        Services.TryAddEnumerable(ServiceDescriptor.Describe(typeof(ISlimRegistrationGuard), typeof(TGuard), lifetime));
+        return this;
+    }
+
+    /// <summary>Adds an observer of security events (see <see cref="ISlimEventObserver"/>). Can be called several times.</summary>
+    public SlimIdentityBuilder AddEventObserver<[DynamicallyAccessedMembers(Ctors)] TObserver>(ServiceLifetime lifetime = ServiceLifetime.Scoped)
+        where TObserver : class, ISlimEventObserver
+    {
+        Services.TryAddEnumerable(ServiceDescriptor.Describe(typeof(ISlimEventObserver), typeof(TObserver), lifetime));
+        return this;
+    }
+
     // ---------------------------------------------------------------- optional capabilities
 
     /// <summary>Activates <c>/refresh</c> and refresh tokens in bearer responses.</summary>

@@ -64,6 +64,15 @@ internal static partial class Log
     [LoggerMessage(3005, LogLevel.Debug, "SlimIdentity: rejected {Purpose} token.")]
     public static partial void TokenRejected(ILogger logger, Exception exception, string purpose);
 
+    [LoggerMessage(3007, LogLevel.Information, "SlimIdentity: sign-in guard refused user {UserId} ({Error}, stage {Stage}).")]
+    public static partial void SignInVetoed(ILogger logger, string userId, string error, string stage);
+
+    [LoggerMessage(3008, LogLevel.Information, "SlimIdentity: registration guard refused a registration ({Error}).")]
+    public static partial void RegistrationVetoed(ILogger logger, string error);
+
+    [LoggerMessage(3009, LogLevel.Error, "SlimIdentity: event handler failed for {Type} – the event was not delivered to it.")]
+    public static partial void EventHandlerFailed(ILogger logger, Exception exception, string type);
+
     [LoggerMessage(3006, LogLevel.Debug, "SlimIdentity: rejected expired {Purpose} token.")]
     public static partial void TokenExpired(ILogger logger, string purpose);
 

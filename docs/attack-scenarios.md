@@ -117,6 +117,7 @@ Test names refer to `tests/SlimIdentity.Tests` (`Integration/…`, `Unit/Propert
 
 | ID | Attack → expected | Status |
 | :--- | :--- | :--- |
+| H9 | A host hook weakens the flow (skips a check, issues a session, breaks sign-ins when it fails) | covered – by design hooks can only refuse or observe; `Hook.A_veto_ends_running_sessions_and_refreshes`, `…An_external_sign_in_is_vetoed_as_well`, `…A_failing_event_handler_changes_nothing`, `…Only_allowed_addresses_can_register` |
 | H1 | Non-atomic store (refresh, recovery, 2FA step) | covered – `SlimIdentity.Testing` conformance, incl. parallel checks |
 | H1b | EF stores and the host share one `DbContext` (host changes saved early or detached) | covered – `SharedContextTests` (EF Core package), template on its own context (`IdentityDb`). **Fixed** (review round 1) |
 | H2 | Non-unique / case-sensitive addresses in the templates | covered – conformance of the EF Core stores on SQLite, PostgreSQL and SQL Server and of the Dapper stores on PostgreSQL (service containers in CI; locally via `SLIMIDENTITY_TEST_POSTGRES` / `SLIMIDENTITY_TEST_SQLSERVER`) |
