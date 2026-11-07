@@ -116,6 +116,9 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
 
 ### Fixed
 
+- The per-recipient mail limit no longer switches itself off when its table is full: 100,000 fresh addresses within
+  15 minutes (a distributed flood) let every later recipient be flooded. It now fails closed for new recipients
+  (warning 7006) and frees expired entries at most once a minute.
 - `/auth/logout` with a genuine but dead refresh token – already rotated, or issued before a password change on the
   same device – no longer ends the session that continues with new tokens; only a valid token ends its session.
 - `GET /auth/2fa` reports `method: recovery` (like the sign-in challenge) when e-mail codes are switched off and the

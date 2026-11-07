@@ -59,14 +59,14 @@ Test names refer to `tests/SlimIdentity.Tests` (`Integration/…`, `Unit/Propert
 | D1 | Same TOTP code twice, also in parallel → accepted once | covered – `TwoFactor.A_totp_code_is_accepted_only_once`, conformance (parallel) |
 | D2 | Older time step after a newer one → rejected | covered – `TwoFactor.A_totp_code_is_accepted_only_once` |
 | D3 | Brute force of the 6-digit code → counts towards lockout, rate limited, parallel guesses beyond the threshold not evaluated | covered – `TwoFactor.Failed_second_factors_count_towards_the_lockout`, `ReviewRound1.R3_parallel_second_factor_guesses_beyond_the_threshold_are_not_evaluated`. **Fixed** (review round 1) |
-| D6 | Stolen session replaces the authenticator (locks the owner out) | covered – `ReviewRound1.R2_replacing_the_authenticator_needs_the_password`, `…R2_a_setup_token_dies_with_the_security_stamp`. **Fixed** (review round 1): `/2fa/enable` needed no password |
 | D4 | `preAuthToken` reused, parallel, expired, of another user | covered – `Concurrency.A_sign_in_challenge_completes_only_one_sign_in` (**fixed** in review), conformance (parallel); property tests for tampered tokens |
 | D5 | Recovery code reused, parallel, brute force, format variants | covered – `TwoFactor.Recovery_code_works_exactly_once`, conformance (parallel); 80-bit codes |
-| D6 | Mail bombing by requesting codes / links repeatedly | covered – `AttackScenario.D6_one_inbox_cannot_be_flooded_with_mails`. **Fixed:** at most 3 mails per recipient and kind in 15 minutes (5 for 2FA codes), silently, per instance |
+| D6 | Mail bombing by requesting codes / links repeatedly | covered – `AttackScenario.D6_one_inbox_cannot_be_flooded_with_mails`. **Fixed:** at most 3 mails per recipient and kind in 15 minutes (5 for 2FA codes), silently, per instance; `ReviewRound2.F05_*` (**fixed**: a table filled with 100,000 fresh addresses switched the limit off for everyone – it now fails closed for new recipients) |
 | D7 | Remember token of another user, after password / 2FA change, after a recovery code | covered – `RememberDevice.Remember_token_belongs_to_one_user`, `…Password_change_invalidates_remembered_devices`, `…Recovery_codes_never_remember_the_device` |
 | D8 | Login with a remember token but without password | covered – the password is always verified first (`RememberDevice.*`) |
 | D9 | Disable 2FA / regenerate codes without password or during impersonation | covered – `OpenScenario.D9_two_factor_changes_need_the_password`, `…G2_*` |
 | D10 | Database dump alone → TOTP secrets unreadable; key ring lost → defined behaviour | covered – `TwoFactor.Totp_secret_and_recovery_codes_are_never_stored_in_clear_text`; key loss documented ([guide](guides/data-protection.md)) |
+| D11 | Stolen session replaces the authenticator (locks the owner out) | covered – `ReviewRound1.R2_replacing_the_authenticator_needs_the_password`, `…R2_a_setup_token_dies_with_the_security_stamp`. **Fixed** (review round 1): `/2fa/enable` needed no password |
 
 ## E. Workflow tokens (reset, verification, invitation, e-mail change)
 

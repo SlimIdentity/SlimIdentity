@@ -62,6 +62,37 @@ public sealed class ReviewRound2Tests
         Assert.NotNull(later);
     }
 
+    // ------------------------------------------------------------------ F-05: mail throttle at capacity
+
+    [Fact]
+    public void F05_a_full_mail_throttle_does_not_let_a_victim_be_flooded()
+    {
+        var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(DateTimeOffset.UtcNow);
+        var throttle = new SlimMailThrottle(time);
+
+        // a distributed attacker fills the table with 100,000 fresh recipients
+        for (var i = 0; i < 100_000; i++)
+            Assert.True(throttle.TryAcquire(SlimEmailKinds.Verification, $"bot-{i}@example.invalid"));
+
+        var allowedForVictim = Enumerable.Range(0, 20).Count(_ => throttle.TryAcquire(SlimEmailKinds.PasswordReset, "victim@example.com"));
+
+        Assert.True(allowedForVictim <= SlimMailThrottle.PerKindAndRecipient,
+            $"{allowedForVictim} mails to victim@example.com were allowed (fail open).");
+    }
+
+    [Fact]
+    public void F05_after_the_flood_new_recipients_get_mail_again()
+    {
+        var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(DateTimeOffset.UtcNow);
+        var throttle = new SlimMailThrottle(time);
+        for (var i = 0; i < 100_000; i++) throttle.TryAcquire(SlimEmailKinds.Verification, $"bot-{i}@example.invalid");
+        Assert.False(throttle.TryAcquire(SlimEmailKinds.Verification, "late@example.com"));   // full: refused, not unlimited
+
+        time.Advance(SlimMailThrottle.Window + TimeSpan.FromMinutes(1));
+
+        Assert.True(throttle.TryAcquire(SlimEmailKinds.Verification, "late@example.com"));
+    }
+
     // ------------------------------------------------------------------ F-06: logout with a dead refresh token
 
     [Fact]

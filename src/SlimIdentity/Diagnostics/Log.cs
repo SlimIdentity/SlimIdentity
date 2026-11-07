@@ -64,6 +64,9 @@ internal static partial class Log
     [LoggerMessage(3005, LogLevel.Debug, "SlimIdentity: rejected {Purpose} token.")]
     public static partial void TokenRejected(ILogger logger, Exception exception, string purpose);
 
+    [LoggerMessage(7006, LogLevel.Warning, "SlimIdentity: mail throttle full ({Capacity} recipients within 15 minutes) – mails to new recipients are not sent. A flood of fresh addresses is likely.")]
+    public static partial void MailThrottleFull(ILogger logger, int capacity);
+
     [LoggerMessage(3007, LogLevel.Information, "SlimIdentity: sign-in guard refused user {UserId} ({Error}, stage {Stage}).")]
     public static partial void SignInVetoed(ILogger logger, string userId, string error, string stage);
 
