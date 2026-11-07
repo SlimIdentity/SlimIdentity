@@ -62,6 +62,55 @@ public sealed class ReviewRound2Tests
         Assert.NotNull(later);
     }
 
+    // ------------------------------------------------------------------ F-06: logout with a dead refresh token
+
+    [Fact]
+    public async Task F06_a_refresh_token_from_before_a_password_change_cannot_end_the_renewed_session()
+    {
+        await using var app = await TestApp.StartAsync();
+        var initial = await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword);
+
+        // the password is changed on this device: the stamp rotates, the session (sid) continues with new tokens
+        var me = app.CreateClient();
+        me.BearerToken = initial.AccessToken;
+        var changed = await me.PostJsonAsync("/auth/change-password", new { currentPassword = TestApp.UserPassword, newPassword = "New-Secure-Pass-123!" });
+
+        // whoever kept the old refresh token sends it to the anonymous logout
+        await app.CreateClient().PostJsonAsync("/auth/logout", new { refreshToken = initial.RefreshToken });
+
+        me.BearerToken = changed.Str("accessToken");
+        Assert.Equal(HttpStatusCode.OK, (await me.GetAsync("/api/hello")).StatusCode);
+        await app.CreateClient().PostJsonAsync("/auth/refresh", new { refreshToken = changed.Str("refreshToken") });
+    }
+
+    [Fact]
+    public async Task F06_an_already_rotated_refresh_token_cannot_end_the_session_through_logout()
+    {
+        await using var app = await TestApp.StartAsync();
+        var initial = await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword);
+        var rotated = await app.CreateClient().PostJsonAsync("/auth/refresh", new { refreshToken = initial.RefreshToken });
+
+        await app.CreateClient().PostJsonAsync("/auth/logout", new { refreshToken = initial.RefreshToken });
+
+        var me = app.CreateClient();
+        me.BearerToken = rotated.Str("accessToken");
+        Assert.Equal(HttpStatusCode.OK, (await me.GetAsync("/api/hello")).StatusCode);
+    }
+
+    [Fact]
+    public async Task F06_the_current_refresh_token_still_ends_its_session()
+    {
+        await using var app = await TestApp.StartAsync();
+        var tokens = await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword);
+
+        await app.CreateClient().PostJsonAsync("/auth/logout", new { refreshToken = tokens.RefreshToken });   // e.g. app closed, access token gone
+
+        var me = app.CreateClient();
+        me.BearerToken = tokens.AccessToken;
+        Assert.Equal(HttpStatusCode.Unauthorized, (await me.GetAsync("/api/hello")).StatusCode);
+        await app.CreateClient().PostJsonAsync("/auth/refresh", new { refreshToken = tokens.RefreshToken }, HttpStatusCode.Unauthorized);
+    }
+
     [Theory]
     [InlineData("/auth/login?useCookies=false")]
     [InlineData("/auth/2fa/setup")]

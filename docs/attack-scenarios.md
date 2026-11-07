@@ -50,7 +50,7 @@ Test names refer to `tests/SlimIdentity.Tests` (`Integration/…`, `Unit/Propert
 | C6 | Access token after session revocation / stamp rotation → rejected immediately | covered – `RefreshAndSession.Logout_revokes_the_current_session_server_side`, `…Logout_all_ends_every_session` |
 | C7 | Token of one user against the session of another | covered – `OpenScenario.C7_a_token_bound_to_another_users_session_is_rejected` (even with the signing key) |
 | C8 | `DELETE /sessions/{id}` for a foreign session (IDOR) → 404 | covered – `RefreshAndSession.Sessions_of_other_users_cannot_be_revoked` |
-| C9 | `/logout` with someone else's or a garbage refresh token | covered – `OpenScenario.C9_logout_cannot_end_other_users_sessions` |
+| C9 | `/logout` with someone else's, a garbage or a dead refresh token (rotated away, or from before a password change on the same device) | covered – `OpenScenario.C9_logout_cannot_end_other_users_sessions`, `ReviewRound2.F06_*` (**fixed**: a dead but genuine token ended the renewed session) |
 
 ## D. Two-factor authentication
 

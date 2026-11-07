@@ -23,7 +23,7 @@ metadata (tag `SlimIdentity`), so typed clients can be generated from `/openapi/
 | `POST /login/2fa` ⏱ | `preAuthToken` + `code` or `recoveryCode`, `rememberDevice` | `200` session (+ `twoFactorRememberToken` in bearer mode / cookie `SlimAuth.2fa` in cookie mode when remembered) | `401 invalid_token`, `401 invalid_two_factor_code`, `423 locked_out` |
 | `POST /login/password-change` ⏱ | `token` (`passwordChangeToken`), `newPassword` | `200` session, or `401 requires_two_factor` | `400 password_unchanged`, `400` validation, `401 invalid_token` |
 | `POST /refresh` | `refreshToken` | `200` new token pair | `400 invalid_request`, `401 invalid_token`, `401 session_expired` |
-| `POST /logout` | `refreshToken` (optional) | `200 logged_out` | – |
+| `POST /logout` | `refreshToken` (optional) | `200 logged_out` – ends the caller's session; a refresh token ends its session only while it is valid (unused, current security stamp) | – |
 | `POST /logout-all` 🔒 | – | `200 logged_out_everywhere` | `401`, `403 not_allowed_while_impersonating` |
 
 `/login/2fa` and `/login/password-change` use the mode chosen at `/login`. `password_change_required` follows a password

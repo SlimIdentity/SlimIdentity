@@ -196,11 +196,18 @@ internal sealed class SlimAuthManager(
             : (await Http.AuthenticateAsync(SlimIdentityDefaults.AuthenticationScheme)).Principal;
         if (principal is not null && CurrentSessionId(principal) is { } own) sessionIds.Add(own);
 
-        if (!string.IsNullOrWhiteSpace(refreshToken))
+        // A refresh token ends its session only while it is live: consumed by this call (not used before) and issued
+        // under the current security stamp. An old token – rotated away, or from before a password change on the same
+        // device, whose session continues with new tokens – has no effect, here as at /refresh.
+        if (!string.IsNullOrWhiteSpace(refreshToken)
+            && workflow.TryUnprotect<SlimRefreshPayload>(SlimWorkflowTokens.RefreshTokenPurpose, refreshToken, out var payload)
+            && services.GetService<ISlimRefreshTokenStore>() is { } refreshStore)
         {
-            if (services.GetService<ISlimRefreshTokenStore>() is { } refreshStore)
-                await refreshStore.ValidateAndConsumeRefreshTokenAsync(SlimHashing.Sha256Hex(refreshToken), ct);
-            if (workflow.TryUnprotect<SlimRefreshPayload>(SlimWorkflowTokens.RefreshTokenPurpose, refreshToken, out var payload) && payload.Sid is { } sid)
+            var owner = await refreshStore.ValidateAndConsumeRefreshTokenAsync(SlimHashing.Sha256Hex(refreshToken), ct);
+            if (payload.Sid is { } sid
+                && string.Equals(owner, payload.Uid, StringComparison.Ordinal)
+                && await store.FindByIdAsync(payload.Uid, ct) is { } owningUser
+                && SlimHashing.FixedTimeEquals(owningUser.SecurityStamp, payload.Stamp))
                 sessionIds.Add(sid);
         }
 

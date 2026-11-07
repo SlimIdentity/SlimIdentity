@@ -116,6 +116,8 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
 
 ### Fixed
 
+- `/auth/logout` with a genuine but dead refresh token – already rotated, or issued before a password change on the
+  same device – no longer ends the session that continues with new tokens; only a valid token ends its session.
 - `GET /auth/2fa` reports `method: recovery` (like the sign-in challenge) when e-mail codes are switched off and the
   account has no authenticator; it said `email` before. The endpoint reference no longer lists password-policy fields
   that do not exist (`require*`).
