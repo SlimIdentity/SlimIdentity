@@ -63,6 +63,13 @@ First public release (1.0.0) in preparation.
   key ring persistence, Have I Been Pwned, admin endpoints and a TypeScript client (incl. QR code for TOTP setup).
 - `ISlimAuthManager.ConfirmPasswordAsync` – password confirmation for host endpoints (sudo mode) with the lockout
   rules of the built-in endpoints.
+- Password hashes use 210,000 PBKDF2-HMAC-SHA512 iterations by default (OWASP); older hashes are upgraded at the next
+  sign-in, a host value always wins.
+- `Tokens.PreviousJwtSecrets` – rotate the JWT secret without rejecting tokens during a rolling deployment.
+- `AddConfigurationApiKeys(section)` – API keys from configuration (hashes, scopes, roles, expiry, revocation by
+  reload) and `tools/new-api-key.cs` to create key and hash; machine-to-machine-only hosts need neither user store nor
+  mail sender.
+- `SlimUser` is sealed.
 
 ### Security (external review round 1)
 

@@ -66,6 +66,7 @@ All defaults are the secure choice. The options are listed in three tiers – mo
 | `RateLimit.RefreshPermitLimit` | `60` | Policy `SlimIdentity_Refresh` for `/refresh` (same window). |
 | `RateLimit.IPv6PrefixLength` | `64` | IPv6 clients are grouped by network prefix (32–128). |
 | `Password.MaximumLength` | `256` | Longer passwords are never hashed (DoS protection). |
+| `Tokens.PreviousJwtSecrets` | – | Earlier signing secrets still accepted for validation (never for signing) – see [rotating the JWT secret](#rotating-the-jwt-secret). |
 | `Tokens.Issuer` / `Audience` | `SlimIdentity` / `SlimIdentityClient` | JWT `iss` / `aud`. |
 | `Tokens.ClockSkew` | `00:00:30` | JWT clock tolerance (0–5 min). |
 | `Tokens.ValidateSecurityStampOnEachRequest` | `true` | Checks stamp, `IsActive` and server-side session on every bearer request. |
@@ -99,6 +100,15 @@ These are deliberately not configurable – changing them would only weaken the 
 
 ## Passwords
 
+New passwords are hashed with ASP.NET Core's `PasswordHasher` (PBKDF2-HMAC-SHA512) at **210,000 iterations**
+(`SlimIdentityDefaults.PasswordHashIterations`, the OWASP recommendation) instead of the framework's 100,000. That
+roughly doubles the CPU time of a sign-in. Existing hashes with fewer iterations are upgraded transparently at the next
+successful sign-in. Your own value always wins, whether configured before or after `AddSlimIdentity`:
+
+```csharp
+builder.Services.Configure<PasswordHasherOptions>(o => o.IterationCount = 300_000);
+```
+
 Additional rules (e.g. a breached-password check) are added with `.AddPasswordRule<T>()` – see
 [`samples/templates/Security/PwnedPasswordRule.cs`](../samples/templates/Security/PwnedPasswordRule.cs). If you need
 classic composition rules (digit, upper case, …), implement them as such a rule.
@@ -113,6 +123,16 @@ The client is identified by IP address. Behind a reverse proxy you need `UseForw
 ([guide](guides/reverse-proxy.md)). A custom key (e.g. a tenant header set by your gateway) can be configured with
 `.UseRateLimitPartitionKey(context => …)` on the builder.
 
+## Rotating the JWT secret
+
+Refresh tokens are protected with Data Protection, not with the JWT secret – a new secret only invalidates access
+tokens (15 minutes), and clients simply refresh. To avoid even that during a rolling deployment:
+
+1. Set the new `Tokens.JwtSecret` and add the old one to `Tokens.PreviousJwtSecrets`; deploy everywhere.
+2. After `Tokens.AccessTokenLifetime`, remove the old secret from `PreviousJwtSecrets`.
+
+If the old secret leaked, do not list it in `PreviousJwtSecrets` – every token signed with it must die at once.
+
 ## Builder methods
 
 | Method | Effect |
@@ -124,6 +144,7 @@ The client is identified by IP address. Behind a reverse proxy you need `UseForw
 | `AddTwoFactorStore<T>()` | `/login/2fa`, `/2fa/*`. |
 | `AddExternalLoginStore<T>()` | `/login/{provider}`, `/login/external/exchange`. |
 | `AddApiKeyStore<T>()` | `X-API-Key` authentication. |
+| `AddConfigurationApiKeys(section)` | `X-API-Key` authentication for a fixed set of clients from configuration (hashes, scopes, roles, expiry) – no database. |
 | `AddCustomPasswordValidator<T>()` | LDAP / legacy password check. |
 | `AddPasswordRule<T>()` | Additional rule for new passwords (can be called several times). |
 | `UseRateLimitPartitionKey(Func<HttpContext, string?>)` | Custom rate-limit client key. |

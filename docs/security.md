@@ -56,7 +56,9 @@ If you find a gap, please report it privately ([SECURITY.md](../SECURITY.md)).
 ## Host responsibilities
 
 - HTTPS for browsers, HSTS and security headers (CSP!) for the front end.
-- Persisting and protecting the Data Protection keys and `JwtSecret`; rotating them if leaked. Losing the key ring
+- Persisting and protecting the Data Protection keys and `JwtSecret`; rotating them if leaked
+  ([JWT secret rotation](configuration.md#rotating-the-jwt-secret)), and keeping configured API-key hashes out of
+  source control. Losing the key ring
   invalidates all sessions and links, and TOTP secrets can no longer be decrypted – affected users sign in with a
   recovery code and set up their authenticator again.
 - Store implementations: atomic deletes / compare-and-set, case-insensitive and unique e-mail, cleanup of expired rows.

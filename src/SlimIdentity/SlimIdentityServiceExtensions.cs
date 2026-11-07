@@ -15,6 +15,8 @@ namespace SlimIdentity;
 /// <summary>Service registration: <c>builder.Services.AddSlimIdentity(…)</c>.</summary>
 public static class SlimIdentityServiceExtensions
 {
+    private static readonly int FrameworkIterationCount = new PasswordHasherOptions().IterationCount;
+
     /// <summary>Registers SlimIdentity configured purely in code.</summary>
     public static SlimIdentityBuilder AddSlimIdentity(this IServiceCollection services, Action<SlimIdentityOptions>? configure = null) =>
         services.AddSlimIdentity(configuration: null, configure);
@@ -44,6 +46,13 @@ public static class SlimIdentityServiceExtensions
         services.ConfigureHttpJsonOptions(o => o.SerializerOptions.TypeInfoResolverChain.Insert(0, SlimJsonContext.Default));
         services.AddDataProtection();
         services.TryAddScoped<IPasswordHasher<SlimUser>, PasswordHasher<SlimUser>>();
+        // OWASP: 210,000 iterations for PBKDF2-HMAC-SHA512 (Identity V3) instead of the framework's 100,000. PostConfigure
+        // and only while untouched: a host value wins regardless of the order of the calls. Older hashes are upgraded at
+        // the next sign-in (SuccessRehashNeeded → rehash path).
+        services.PostConfigure<PasswordHasherOptions>(o =>
+        {
+            if (o.IterationCount == FrameworkIterationCount) o.IterationCount = SlimIdentityDefaults.PasswordHashIterations;
+        });
 
         // ---------------------------------------------------------------- internal services
         services.TryAddSingleton<SlimWorkflowTokens>();
@@ -153,7 +162,10 @@ public static class SlimIdentityServiceExtensions
                     ValidateLifetime = true,
                     RequireExpirationTime = true,
                     ValidateIssuerSigningKey = true,
-                    IssuerSigningKey = string.IsNullOrEmpty(t.JwtSecret) ? null : SlimJwtTokenFactory.CreateSigningKey(t.JwtSecret),
+                    // the current secret signs and validates; previous ones only validate (rotation without rejected tokens)
+                    IssuerSigningKeys = string.IsNullOrEmpty(t.JwtSecret)
+                        ? []
+                        : [SlimJwtTokenFactory.CreateSigningKey(t.JwtSecret), .. t.PreviousJwtSecrets.Select(SlimJwtTokenFactory.CreateSigningKey)],
                     ValidAlgorithms = [SecurityAlgorithms.HmacSha256],
                     ClockSkew = t.ClockSkew,
                     NameClaimType = SlimClaimTypes.Email,

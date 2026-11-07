@@ -4,7 +4,7 @@ namespace SlimIdentity;
 /// The only data structure exchanged between the host database and SlimIdentity.
 /// Contains nothing but authentication / hardening state – no profile or business data.
 /// </summary>
-public class SlimUser
+public sealed class SlimUser
 {
     /// <summary>Unique user id (Guid, int or string in the host DB – always transported as string).</summary>
     public string Id { get; set; } = string.Empty;

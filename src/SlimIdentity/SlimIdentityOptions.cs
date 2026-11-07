@@ -176,6 +176,12 @@ public sealed class SlimTokenOptions
     /// cookie sessions are available. Keep it secret.
     /// </summary>
     public string JwtSecret { get; set; } = string.Empty;
+    /// <summary>
+    /// Earlier signing keys that are still accepted for validation (never used to sign) – for a rotation without
+    /// rejected tokens: set the new <see cref="JwtSecret"/>, move the old one here, remove it after
+    /// <see cref="AccessTokenLifetime"/> once every instance runs the new configuration. Each at least 32 bytes.
+    /// </summary>
+    public IList<string> PreviousJwtSecrets { get; set; } = [];
     /// <summary>JWT <c>iss</c>. Default <c>SlimIdentity</c>.</summary>
     public string Issuer { get; set; } = "SlimIdentity";
     /// <summary>JWT <c>aud</c>. Default <c>SlimIdentityClient</c>.</summary>

@@ -19,6 +19,12 @@ public static class SlimIdentityDefaults
     /// <summary>Temporary sign-in scheme for OAuth/OIDC handlers (set <c>SignInScheme</c> of your providers to this).</summary>
     public const string ExternalScheme = "SlimIdentity.External";
 
+    /// <summary>
+    /// PBKDF2-HMAC-SHA512 iterations of new password hashes unless the host configures <c>PasswordHasherOptions</c>
+    /// itself (OWASP recommendation). About twice the CPU time of the framework default per sign-in.
+    /// </summary>
+    public const int PasswordHashIterations = 210_000;
+
     /// <summary>Rate-limiter policy of the sensitive endpoints – apply it to your own login-like endpoints, too.</summary>
     public const string BruteForcePolicy = "SlimIdentity_BruteForce";
     /// <summary>Separate, more generous limiter for <c>/refresh</c> (refresh tokens cannot be guessed).</summary>

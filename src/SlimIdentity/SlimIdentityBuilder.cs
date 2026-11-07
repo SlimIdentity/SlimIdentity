@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using System.Diagnostics.CodeAnalysis;
 using SlimIdentity.Authentication;
 using SlimIdentity.Endpoints;
@@ -90,6 +91,27 @@ public sealed class SlimIdentityBuilder
         Services.TryAddSingleton<SlimLocalNonceRegistry>();
         Services.Configure<AuthenticationOptions>(o => o.DefaultSignInScheme ??= SlimIdentityDefaults.ExternalScheme);
         return this;
+    }
+
+    /// <summary>
+    /// Activates the <c>X-API-Key</c> handler for a fixed set of machine clients from configuration – no database.
+    /// <paramref name="section"/> is a list of <see cref="SlimConfiguredApiKey"/> (client id, hash, scopes, roles,
+    /// expiry). It is validated at startup and followed on reload: removing or changing an entry revokes the key.
+    /// </summary>
+    /// <example><code>
+    /// // "SlimIdentity": { "ApiKeys": [ { "ClientId": "reports", "Hash": "9f2c…", "Scopes": [ "reports:read" ] } ] }
+    /// builder.Services.AddSlimIdentity(…).AddConfigurationApiKeys(builder.Configuration.GetSection("SlimIdentity:ApiKeys"));
+    /// </code></example>
+    public SlimIdentityBuilder AddConfigurationApiKeys(IConfiguration section)
+    {
+        ArgumentNullException.ThrowIfNull(section);
+        Services.AddOptions<SlimConfiguredApiKeyOptions>()
+            .Configure(o => o.Keys = section.Get<List<SlimConfiguredApiKey>>() ?? [])
+            .ValidateOnStart();
+        Services.AddSingleton<IOptionsChangeTokenSource<SlimConfiguredApiKeyOptions>>(
+            new ConfigurationChangeTokenSource<SlimConfiguredApiKeyOptions>(section));
+        Services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<SlimConfiguredApiKeyOptions>, SlimConfiguredApiKeyValidator>());
+        return AddApiKeyStore<SlimConfigurationApiKeyStore>(ServiceLifetime.Singleton);
     }
 
     /// <summary>Activates the <c>X-API-Key</c> authentication handler.</summary>

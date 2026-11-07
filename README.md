@@ -43,6 +43,11 @@ the provided samples and verify your stores with the
 - **Observable**: OpenTelemetry-ready metrics and structured logs with stable event ids – no extra dependency.
 - **Native AOT** and trimming compatible; options validated at startup.
 
+**Not an identity provider.** SlimIdentity signs users in to *your* application. It issues no tokens for other
+applications and has no consent screens, client registration or discovery document. For single sign-on across several
+applications, run an identity provider (Keycloak, Microsoft Entra ID, Duende IdentityServer, OpenIddict, …) and connect
+it through [external login](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/external-login.md).
+
 ## Quickstart
 
 ```bash
@@ -117,6 +122,17 @@ All packages are released together with the same version.
   [Native AOT](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/native-aot.md) ·
   [migrating from ASP.NET Core Identity](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/migrating-from-aspnet-identity.md)
 - [Architecture and design principles](https://github.com/timmkautz/slimidentity/blob/main/docs/architecture-manifest.md)
+
+## Roadmap
+
+After 1.0, roughly in this order – nothing here needs a breaking change:
+
+- **Passkeys (1.1)** – WebAuthn as a new capability (`ISlimPasskeyStore`); password-less accounts and a free-form
+  `amr` already exist.
+- OIDC back-channel logout: an enterprise identity provider ends the local sessions of a user it signs out or blocks.
+- Device-bound tokens (DPoP) for bearer clients.
+- Adapter for the ASP.NET Core Identity table schema (`AspNetUsers`), turning a migration into a configuration step.
+- API-key entity in the EF Core package; npm package of the TypeScript client if there is demand.
 
 ## Contributing
 

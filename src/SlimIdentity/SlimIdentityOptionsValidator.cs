@@ -25,6 +25,8 @@ internal sealed class SlimIdentityOptionsValidator : IValidateOptions<SlimIdenti
         {
             if (Encoding.UTF8.GetByteCount(t.JwtSecret) < 32)
                 f.Add("Tokens.JwtSecret must be at least 32 bytes.");
+            if (t.PreviousJwtSecrets.Any(s => Encoding.UTF8.GetByteCount(s ?? string.Empty) < 32))
+                f.Add("Tokens.PreviousJwtSecrets: every secret must be at least 32 bytes.");
             if (string.IsNullOrWhiteSpace(t.Issuer)) f.Add("Tokens.Issuer is required.");
             if (string.IsNullOrWhiteSpace(t.Audience)) f.Add("Tokens.Audience is required.");
             if (t.AccessTokenLifetime <= TimeSpan.Zero) f.Add("Tokens.AccessTokenLifetime must be positive.");

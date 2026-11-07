@@ -70,5 +70,31 @@ var (key, hash) = SlimApiKeys.Generate("sk");   // show `key` once, store only `
 ```
 
 Clients send `X-API-Key: sk_…`; `ISlimApiKeyStore.ValidateApiKeyAsync(hash)` returns the claims of the client (or
-null). Protect M2M endpoints with `.RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = SlimIdentityDefaults.ApiKeyScheme })`
+null).
+
+**A few fixed clients, no database:** configure the hashes and let SlimIdentity read them.
+
+```bash
+dotnet run tools/new-api-key.cs -- reports   # prints the key (for the client) and its hash (for you)
+```
+
+```json
+"SlimIdentity": {
+  "ApiKeys": [
+    { "ClientId": "reports", "Hash": "63a5fd58…", "Scopes": [ "reports:read" ], "ExpiresUtc": "2027-06-30T00:00:00Z" }
+  ]
+}
+```
+
+```csharp
+.AddConfigurationApiKeys(builder.Configuration.GetSection("SlimIdentity:ApiKeys"))
+```
+
+The principal's `sub` is `client:{ClientId}`, scopes become `scope` claims, roles `role` claims. Entries are validated
+at startup (a key pasted instead of its hash stops the start) and followed on reload – remove or change an entry to
+revoke a key. Keep the hashes out of source control like any other credential material.
+
+**Machine-to-machine only:** an API that has no users at all needs neither a user store nor a mail sender – call
+`AddSlimIdentity()` with `AddConfigurationApiKeys(…)` (or `AddApiKeyStore<T>()`), leave out `MapSlimIdentityApi()`, and
+protect the endpoints with the API-key scheme as shown below. Protect M2M endpoints with `.RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = SlimIdentityDefaults.ApiKeyScheme })`
 or rely on the default policy scheme, which forwards requests with an `X-API-Key` header to the API-key handler.

@@ -60,6 +60,14 @@ verifier – an intercepted code (deep link, history, another app) is worthless.
 
 Inactive, locked and (with `RequireConfirmedEmail`) unconfirmed accounts are rejected with matching error codes.
 
+## Signing out at the provider
+
+After the sign-in, the session lives in your application. Signing out at the provider – or revoking the app's access in
+the Google or Microsoft account – does not end it; that is how social logins work everywhere. Enterprise identity
+providers (Keycloak, Okta, Auth0, …) can notify applications through OIDC back-channel logout; SlimIdentity does not
+handle that yet (see the roadmap). Until then, end a user's sessions from your own code with
+`ISlimAuthManager.SignOutEverywhereAsync` when your provider reports a sign-out or a block.
+
 ## Enterprise SSO and certificates
 
 Entra ID, Keycloak, Okta, ADFS work through `AddOpenIdConnect` / `AddWsFederation`. Client certificates (mTLS) are not

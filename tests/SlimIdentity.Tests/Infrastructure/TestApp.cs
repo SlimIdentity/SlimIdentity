@@ -60,7 +60,7 @@ public sealed class TestApp : IAsyncDisposable
         if (options.LoggerProvider is { } loggerProvider)
             builder.Logging.AddProvider(loggerProvider).SetMinimumLevel(LogLevel.Trace);
 
-        // starts at the real time: JWT / DataProtector validation use the system clock
+        // starts at the real time: JWT validation uses the system clock
         var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
         builder.Services.AddSingleton<TimeProvider>(time);
 
