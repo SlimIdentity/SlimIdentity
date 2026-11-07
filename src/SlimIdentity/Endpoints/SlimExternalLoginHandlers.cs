@@ -286,7 +286,8 @@ internal sealed class SlimExternalLoginHandlers(
     }
 
     /// <summary>Open-redirect protection: local paths or trusted origins only.</summary>
-    private string? ValidateReturnUrl(string? returnUrl) => SlimReturnUrl.Validate(returnUrl, O);
+    private string? ValidateReturnUrl(string? returnUrl) =>
+        SlimReturnUrl.Validate(returnUrl, O, origin => SlimLinks.IsTrustedOrigin(Http, origin));
 
     // errors are no secrets – query, readable by server-rendered pages too
     private static IResult Redirect(string returnUrl, string key, string value) =>

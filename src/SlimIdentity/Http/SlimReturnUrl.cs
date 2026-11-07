@@ -7,7 +7,11 @@ namespace SlimIdentity.Http;
 internal static class SlimReturnUrl
 {
     /// <summary>Returns the URL to redirect to, the default for an empty input, or <c>null</c> if it is not allowed.</summary>
-    public static string? Validate(string? returnUrl, SlimIdentityOptions options)
+    public static string? Validate(string? returnUrl, SlimIdentityOptions options) =>
+        Validate(returnUrl, options, options.IsTrustedOrigin);
+
+    /// <summary>As above, with the origin decision of an <see cref="ISlimOriginPolicy"/>.</summary>
+    public static string? Validate(string? returnUrl, SlimIdentityOptions options, Func<string, bool> isTrustedOrigin)
     {
         if (string.IsNullOrWhiteSpace(returnUrl)) return options.ExternalLogin.DefaultReturnUrl;
 
@@ -25,7 +29,7 @@ internal static class SlimReturnUrl
             return null;
 
         // redirect to the URL exactly as .NET parsed it, never to the raw input another parser might read differently
-        return options.IsTrustedOrigin(uri.AbsoluteUri) ? uri.AbsoluteUri : null;
+        return isTrustedOrigin(uri.AbsoluteUri) ? uri.AbsoluteUri : null;
     }
 
     /// <summary>"/path" – but not "//host" or "/\host" (protocol-relative in browsers).</summary>

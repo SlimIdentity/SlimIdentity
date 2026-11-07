@@ -40,6 +40,12 @@ public static class SlimIdentityDefaults
     /// </summary>
     public const string CsrfHeaderName = "X-CSRF";
 
+    /// <summary>
+    /// CORS policy of <c>AddCorsPolicy()</c>: credentials for the origins of the <see cref="ISlimOriginPolicy"/> only –
+    /// <c>app.UseCors(SlimIdentityDefaults.CorsPolicy)</c>.
+    /// </summary>
+    public const string CorsPolicy = "SlimIdentity_Cors";
+
     // fixed protocol parameters (deliberately not configurable)
     internal static readonly TimeSpan PreAuthTokenLifetime = TimeSpan.FromMinutes(5);
     internal static readonly TimeSpan TwoFactorSetupTokenLifetime = TimeSpan.FromMinutes(10);

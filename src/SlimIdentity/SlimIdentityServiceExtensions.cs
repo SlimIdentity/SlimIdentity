@@ -69,6 +69,8 @@ public static class SlimIdentityServiceExtensions
         services.TryAddSingleton<SlimMailThrottle>();
         services.TryAddSingleton<SlimAttemptGate>();
         services.TryAddSingleton<SlimHookRunner>();
+        services.TryAddSingleton<ISlimOriginPolicy, SlimTrustedOriginsPolicy>();
+        services.TryAddSingleton<SlimLinks>();
         services.TryAddSingleton<Http.SlimDeploymentDiagnostics>();
         services.TryAddScoped<SlimEmailDispatcher>();
         services.AddHostedService<SlimEmailBackgroundService>();

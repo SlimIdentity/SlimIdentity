@@ -36,13 +36,13 @@ o.Cookies.SameSite = SameSiteMode.Lax;            // the cookie must be sent on 
 o.Cookies.Domain = ".example.com";                // optional: share the cookie between subdomains
 o.Links.BaseUrl = "https://app.example.com";      // mail links – and this origin is trusted (CSRF Origin check)
 
-builder.Services.AddCors(c => c.AddDefaultPolicy(p => p
-    .WithOrigins("https://app.example.com")
-    .AllowCredentials()
-    .AllowAnyMethod()
-    .WithHeaders("Content-Type", "X-CSRF")));
-// app.UseCors() before UseAuthentication()
+builder.Services.AddSlimIdentity(…).AddCorsPolicy();   // CORS from the same trusted origins
+app.UseCors(SlimIdentityDefaults.CorsPolicy);           // before UseAuthentication()
 ```
+
+`AddCorsPolicy()` allows credentials for exactly the trusted origins (`TrustedOrigins`, `Links.BaseUrl`) and the
+headers `Content-Type`, `Authorization` and `X-CSRF` – one list for CSRF, redirects and CORS. Never combine
+credentials with `SetIsOriginAllowed(_ => true)`: every website could then call your API with the user's cookie.
 
 ## Completely different sites
 

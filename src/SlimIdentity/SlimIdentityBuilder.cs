@@ -88,6 +88,40 @@ public sealed class SlimIdentityBuilder
         return this;
     }
 
+    // ---------------------------------------------------------------- tenants
+
+    /// <summary>
+    /// Replaces the trusted origins (<c>TrustedOrigins</c>, <c>Links.BaseUrl</c>) with your per-request decision – e.g.
+    /// each tenant trusts its own front end (see <see cref="ISlimOriginPolicy"/>).
+    /// </summary>
+    public SlimIdentityBuilder AddOriginPolicy<[DynamicallyAccessedMembers(Ctors)] TPolicy>()
+        where TPolicy : class, ISlimOriginPolicy
+    {
+        Services.Replace(ServiceDescriptor.Singleton<ISlimOriginPolicy, TPolicy>());
+        return this;
+    }
+
+    /// <summary>Builds mail, reset and invitation links per request, e.g. on the tenant's domain (see <see cref="ISlimLinkBuilder"/>).</summary>
+    public SlimIdentityBuilder AddLinkBuilder<[DynamicallyAccessedMembers(Ctors)] TBuilder>(ServiceLifetime lifetime = ServiceLifetime.Singleton)
+        where TBuilder : class, ISlimLinkBuilder
+    {
+        Services.Replace(ServiceDescriptor.Describe(typeof(ISlimLinkBuilder), typeof(TBuilder), lifetime));
+        return this;
+    }
+
+    /// <summary>
+    /// Registers the CORS policy <see cref="SlimIdentityDefaults.CorsPolicy"/>, built per request from the
+    /// <see cref="ISlimOriginPolicy"/>: credentials allowed, exactly the requesting origin if trusted, headers
+    /// <c>Content-Type</c>, <c>Authorization</c> and <c>X-CSRF</c>. One list for CSRF, redirects and CORS instead of two
+    /// that drift apart. Activate it with <c>app.UseCors(SlimIdentityDefaults.CorsPolicy)</c> before the endpoints.
+    /// </summary>
+    public SlimIdentityBuilder AddCorsPolicy()
+    {
+        Services.AddCors();
+        Services.Replace(ServiceDescriptor.Transient<Microsoft.AspNetCore.Cors.Infrastructure.ICorsPolicyProvider, SlimCorsPolicyProvider>());
+        return this;
+    }
+
     // ---------------------------------------------------------------- hooks (they can only tighten)
 
     /// <summary>Adds a veto before every new session and while it runs (see <see cref="ISlimSignInGuard"/>). Can be called several times.</summary>

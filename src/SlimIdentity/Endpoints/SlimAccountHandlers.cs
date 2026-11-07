@@ -15,6 +15,7 @@ internal sealed class SlimAccountHandlers(
     SlimAuthManager authManager,
     SlimWorkflowTokens workflow,
     SlimHookRunner hooks,
+    SlimLinks links,
     SlimMetrics metrics,
     IOptions<SlimIdentityOptions> options,
     TimeProvider time,
@@ -117,7 +118,7 @@ internal sealed class SlimAccountHandlers(
         var token = workflow.Protect(SlimWorkflowTokens.EmailVerificationPurpose,
             new SlimEmailTokenPayload(user.Id, user.Email, user.SecurityStamp), O.Tokens.EmailVerificationTokenLifetime);
         var email = user.Email;
-        var link = SlimWorkflowTokens.BuildLink(O.Links.EmailVerificationTemplate, token);
+        var link = links.Build(SlimLinkKind.EmailVerification, token);
         await mail.SendAsync(SlimEmailKinds.Verification, email, user.Id, (s, x, c) => s.SendVerificationEmailAsync(x, email, link, c), ct);
     }
 
@@ -134,7 +135,7 @@ internal sealed class SlimAccountHandlers(
                 var token = workflow.Protect(SlimWorkflowTokens.PasswordResetPurpose,
                     new SlimResetTokenPayload(user.Id, user.SecurityStamp), O.Tokens.PasswordResetTokenLifetime);
                 var address = user.Email;
-                var link = SlimWorkflowTokens.BuildLink(O.Links.PasswordResetTemplate, token);
+                var link = links.Build(SlimLinkKind.PasswordReset, token);
                 await mail.SendAsync(SlimEmailKinds.PasswordReset, address, user.Id, (s, x, c) => s.SendPasswordResetEmailAsync(x, address, link, c), ct);
                 metrics.PasswordReset("requested");
             }
@@ -201,7 +202,7 @@ internal sealed class SlimAccountHandlers(
         {
             var token = workflow.Protect(SlimWorkflowTokens.EmailChangePurpose,
                 new SlimEmailChangePayload(user.Id, user.Email, target, user.SecurityStamp), O.Tokens.EmailVerificationTokenLifetime);
-            var link = SlimWorkflowTokens.BuildLink(O.Links.EmailChangeTemplate, token);
+            var link = links.Build(SlimLinkKind.EmailChange, token);
             await mail.SendAsync(SlimEmailKinds.EmailChange, target, user.Id, (s, x, c) => s.SendEmailChangeConfirmationAsync(x, target, link, c), ct);
         }
         else

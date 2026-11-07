@@ -171,6 +171,8 @@ public sealed class ApiClient(HttpClient http)
     public string? BearerToken { get; set; }
     public bool SendCsrfHeader { get; set; }
     public string? Origin { get; set; }
+    /// <summary>Host the request is sent to (tenants by host name); default <c>localhost</c>.</summary>
+    public string Host { get; set; } = "localhost";
 
     public IReadOnlyDictionary<string, string> Cookies => _cookies;
 
@@ -206,7 +208,7 @@ public sealed class ApiClient(HttpClient http)
 
     public async Task<HttpResponseMessage> SendAsync(HttpMethod method, string path, object? body, IReadOnlyDictionary<string, string>? headers = null)
     {
-        using var request = new HttpRequestMessage(method, new Uri(new Uri("https://localhost"), path));
+        using var request = new HttpRequestMessage(method, new Uri(new Uri($"https://{Host}"), path));
         foreach (var (name, value) in headers ?? new Dictionary<string, string>()) request.Headers.Add(name, value);
         if (body is not null) request.Content = JsonContent.Create(body, options: Json);
         if (BearerToken is not null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", BearerToken);

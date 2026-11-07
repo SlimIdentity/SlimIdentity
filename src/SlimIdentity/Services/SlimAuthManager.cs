@@ -126,7 +126,8 @@ internal sealed class SlimAuthManager(
         var token = workflow.Protect(SlimWorkflowTokens.PasswordResetPurpose,
             new SlimResetTokenPayload(user.Id, user.SecurityStamp, ByAdministrator: true), validity);
         Log.AdminPasswordResetCreated(logger, user.Id);
-        return Task.FromResult(new SlimPasswordReset(token, SlimWorkflowTokens.BuildLink(o.Links.PasswordResetTemplate, token), time.GetUtcNow() + validity));
+        var link = services.GetRequiredService<SlimLinks>().Build(SlimLinkKind.PasswordReset, token);
+        return Task.FromResult(new SlimPasswordReset(token, link, time.GetUtcNow() + validity));
     }
 
     public async Task ResetTwoFactorAsync(SlimUser user, CancellationToken ct = default)
@@ -239,7 +240,8 @@ internal sealed class SlimAuthManager(
         var token = workflow.Protect(SlimWorkflowTokens.InvitationPurpose,
             new SlimInvitationPayload(user.Id, user.Email, user.SecurityStamp), validity);
         metrics.Invitation("created");
-        return Task.FromResult(new SlimInvitation(token, SlimWorkflowTokens.BuildLink(o.Links.InvitationTemplate, token), time.GetUtcNow() + validity));
+        var link = services.GetRequiredService<SlimLinks>().Build(SlimLinkKind.Invitation, token);
+        return Task.FromResult(new SlimInvitation(token, link, time.GetUtcNow() + validity));
     }
 
     // ------------------------------------------------------------------ internal API

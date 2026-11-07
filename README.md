@@ -44,6 +44,7 @@ the provided samples and verify your stores with the
 - **Framework native**: built-in cookie/JWT handlers, `PasswordHasher`, Data Protection and rate limiter;
   `[Authorize]` and policies just work. Full OpenAPI metadata for client generation.
 - **Observable**: OpenTelemetry-ready metrics and structured logs with stable event ids – no extra dependency.
+- **Multi-tenant ready**: scoped stores keep tenants apart; trusted origins, CORS and mail links per tenant domain.
 - **Extensible, never weaker**: guards for sessions and registrations (tenants, IP allow-lists, company domains) and
   security events for your audit trail – hooks can only tighten the flow.
 - **Native AOT** and trimming compatible; options validated at startup.
@@ -120,6 +121,7 @@ All packages are released together with the same version.
   [admin features](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/admin-features.md) ·
   [without e-mail](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/without-email.md) ·
   [hooks](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/hooks.md) ·
+  [multi-tenancy](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/multi-tenancy.md) ·
   [LDAP](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/ldap-and-legacy-passwords.md) ·
   [client certificates](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/client-certificates.md) ·
   [Data Protection](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/data-protection.md) ·

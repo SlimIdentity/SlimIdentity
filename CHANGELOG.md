@@ -81,6 +81,9 @@ First public release (1.0.0) in preparation.
   `ISlimRegistrationGuard` (veto against new accounts, also external auto-registration), `ISlimEventObserver`
   (security events: sign-ins, failures, lockouts, password and 2FA changes, impersonation, …). `SlimAuthResult`
   carries `Vetoed` / `ErrorMessage`.
+- Tenants with own domains: `ISlimOriginPolicy` (`AddOriginPolicy<T>()`) decides trusted origins per request for the
+  CSRF check, `returnUrl` and CORS; `ISlimLinkBuilder` (`AddLinkBuilder<T>()`) builds mail, reset and invitation links
+  per request. `AddCorsPolicy()` derives CORS from the same origins (`SlimIdentityDefaults.CorsPolicy`).
 - Forced password change: `SlimUser.PasswordChangeRequired` (new column for stores, checked by the conformance kit),
   `401 password_change_required` at `/login` and `POST /auth/login/password-change`; TypeScript client support.
 

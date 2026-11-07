@@ -67,7 +67,8 @@ internal sealed class SlimCsrfEndpointFilter(IOptions<SlimIdentityOptions> optio
     }
 
     private static bool IsAllowedOrigin(string origin, HttpRequest request, SlimIdentityOptions o) =>
-        string.Equals(origin.TrimEnd('/'), SelfOrigin(request), StringComparison.OrdinalIgnoreCase) || o.IsTrustedOrigin(origin);
+        string.Equals(origin.TrimEnd('/'), SelfOrigin(request), StringComparison.OrdinalIgnoreCase)
+        || Services.SlimLinks.IsTrustedOrigin(request.HttpContext, origin);   // TrustedOrigins, or the host's per-request policy
 
     private static string SelfOrigin(HttpRequest request) => $"{request.Scheme}://{request.Host.Value}";
 }
