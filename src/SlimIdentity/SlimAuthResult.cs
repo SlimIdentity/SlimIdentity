@@ -42,6 +42,15 @@ public sealed record SlimAuthResult
         };
 }
 
+/// <summary>
+/// Result of <see cref="ISlimAuthManager.CreatePasswordResetAsync"/>: hand <see cref="Link"/> to the user (chat, ticket,
+/// in person). The user chooses the password – the administrator never sees it.
+/// </summary>
+/// <param name="Token">Raw reset token (for <c>POST /auth/reset-password</c>).</param>
+/// <param name="Link">The reset link (<c>Links.BaseUrl</c> + <c>/reset-password</c> or <c>Links.PasswordResetUrl</c>) with the token inserted, or the raw token if neither is configured.</param>
+/// <param name="ExpiresAt">End of validity.</param>
+public sealed record SlimPasswordReset(string Token, string Link, DateTimeOffset ExpiresAt);
+
 /// <summary>Result of <see cref="ISlimAuthManager.CreateInvitationAsync"/>: send <see cref="Link"/> to the invited user.</summary>
 /// <param name="Token">Raw invitation token.</param>
 /// <param name="Link">The invitation link (<c>Links.BaseUrl</c> + <c>/accept-invitation</c> or <c>Links.InvitationUrl</c>) with the token inserted, or the raw token if neither is configured.</param>

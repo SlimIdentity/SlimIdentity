@@ -14,7 +14,7 @@ limiting, account lockout, CSRF protection and enumeration resistance already ac
 | :--- | :--- |
 | Thirteen properties on your user entity | copy-paste |
 | One line in `OnModelCreating`, one migration | `ApplySlimIdentity<AppUser, Guid>()` |
-| `ISlimEmailSender` – sends the mails | `AddNullEmailSender()` while developing |
+| `ISlimEmailSender` – sends the mails | `AddNullEmailSender()` while developing; `WithoutEmail()` for hosts without mail ([guide](guides/without-email.md)) |
 
 ## 1. Install
 
@@ -83,6 +83,7 @@ public class AppUser : ISlimUserEntity<Guid>
     public int FailedLoginAttempts { get; set; }
     public DateTimeOffset? LockoutEndUtc { get; set; }
     public bool TwoFactorEnabled { get; set; }
+    public bool PasswordChangeRequired { get; set; }
     public string? TotpSecret { get; set; }
     public long? LastTwoFactorCodeAt { get; set; }
     public long? LastTwoFactorChallengeAt { get; set; }

@@ -52,6 +52,13 @@ count towards it (with the lockout notification), parallel guesses are serialize
 yourself – a stolen session could then guess it without limit. `ElevateSessionAsync` only accepts the signed-in user
 of the request.
 
+## Passwords, reset links, 2FA reset, unlock
+
+`ISlimAuthManager` has the administrator's tools for accounts whose owners cannot help themselves – essential on hosts
+without mail: `CreatePasswordResetAsync` (a link the user sets the password with), `SetPasswordAsync` (a start
+password, by default with a forced change at the next sign-in), `ResetTwoFactorAsync` and `UnlockAsync`. See
+[running without e-mail](without-email.md); endpoints for all of them are in the admin template.
+
 ## Banning a user
 
 ```csharp

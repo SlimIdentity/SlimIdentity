@@ -49,6 +49,8 @@ If you find a gap, please report it privately ([SECURITY.md](../SECURITY.md)).
 | Dev mail sender in production | `AddNullEmailSender()` stops the start in the `Production` environment (it would log live links and codes) unless explicitly allowed. |
 | Cached answers with secrets | Every answer under `/auth` carries `Cache-Control: no-store` (RFC 6749 §5.1) – tokens, recovery codes and TOTP secrets never land in a browser, proxy or CDN cache. |
 | Tokens in URLs / logs | After an external login, secrets travel in the URL **fragment** (never sent to servers, logs or referrers): bearer clients get a short-lived (1 min), single-use code that is bound to their PKCE challenge (S256) – worthless without the verifier –, cookie sign-ins with 2FA get their challenge there. Only error codes use the query. E-mail links carry their token by nature (single use, stamp-bound, short-lived); a link template like `https://app/reset#token={token}` keeps it out of server logs and referrers. Logs and metrics contain user ids at most, never passwords, tokens or codes. |
+| Administrator-set passwords | A start password (`SetPasswordAsync`) yields no session – not even on a remembered device – until the user has chosen an own one (`password_change_required`, single-use token bound to the stamp). Reset links an administrator hands over are no proof of the mailbox: an unconfirmed account stays unconfirmed and keeps its second factor. |
+| E-mail as second factor | Optional (`TwoFactor.AllowEmailCodes = false`, always off without mail): whoever controls the mailbox can also reset the password. Accounts with e-mail codes then sign in with a recovery code or are reset by an administrator. |
 | Abuse of impersonation | The impersonation session carries the admin's id and stamp (`act`); it ends as soon as the admin is banned or signs out everywhere. Never persistent, no refresh token, sensitive actions (`/change-password`, `/change-email`, 2FA changes, …) are blocked. |
 | Leaked API keys | Only SHA-256 hashes are stored; keys have 256 bits of entropy and a recognizable prefix for secret scanners. |
 | API key acting as its user | The account endpoints (`/auth/*`) accept cookies and bearer tokens only – a (possibly narrowly scoped) key bound to a user can neither act as that user there nor mint a session. |
@@ -63,6 +65,8 @@ If you find a gap, please report it privately ([SECURITY.md](../SECURITY.md)).
   recovery code and set up their authenticator again.
 - Store implementations: atomic deletes / compare-and-set, case-insensitive and unique e-mail, cleanup of expired rows.
 - CORS configuration that matches `TrustedOrigins` (credentials only for trusted origins).
+- Authorizing the administration calls of `ISlimAuthManager` (`SetPasswordAsync`, `CreatePasswordResetAsync`,
+  `ResetTwoFactorAsync`, `UnlockAsync`) – ideally behind sudo mode – and handing reset links over on a trusted channel.
 - Re-confirming passwords on your own endpoints (sudo mode) with `ISlimAuthManager.ConfirmPasswordAsync` – never with
   `IPasswordHasher` directly, which bypasses the lockout.
 - Protecting your own endpoints: `.RequireAuthorization()`, `.RequireSlimCsrf()` for cookie-authenticated

@@ -36,7 +36,10 @@ EF Core and Dapper implementations are in [`samples/templates`](../../samples/te
 3. The user enters the first 6-digit code: `POST /auth/2fa/enable` with `setupToken`, `code` and the current `password` → `recoveryCodes`
    (format `xxxx-xxxx-xxxx-xxxx`, **show them once**) and a refreshed `session`.
 
-**E-mail codes:** `POST /auth/2fa/enable-email` with the current `password`.
+**E-mail codes:** `POST /auth/2fa/enable-email` with the current `password`. E-mail is the weakest second factor –
+whoever controls the mailbox can reset the password as well. `TwoFactor.AllowEmailCodes = false` (always off with
+[`WithoutEmail()`](without-email.md)) leaves authenticator apps only; accounts that already use e-mail codes then get
+the challenge method `recovery` and sign in with a recovery code, or an administrator resets their second factor.
 
 Enabling and disabling rotate the security stamp: other devices are signed out, the calling device gets new
 tokens/cookie in the response. Regenerating recovery codes (`POST /auth/2fa/recovery-codes`, password required) only

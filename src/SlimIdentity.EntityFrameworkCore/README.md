@@ -23,6 +23,7 @@ public class AppUser : ISlimUserEntity<Guid>
     public int FailedLoginAttempts { get; set; }
     public DateTimeOffset? LockoutEndUtc { get; set; }
     public bool TwoFactorEnabled { get; set; }
+    public bool PasswordChangeRequired { get; set; }
     public string? TotpSecret { get; set; }
     public long? LastTwoFactorCodeAt { get; set; }
     public long? LastTwoFactorChallengeAt { get; set; }

@@ -51,6 +51,11 @@ public sealed record SlimEmailRequest(string Email);
 /// <param name="NewPassword">New password according to the password policy.</param>
 public sealed record SlimResetPasswordRequest(string Token, string NewPassword);
 
+/// <summary>Body of <c>POST /auth/login/password-change</c>: the forced change of a password set by an administrator.</summary>
+/// <param name="Token"><c>passwordChangeToken</c> from the <c>password_change_required</c> answer of <c>/auth/login</c>.</param>
+/// <param name="NewPassword">New password according to the password policy, different from the current one.</param>
+public sealed record SlimPasswordChangeLoginRequest(string Token, string NewPassword);
+
 /// <summary>Body of <c>POST /auth/change-password</c>.</summary>
 /// <param name="CurrentPassword">The current password.</param>
 /// <param name="NewPassword">New password according to the password policy.</param>
@@ -133,20 +138,23 @@ public sealed class SlimAuthResponse
 }
 
 /// <summary>
-/// 401 body of <c>/auth/login</c>: either <c>invalid_credentials</c> or <c>requires_two_factor</c>
-/// (then <see cref="PreAuthToken"/> and <see cref="TwoFactorMethod"/> are set).
+/// 401 body of <c>/auth/login</c>: <c>invalid_credentials</c>, <c>requires_two_factor</c> (then
+/// <see cref="PreAuthToken"/> and <see cref="TwoFactorMethod"/> are set) or <c>password_change_required</c> (then
+/// <see cref="PasswordChangeToken"/> is set).
 /// </summary>
 public sealed class SlimLoginChallengeResponse
 {
-    /// <summary><c>invalid_credentials</c> or <c>requires_two_factor</c>.</summary>
+    /// <summary><c>invalid_credentials</c>, <c>requires_two_factor</c> or <c>password_change_required</c>.</summary>
     public string Status { get; init; } = "invalid_credentials";
     /// <summary>Human-readable English description.</summary>
     public string? Message { get; init; }
     /// <summary>Short-lived token for <c>POST /auth/login/2fa</c>.</summary>
     public string? PreAuthToken { get; init; }
-    /// <summary><c>totp</c> or <c>email</c>.</summary>
+    /// <summary><c>totp</c>, <c>email</c> or <c>recovery</c> (no codes can be sent – only a recovery code helps).</summary>
     public string? TwoFactorMethod { get; init; }
-    /// <summary>Lifetime of <see cref="PreAuthToken"/> in seconds.</summary>
+    /// <summary>Short-lived token for <c>POST /auth/login/password-change</c>.</summary>
+    public string? PasswordChangeToken { get; init; }
+    /// <summary>Lifetime of <see cref="PreAuthToken"/> or <see cref="PasswordChangeToken"/> in seconds.</summary>
     public int? ExpiresIn { get; init; }
 }
 

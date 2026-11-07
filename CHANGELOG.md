@@ -70,6 +70,15 @@ First public release (1.0.0) in preparation.
   reload) and `tools/new-api-key.cs` to create key and hash; machine-to-machine-only hosts need neither user store nor
   mail sender.
 - `SlimUser` is sealed.
+- `SlimEmailContext` on every `ISlimEmailSender` method: kind of mail, account id, the request's culture (captured for
+  the background queue) and host data from `AddEmailContextEnricher<T>()` – localized and branded mails, tenants.
+  `SlimEmailKinds` lists the kinds. **Breaking** for mail senders.
+- `WithoutEmail()` – hosts without a mail server: no sender, no mail-based endpoints, contradictions stop the start.
+- `TwoFactor.AllowEmailCodes` – switch off e-mail as second factor; affected accounts sign in with a recovery code.
+- Administration in `ISlimAuthManager`: `SetPasswordAsync` (start password, forced change by default),
+  `CreatePasswordResetAsync` (reset link to hand over – no proof of the mailbox), `ResetTwoFactorAsync`, `UnlockAsync`.
+- Forced password change: `SlimUser.PasswordChangeRequired` (new column for stores, checked by the conformance kit),
+  `401 password_change_required` at `/login` and `POST /auth/login/password-change`; TypeScript client support.
 
 ### Security (external review round 1)
 

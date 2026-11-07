@@ -56,6 +56,38 @@ public sealed class SlimIdentityBuilder
         return this;
     }
 
+    /// <summary>
+    /// Runs without a mail server (internal services where an administrator creates accounts): no mail is ever sent and
+    /// no sender is required. Not mapped: <c>/forgot-password</c>, <c>/verify-email</c>, <c>/resend-verification</c>,
+    /// <c>/change-email</c>, <c>/confirm-email-change</c>, <c>/2fa/enable-email</c> and – unless
+    /// <paramref name="allowSelfRegistration"/> – <c>/register</c>. Lockout and "account exists" notices are dropped.
+    /// Passwords are changed with <c>/change-password</c>; forgotten passwords are reset by an administrator
+    /// (<see cref="ISlimAuthManager"/>), whose links use <c>/reset-password</c> and <c>/invitation/accept</c>.
+    /// </summary>
+    /// <param name="allowSelfRegistration">Keeps <c>/register</c> (accounts without a confirmed address).</param>
+    public SlimIdentityBuilder WithoutEmail(bool allowSelfRegistration = false)
+    {
+        Services.PostConfigure<SlimIdentityOptions>(o =>
+        {
+            o.Email.Enabled = false;
+            o.Endpoints.EnableEmailVerification = false;
+            o.Endpoints.EnableChangeEmail = false;
+            if (!allowSelfRegistration) o.Endpoints.EnableRegistration = false;
+        });
+        return this;
+    }
+
+    /// <summary>
+    /// Adds host data (tenant, brand, front-end origin, …) to the <see cref="SlimEmailContext"/> of every mail, captured
+    /// in the request that causes it. Can be called several times.
+    /// </summary>
+    public SlimIdentityBuilder AddEmailContextEnricher<[DynamicallyAccessedMembers(Ctors)] TEnricher>()
+        where TEnricher : class, ISlimEmailContextEnricher
+    {
+        Services.TryAddEnumerable(ServiceDescriptor.Singleton<ISlimEmailContextEnricher, TEnricher>());
+        return this;
+    }
+
     // ---------------------------------------------------------------- optional capabilities
 
     /// <summary>Activates <c>/refresh</c> and refresh tokens in bearer responses.</summary>

@@ -39,8 +39,12 @@ public static class SlimIdentityEndpointExtensions
 
         if (!Has<ISlimUserStore>())
             throw new InvalidOperationException("SlimIdentity: no ISlimUserStore registered. Call .AddUserStore<T>() after AddSlimIdentity().");
-        if (!Has<ISlimEmailSender>())
-            throw new InvalidOperationException("SlimIdentity: no ISlimEmailSender registered. Call .AddEmailSender<T>() or .AddNullEmailSender().");
+        if (o.Email.Enabled && !Has<ISlimEmailSender>())
+            throw new InvalidOperationException(
+                "SlimIdentity: no ISlimEmailSender registered. Call .AddEmailSender<T>() or .AddNullEmailSender() – or .WithoutEmail() for a host without mail.");
+        if (!o.Email.Enabled && Has<ISlimEmailSender>())
+            throw new InvalidOperationException(
+                "SlimIdentity: WithoutEmail() and a mail sender are both registered. Remove one of them.");
         if (sp.GetService<SlimIdentityBuilder.SlimNullEmailSenderGuard>() is { AllowInProduction: false }
             && sp.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>() is { } environment
             && Microsoft.Extensions.Hosting.HostEnvironmentEnvExtensions.IsProduction(environment))
@@ -61,7 +65,7 @@ public static class SlimIdentityEndpointExtensions
         MapLogin(group, o, Has<ISlimTwoFactorStore>(), Has<ISlimRefreshTokenStore>());
         MapAccount(group, o);
         if (Has<ISlimSessionStore>()) MapSessions(group);
-        if (Has<ISlimTwoFactorStore>()) MapTwoFactor(group);
+        if (Has<ISlimTwoFactorStore>()) MapTwoFactor(group, o);
         if (Has<ISlimExternalLoginStore>()) MapExternal(group, o);
 
         return group;
@@ -110,6 +114,18 @@ public static class SlimIdentityEndpointExtensions
                 .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
                 .AllowAnonymous();
         }
+
+        group.MapPost("/login/password-change", static ([FromBody] SlimPasswordChangeLoginRequest request,
+                [FromServices] SlimLoginHandlers h, CancellationToken ct) => h.CompletePasswordChangeAsync(request, ct))
+            .WithName("SlimIdentity_LoginPasswordChange")
+            .WithSummary("Replace a password set by an administrator (passwordChangeToken from /login); then 2FA or the session.")
+            .Produces<SlimAuthResponse>()
+            .Produces<SlimLoginChallengeResponse>(StatusCodes.Status401Unauthorized)
+            .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
+            .ProducesValidationProblem()
+            .Produces(StatusCodes.Status429TooManyRequests)
+            .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
+            .AllowAnonymous();
 
         if (refresh && o.JwtEnabled)
         {
@@ -178,7 +194,7 @@ public static class SlimIdentityEndpointExtensions
                 .AllowAnonymous();
         }
 
-        if (e.EnablePasswordReset)
+        if (e.EnablePasswordReset && o.Email.Enabled)
         {
             group.MapPost("/forgot-password", static ([FromBody] SlimEmailRequest request,
                     [FromServices] SlimAccountHandlers h, CancellationToken ct) => h.ForgotPasswordAsync(request, ct))
@@ -187,7 +203,11 @@ public static class SlimIdentityEndpointExtensions
                 .Produces<SlimStatusResponse>()
                 .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
                 .AllowAnonymous();
+        }
 
+        // also without mail: administrators hand out reset links (ISlimAuthManager.CreatePasswordResetAsync)
+        if (e.EnablePasswordReset)
+        {
             group.MapPost("/reset-password", static ([FromBody] SlimResetPasswordRequest request,
                     [FromServices] SlimAccountHandlers h, CancellationToken ct) => h.ResetPasswordAsync(request, ct))
                 .WithName("SlimIdentity_ResetPassword")
@@ -301,7 +321,7 @@ public static class SlimIdentityEndpointExtensions
 
     // ------------------------------------------------------------------ 2FA management
 
-    private static void MapTwoFactor(RouteGroupBuilder root)
+    private static void MapTwoFactor(RouteGroupBuilder root, SlimIdentityOptions o)
     {
         var group = root.MapGroup("/2fa").RequireAuthorization(SlimAuthorize);
 
@@ -323,13 +343,16 @@ public static class SlimIdentityEndpointExtensions
             .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
             .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy);
 
-        group.MapPost("/enable-email", static ([FromBody] SlimPasswordConfirmationRequest request,
-                [FromServices] SlimTwoFactorHandlers h, CancellationToken ct) => h.EnableEmailAsync(request, ct))
-            .WithName("SlimIdentity_TwoFactorEnableEmail")
-            .WithSummary("Enable 2FA with e-mail codes (password confirmation required).")
-            .Produces<SlimRecoveryCodesResponse>()
-            .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
-            .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy);
+        if (o.EmailCodesEnabled)
+        {
+            group.MapPost("/enable-email", static ([FromBody] SlimPasswordConfirmationRequest request,
+                    [FromServices] SlimTwoFactorHandlers h, CancellationToken ct) => h.EnableEmailAsync(request, ct))
+                .WithName("SlimIdentity_TwoFactorEnableEmail")
+                .WithSummary("Enable 2FA with e-mail codes (password confirmation required).")
+                .Produces<SlimRecoveryCodesResponse>()
+                .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
+                .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy);
+        }
 
         group.MapPost("/disable", static ([FromBody] SlimPasswordConfirmationRequest request,
                 [FromServices] SlimTwoFactorHandlers h, CancellationToken ct) => h.DisableAsync(request, ct))

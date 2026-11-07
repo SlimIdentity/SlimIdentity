@@ -110,7 +110,8 @@ public class SlimEfUserStore<TContext, TUser, TKey>(SlimEfContext<TContext> cont
             .SetProperty(u => EF.Property<bool>(u, nameof(ISlimUserEntity<TKey>.EmailConfirmed)), user.EmailConfirmed)
             .SetProperty(u => EF.Property<int>(u, Failed), user.FailedLoginAttempts)
             .SetProperty(u => EF.Property<DateTimeOffset?>(u, nameof(ISlimUserEntity<TKey>.LockoutEndUtc)), user.LockoutEndUtc)
-            .SetProperty(u => EF.Property<bool>(u, nameof(ISlimUserEntity<TKey>.TwoFactorEnabled)), user.TwoFactorEnabled), ct);
+            .SetProperty(u => EF.Property<bool>(u, nameof(ISlimUserEntity<TKey>.TwoFactorEnabled)), user.TwoFactorEnabled)
+            .SetProperty(u => EF.Property<bool>(u, nameof(ISlimUserEntity<TKey>.PasswordChangeRequired)), user.PasswordChangeRequired), ct);
     }
 
     /// <inheritdoc />
@@ -180,7 +181,7 @@ public class SlimEfUserStore<TContext, TUser, TKey>(SlimEfContext<TContext> cont
         {
             Id = SlimEf.KeyToString(u.Id), Email = u.Email, PasswordHash = u.PasswordHash, SecurityStamp = u.SecurityStamp,
             IsActive = u.IsActive, EmailConfirmed = u.EmailConfirmed, FailedLoginAttempts = u.FailedLoginAttempts,
-            LockoutEndUtc = u.LockoutEndUtc, TwoFactorEnabled = u.TwoFactorEnabled,
+            LockoutEndUtc = u.LockoutEndUtc, TwoFactorEnabled = u.TwoFactorEnabled, PasswordChangeRequired = u.PasswordChangeRequired,
         };
     }
 

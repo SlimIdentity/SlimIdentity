@@ -36,7 +36,10 @@ the provided samples and verify your stores with the
 - **External login**: any ASP.NET Core OAuth/OIDC handler (Google, Microsoft Entra ID, Keycloak, …) with safe account linking.
 - **Workflows**: registration, e-mail verification, password reset/change, e-mail change, invitations – stateless,
   single-use links.
-- **Admin tooling**: impersonation, step-up "sudo" mode, bans, API keys for machine-to-machine access.
+- **Admin tooling**: impersonation, step-up "sudo" mode, bans, start passwords with forced change, reset links,
+  2FA reset, API keys for machine-to-machine access.
+- **With or without mail**: localized mails with full context for your templates – or `WithoutEmail()` for internal
+  services where an administrator manages the accounts.
 - **Your database stays boring**: it only ever sees hashes and ciphertext – no usable tokens, codes or 2FA secrets.
 - **Framework native**: built-in cookie/JWT handlers, `PasswordHasher`, Data Protection and rate limiter;
   `[Authorize]` and policies just work. Full OpenAPI metadata for client generation.
@@ -113,6 +116,7 @@ All packages are released together with the same version.
   [external login](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/external-login.md) ·
   [invitations](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/invitations.md) ·
   [admin features](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/admin-features.md) ·
+  [without e-mail](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/without-email.md) ·
   [LDAP](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/ldap-and-legacy-passwords.md) ·
   [client certificates](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/client-certificates.md) ·
   [Data Protection](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/data-protection.md) ·

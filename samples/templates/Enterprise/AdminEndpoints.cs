@@ -18,6 +18,8 @@ public static class AdminEndpoints
 {
     public sealed record SudoRequest(string Password);
     public sealed record InviteRequest(string Email, string DisplayName);
+    public sealed record CreateUserRequest(string Email, string? StartPassword);
+    public sealed record SetPasswordRequest(string Password, bool MustChange = true);
 
     /// <summary>Your own invitation mail (inviter name, company branding, …) – not part of ISlimEmailSender.</summary>
     public interface IInvitationMailer
@@ -100,6 +102,54 @@ public static class AdminEndpoints
                 var invitation = await auth.CreateInvitationAsync(user, TimeSpan.FromDays(14), ct); // link from Links.BaseUrl (or Links.InvitationUrl)
                 await mailer.SendInvitationAsync(req.Email, req.DisplayName, me.GetSlimEmail(), invitation.Link, invitation.ExpiresAt, ct);
                 return Results.Ok(new { status = "invited", user.Id, invitation.ExpiresAt });
+            });
+
+        // ---- account administration (essential with .WithoutEmail(); all behind a fresh sudo session)
+        var accounts = admin.MapGroup("/users").RequireAuthorization(SlimIdentityDefaults.SudoPolicy);
+
+        // Create an account without mail: the admin vouches for the address and hands over a reset link
+        accounts.MapPost("/", async (CreateUserRequest req, ISlimUserStore store, ISlimAuthManager auth, CancellationToken ct) =>
+            {
+                if (await store.CreateAsync(req.Email, passwordHash: string.Empty, ct) is not { } user)
+                    return Results.Conflict(new { status = "already_exists" });
+                user.EmailConfirmed = true;   // the administrator vouches for the address
+                await store.UpdateSecurityStateAsync(user, ct);
+                // TODO: business profile (DisplayName, roles …) for user.Id
+                if (req.StartPassword is { } start)
+                {
+                    // read out on the phone – the user must choose an own password at the first sign-in
+                    if (await auth.SetPasswordAsync(user, start, mustChange: true, ct) is { } invalid) return invalid;
+                    return Results.Ok(new { status = "created", user.Id });
+                }
+                var reset = await auth.CreatePasswordResetAsync(user, TimeSpan.FromDays(3), ct);   // the user sets the first password
+                return Results.Ok(new { status = "created", user.Id, resetLink = reset.Link, reset.ExpiresAt });
+            });
+
+        // Forgotten password: a link the user sets the password with – the admin never knows it
+        accounts.MapPost("/{userId}/reset-link", async (string userId, ISlimUserStore store, ISlimAuthManager auth, CancellationToken ct) =>
+            await store.FindByIdAsync(userId, ct) is { } user
+                ? Results.Ok(await auth.CreatePasswordResetAsync(user, ct: ct))
+                : Results.NotFound());
+
+        // Start password (forced change at the next sign-in unless mustChange is false)
+        accounts.MapPost("/{userId}/password", async (string userId, SetPasswordRequest req, ISlimUserStore store, ISlimAuthManager auth, CancellationToken ct) =>
+            await store.FindByIdAsync(userId, ct) is { } user
+                ? await auth.SetPasswordAsync(user, req.Password, req.MustChange, ct) ?? Results.Ok(new { status = "password_set" })
+                : Results.NotFound());
+
+        // Phone and recovery codes lost
+        accounts.MapPost("/{userId}/reset-2fa", async (string userId, ISlimUserStore store, ISlimAuthManager auth, CancellationToken ct) =>
+            {
+                if (await store.FindByIdAsync(userId, ct) is not { } user) return Results.NotFound();
+                await auth.ResetTwoFactorAsync(user, ct);
+                return Results.Ok(new { status = "two_factor_reset" });
+            });
+
+        accounts.MapPost("/{userId}/unlock", async (string userId, ISlimUserStore store, ISlimAuthManager auth, CancellationToken ct) =>
+            {
+                if (await store.FindByIdAsync(userId, ct) is not { } user) return Results.NotFound();
+                await auth.UnlockAsync(user, ct);
+                return Results.Ok(new { status = "unlocked" });
             });
 
         // Ban: end every session on every device, then block the account in your own store

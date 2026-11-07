@@ -28,7 +28,8 @@ public sealed class DapperUserStore(NpgsqlDataSource db) : ISlimUserStore
         email_confirmed        AS EmailConfirmed,
         failed_login_attempts  AS FailedLoginAttempts,
         lockout_end_utc        AS LockoutEndUtc,
-        two_factor_enabled     AS TwoFactorEnabled
+        two_factor_enabled     AS TwoFactorEnabled,
+        password_change_required AS PasswordChangeRequired
         """;
 
     public async Task<SlimUser?> FindByEmailAsync(string email, CancellationToken ct)
@@ -107,7 +108,8 @@ public sealed class DapperUserStore(NpgsqlDataSource db) : ISlimUserStore
                 email_confirmed = @EmailConfirmed,
                 failed_login_attempts = @FailedLoginAttempts,
                 lockout_end_utc = @LockoutEndUtc,
-                two_factor_enabled = @TwoFactorEnabled
+                two_factor_enabled = @TwoFactorEnabled,
+                password_change_required = @PasswordChangeRequired
             WHERE id = @Id::uuid
             """, user, cancellationToken: ct));
     }

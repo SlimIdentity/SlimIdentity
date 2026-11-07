@@ -46,7 +46,7 @@ internal sealed class SlimAccountHandlers(
             // (sent in the background, so the mail server's latency is not observable).
             credentials.HashPassword(new SlimUser { Email = email! }, request.Password);
             Log.RegistrationForExistingAccount(logger, existing.Id);
-            return await AccountExistsAsync(existing.Email);
+            return await AccountExistsAsync(existing.Email, existing.Id);
         }
 
         var hash = credentials.HashPassword(new SlimUser { Email = email! }, request.Password);
@@ -55,7 +55,7 @@ internal sealed class SlimAccountHandlers(
         {
             // a concurrent registration took the address between the lookup and the insert – same answer as above
             Log.RegistrationRaceLost(logger);
-            return await AccountExistsAsync(email!);
+            return await AccountExistsAsync(email!, null);   // the winner of the race is not loaded
         }
         metrics.Registration("created");
 
@@ -64,10 +64,10 @@ internal sealed class SlimAccountHandlers(
 
         return accepted;
 
-        async Task<IResult> AccountExistsAsync(string existingEmail)
+        async Task<IResult> AccountExistsAsync(string existingEmail, string? existingUserId)
         {
             metrics.Registration("existing_account");
-            await mail.SendAsync(SlimMailKinds.AccountExists, existingEmail, (s, c) => s.SendAccountExistsEmailAsync(existingEmail, c), ct);
+            await mail.SendAsync(SlimEmailKinds.AccountExists, existingEmail, existingUserId, (s, x, c) => s.SendAccountExistsEmailAsync(x, existingEmail, c), ct);
             return accepted;
         }
     }
@@ -111,7 +111,7 @@ internal sealed class SlimAccountHandlers(
             new SlimEmailTokenPayload(user.Id, user.Email, user.SecurityStamp), O.Tokens.EmailVerificationTokenLifetime);
         var email = user.Email;
         var link = SlimWorkflowTokens.BuildLink(O.Links.EmailVerificationTemplate, token);
-        await mail.SendAsync(SlimMailKinds.Verification, email, (s, c) => s.SendVerificationEmailAsync(email, link, c), ct);
+        await mail.SendAsync(SlimEmailKinds.Verification, email, user.Id, (s, x, c) => s.SendVerificationEmailAsync(x, email, link, c), ct);
     }
 
     // ------------------------------------------------------------------ POST /forgot-password & /reset-password
@@ -128,7 +128,7 @@ internal sealed class SlimAccountHandlers(
                     new SlimResetTokenPayload(user.Id, user.SecurityStamp), O.Tokens.PasswordResetTokenLifetime);
                 var address = user.Email;
                 var link = SlimWorkflowTokens.BuildLink(O.Links.PasswordResetTemplate, token);
-                await mail.SendAsync(SlimMailKinds.PasswordReset, address, (s, c) => s.SendPasswordResetEmailAsync(address, link, c), ct);
+                await mail.SendAsync(SlimEmailKinds.PasswordReset, address, user.Id, (s, x, c) => s.SendPasswordResetEmailAsync(x, address, link, c), ct);
                 metrics.PasswordReset("requested");
             }
         }
@@ -148,7 +148,7 @@ internal sealed class SlimAccountHandlers(
             return SlimResults.Validation(errors);
 
         credentials.ApplyNewPassword(user, request.NewPassword); // rotates stamp → token single-use, all sessions revoked
-        if (!user.EmailConfirmed)
+        if (!user.EmailConfirmed && !payload.ByAdministrator)   // a link handed over by an administrator proves no mailbox
         {
             // First proof of the mailbox: whoever registered the address before (possibly an attacker – pre-account
             // hijacking) must keep neither a second factor that locks the real owner out nor a linked external login.
@@ -188,16 +188,17 @@ internal sealed class SlimAccountHandlers(
         // Enumeration prevention: same answer whether or not the new address is already used. Its owner
         // gets either the confirmation link or an "account exists" notice.
         var target = newEmail!;
-        if (await store.FindByEmailAsync(target, ct) is null)
+        var owner = await store.FindByEmailAsync(target, ct);
+        if (owner is null)
         {
             var token = workflow.Protect(SlimWorkflowTokens.EmailChangePurpose,
                 new SlimEmailChangePayload(user.Id, user.Email, target, user.SecurityStamp), O.Tokens.EmailVerificationTokenLifetime);
             var link = SlimWorkflowTokens.BuildLink(O.Links.EmailChangeTemplate, token);
-            await mail.SendAsync(SlimMailKinds.EmailChange, target, (s, c) => s.SendEmailChangeConfirmationAsync(target, link, c), ct);
+            await mail.SendAsync(SlimEmailKinds.EmailChange, target, user.Id, (s, x, c) => s.SendEmailChangeConfirmationAsync(x, target, link, c), ct);
         }
         else
         {
-            await mail.SendAsync(SlimMailKinds.AccountExists, target, (s, c) => s.SendAccountExistsEmailAsync(target, c), ct);
+            await mail.SendAsync(SlimEmailKinds.AccountExists, target, owner.Id, (s, x, c) => s.SendAccountExistsEmailAsync(x, target, c), ct);
         }
 
         Log.EmailChangeRequested(logger, user.Id);
@@ -228,7 +229,7 @@ internal sealed class SlimAccountHandlers(
         await authManager.RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
 
         var (oldEmail, newEmail) = (payload.OldEmail, payload.NewEmail);
-        await mail.SendAsync(SlimMailKinds.EmailChanged, oldEmail, (s, c) => s.SendEmailChangedNotificationAsync(oldEmail, newEmail, c), ct);
+        await mail.SendAsync(SlimEmailKinds.EmailChanged, oldEmail, user.Id, (s, x, c) => s.SendEmailChangedNotificationAsync(x, oldEmail, newEmail, c), ct);
 
         Log.EmailChanged(logger, user.Id);
         metrics.EmailChange("completed");

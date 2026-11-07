@@ -111,7 +111,8 @@ public sealed class EfCoreUserStore(IdentityDb identity) : ISlimUserStore
             .SetProperty(u => u.EmailConfirmed, user.EmailConfirmed)
             .SetProperty(u => u.FailedLoginAttempts, user.FailedLoginAttempts)
             .SetProperty(u => u.LockoutEndUtc, user.LockoutEndUtc)
-            .SetProperty(u => u.TwoFactorEnabled, user.TwoFactorEnabled), ct);
+            .SetProperty(u => u.TwoFactorEnabled, user.TwoFactorEnabled)
+            .SetProperty(u => u.PasswordChangeRequired, user.PasswordChangeRequired), ct);
     }
 
     public async Task<bool> UpdateEmailAsync(SlimUser user, string newEmail, CancellationToken ct)
@@ -159,6 +160,7 @@ public sealed class EfCoreUserStore(IdentityDb identity) : ISlimUserStore
         FailedLoginAttempts = u.FailedLoginAttempts,
         LockoutEndUtc = u.LockoutEndUtc,
         TwoFactorEnabled = u.TwoFactorEnabled,
+        PasswordChangeRequired = u.PasswordChangeRequired,
     };
 }
 

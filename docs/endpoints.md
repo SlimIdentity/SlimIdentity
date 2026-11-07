@@ -19,13 +19,16 @@ metadata (tag `SlimIdentity`), so typed clients can be generated from `/openapi/
 
 | Endpoint | Body | Success | Errors |
 | :--- | :--- | :--- | :--- |
-| `POST /login` ⏱ | `email`, `password`, `rememberMe`, `twoFactorRememberToken` (bearer, optional) | `200` session | `400 invalid_request`; `401 invalid_credentials`; `401 requires_two_factor` (+ `preAuthToken`, `twoFactorMethod`); `403 email_not_confirmed`; with `RevealAccountState`: `403 account_disabled`, `423 locked_out` |
+| `POST /login` ⏱ | `email`, `password`, `rememberMe`, `twoFactorRememberToken` (bearer, optional) | `200` session | `400 invalid_request`; `401 invalid_credentials`; `401 requires_two_factor` (+ `preAuthToken`, `twoFactorMethod` `totp`/`email`/`recovery`); `401 password_change_required` (+ `passwordChangeToken`); `403 email_not_confirmed`; with `RevealAccountState`: `403 account_disabled`, `423 locked_out` |
 | `POST /login/2fa` ⏱ | `preAuthToken` + `code` or `recoveryCode`, `rememberDevice` | `200` session (+ `twoFactorRememberToken` in bearer mode / cookie `SlimAuth.2fa` in cookie mode when remembered) | `401 invalid_token`, `401 invalid_two_factor_code`, `423 locked_out` |
+| `POST /login/password-change` ⏱ | `token` (`passwordChangeToken`), `newPassword` | `200` session, or `401 requires_two_factor` | `400 password_unchanged`, `400` validation, `401 invalid_token` |
 | `POST /refresh` | `refreshToken` | `200` new token pair | `400 invalid_request`, `401 invalid_token`, `401 session_expired` |
 | `POST /logout` | `refreshToken` (optional) | `200 logged_out` | – |
 | `POST /logout-all` 🔒 | – | `200 logged_out_everywhere` | `401`, `403 not_allowed_while_impersonating` |
 
-`/login/2fa` uses the mode chosen at `/login`. `/refresh` only exists with `ISlimRefreshTokenStore`; `/login/2fa` only
+`/login/2fa` and `/login/password-change` use the mode chosen at `/login`. `password_change_required` follows a password
+set by an administrator with `mustChange` ([running without e-mail](guides/without-email.md#the-forced-password-change)).
+`twoFactorMethod: recovery` means no code can be sent (e-mail codes switched off) – only a recovery code helps. `/refresh` only exists with `ISlimRefreshTokenStore`; `/login/2fa` only
 with `ISlimTwoFactorStore`.
 
 ## External login (`ISlimExternalLoginStore`)
@@ -55,6 +58,10 @@ required in cookie mode – `#slim_status=requires_two_factor&preAuthToken=…&m
 | `POST /confirm-email-change` ⏱ | `token` | `200 email_changed` – address changed, confirmed, all sessions end, old address notified | `400 invalid_token`, `400 email_taken` |
 | `GET /password-policy` | – | `200` `minimumLength`, `maximumLength`, `requireDigit`, `requireLowercase`, `requireUppercase`, `requireNonAlphanumeric`, `hasAdditionalRules` – for hints and live validation in the front end | – |
 | `GET /me` 🔒 | – | `200` `id`, `email`, `isImpersonating`, `impersonatorId`, `authenticationMethod`, `sudoUntil`, `claims` | `401` |
+
+With `WithoutEmail()` the mail-based routes are not mapped: `/forgot-password`, `/verify-email`, `/resend-verification`,
+`/change-email`, `/confirm-email-change`, `/2fa/enable-email` and – unless `allowSelfRegistration` – `/register`.
+`/reset-password` stays for links an administrator hands over.
 
 ## Invitations
 

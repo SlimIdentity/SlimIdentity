@@ -49,6 +49,9 @@ public sealed class SlimIdentityOptions
     /// <summary>JWT bearer authentication is active as soon as <see cref="SlimTokenOptions.JwtSecret"/> is set.</summary>
     internal bool JwtEnabled => !string.IsNullOrEmpty(Tokens.JwtSecret);
 
+    /// <summary>Second-factor codes by e-mail can be sent.</summary>
+    internal bool EmailCodesEnabled => TwoFactor.AllowEmailCodes && Email.Enabled;
+
     /// <summary>Cookie mode is the default if requested, or if JWT is not configured.</summary>
     internal bool EffectiveDefaultUseCookies => Endpoints.AllowCookieAuth && (Endpoints.DefaultUseCookies || !JwtEnabled);
 
@@ -239,6 +242,14 @@ public sealed class SlimTwoFactorOptions
     /// <c>/2fa/forget-all-devices</c> invalidate all of them. Maximum 90 days.
     /// </summary>
     public TimeSpan? RememberDeviceLifetime { get; set; }
+
+    /// <summary>
+    /// Allows 6-digit codes by e-mail as second factor (<c>/2fa/enable-email</c>). E-mail is the weakest second factor
+    /// (a compromised mailbox yields password reset and code alike); <c>false</c> leaves authenticator apps only.
+    /// Accounts that already use e-mail codes are then asked for a recovery code. Always off with <c>WithoutEmail()</c>.
+    /// Default <c>true</c>.
+    /// </summary>
+    public bool AllowEmailCodes { get; set; } = true;
 }
 
 /// <summary>OAuth / OIDC logins. Allowed <c>returnUrl</c> origins are the <see cref="SlimIdentityOptions.TrustedOrigins"/>.</summary>
@@ -297,4 +308,7 @@ public sealed class SlimEmailOptions
 
     /// <summary>Maximum number of queued mails; further mails are dropped (and logged) until the queue drains. Default 1000.</summary>
     public int QueueCapacity { get; set; } = 1000;
+
+    /// <summary><c>false</c> after <c>WithoutEmail()</c>: SlimIdentity never sends mail and maps no mail-based endpoint.</summary>
+    public bool Enabled { get; internal set; } = true;
 }

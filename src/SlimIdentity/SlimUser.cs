@@ -33,6 +33,12 @@ public sealed class SlimUser
     /// <summary>Whether the 2FA state machine kicks in after a successful password check.</summary>
     public bool TwoFactorEnabled { get; set; }
 
+    /// <summary>
+    /// The password was set by an administrator and must be changed at the next sign-in, before any session exists
+    /// (<c>password_change_required</c>). Cleared by every new password.
+    /// </summary>
+    public bool PasswordChangeRequired { get; set; }
+
     /// <summary>True while <see cref="LockoutEndUtc"/> lies in the future.</summary>
     public bool IsLockedOut(DateTimeOffset utcNow) => LockoutEndUtc is { } end && end > utcNow;
 

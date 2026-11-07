@@ -32,6 +32,8 @@ public interface ISlimUserEntity<TKey> where TKey : IEquatable<TKey>, IParsable<
     DateTimeOffset? LockoutEndUtc { get; set; }
     /// <summary>Second factor required.</summary>
     bool TwoFactorEnabled { get; set; }
+    /// <summary>The password was set by an administrator and must be changed at the next sign-in.</summary>
+    bool PasswordChangeRequired { get; set; }
     /// <summary>Authenticator secret, already encrypted by SlimIdentity (null = e-mail codes).</summary>
     string? TotpSecret { get; set; }
     /// <summary>Replay protection: unix milliseconds of the last accepted 2FA code.</summary>

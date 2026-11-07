@@ -90,6 +90,7 @@ public sealed class InMemoryUserStore : ISlimUserStore
         stored.FailedLoginAttempts = user.FailedLoginAttempts;
         stored.LockoutEndUtc = user.LockoutEndUtc;
         stored.TwoFactorEnabled = user.TwoFactorEnabled;
+        stored.PasswordChangeRequired = user.PasswordChangeRequired;
         return Task.CompletedTask;
     }
 
@@ -122,7 +123,7 @@ public sealed class InMemoryUserStore : ISlimUserStore
     {
         Id = u.Id, Email = u.Email, PasswordHash = u.PasswordHash, SecurityStamp = u.SecurityStamp,
         IsActive = u.IsActive, EmailConfirmed = u.EmailConfirmed, FailedLoginAttempts = u.FailedLoginAttempts,
-        LockoutEndUtc = u.LockoutEndUtc, TwoFactorEnabled = u.TwoFactorEnabled,
+        LockoutEndUtc = u.LockoutEndUtc, TwoFactorEnabled = u.TwoFactorEnabled, PasswordChangeRequired = u.PasswordChangeRequired,
     };
 }
 
@@ -259,25 +260,25 @@ public sealed class InMemoryApiKeyStore : ISlimApiKeyStore
 /// <summary>Prints mails to the console and drops them into the playground's fake mailbox.</summary>
 public sealed class ConsoleEmailSender(DemoMailbox mailbox) : ISlimEmailSender
 {
-    public Task SendVerificationEmailAsync(string email, string verificationTokenOrLink, CancellationToken ct) =>
+    public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string verificationTokenOrLink, CancellationToken ct) =>
         Write("Verify your e-mail", email, verificationTokenOrLink);
 
-    public Task SendPasswordResetEmailAsync(string email, string resetTokenOrLink, CancellationToken ct) =>
+    public Task SendPasswordResetEmailAsync(SlimEmailContext context, string email, string resetTokenOrLink, CancellationToken ct) =>
         Write("Reset your password", email, resetTokenOrLink);
 
-    public Task SendTwoFactorCodeAsync(string email, string code, CancellationToken ct) =>
+    public Task SendTwoFactorCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) =>
         Write("Your sign-in code", email, code);
 
-    public Task SendEmailChangeConfirmationAsync(string newEmail, string confirmationTokenOrLink, CancellationToken ct) =>
+    public Task SendEmailChangeConfirmationAsync(SlimEmailContext context, string newEmail, string confirmationTokenOrLink, CancellationToken ct) =>
         Write("Confirm your new e-mail address", newEmail, confirmationTokenOrLink);
 
-    public Task SendEmailChangedNotificationAsync(string oldEmail, string newEmail, CancellationToken ct) =>
+    public Task SendEmailChangedNotificationAsync(SlimEmailContext context, string oldEmail, string newEmail, CancellationToken ct) =>
         Write("Your e-mail address was changed", oldEmail, $"The sign-in address of your account is now {newEmail}. Not you? Contact support.");
 
-    public Task SendAccountExistsEmailAsync(string email, CancellationToken ct) =>
+    public Task SendAccountExistsEmailAsync(SlimEmailContext context, string email, CancellationToken ct) =>
         Write("You already have an account", email, "Someone tried to register with your address. Forgot your password? Use /auth/forgot-password.");
 
-    public Task SendLockoutNotificationEmailAsync(string email, DateTimeOffset lockoutEndUtc, CancellationToken ct) =>
+    public Task SendLockoutNotificationEmailAsync(SlimEmailContext context, string email, DateTimeOffset lockoutEndUtc, CancellationToken ct) =>
         Write("Your account was temporarily locked", email, $"Too many failed sign-ins. Locked until {lockoutEndUtc:u}. Not you? Change your password.");
 
     private Task Write(string subject, string to, string body)

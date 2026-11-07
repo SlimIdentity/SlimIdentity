@@ -94,6 +94,58 @@ internal sealed class SlimAuthManager(
             null, null, issueRefreshToken: true, ct);
     }
 
+    public async Task<IResult?> SetPasswordAsync(SlimUser user, string password, bool mustChange = true, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+        if (await services.GetRequiredService<SlimPasswordPolicy>().ValidateAsync(password, user.Email, ct) is { } errors)
+            return Results.ValidationProblem(errors);
+
+        services.GetRequiredService<SlimCredentialService>().ApplyNewPassword(user, password);   // new stamp, lockout cleared
+        user.PasswordChangeRequired = mustChange;
+        await store.UpdateSecurityStateAsync(user, ct);
+        await RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
+        Log.AdminPasswordSet(logger, user.Id, mustChange);
+        return null;
+    }
+
+    public Task<SlimPasswordReset> CreatePasswordResetAsync(SlimUser user, TimeSpan? lifetime = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+        var o = options.Value;
+        var validity = lifetime ?? o.Tokens.PasswordResetTokenLifetime;
+        if (validity <= TimeSpan.Zero || validity > TimeSpan.FromDays(7))
+            throw new ArgumentOutOfRangeException(nameof(lifetime), "SlimIdentity: a reset link must be valid for more than 0 and at most 7 days.");
+
+        var token = workflow.Protect(SlimWorkflowTokens.PasswordResetPurpose,
+            new SlimResetTokenPayload(user.Id, user.SecurityStamp, ByAdministrator: true), validity);
+        Log.AdminPasswordResetCreated(logger, user.Id);
+        return Task.FromResult(new SlimPasswordReset(token, SlimWorkflowTokens.BuildLink(o.Links.PasswordResetTemplate, token), time.GetUtcNow() + validity));
+    }
+
+    public async Task ResetTwoFactorAsync(SlimUser user, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+        if (services.GetService<SlimTwoFactorService>() is { } twoFactor)
+        {
+            await twoFactor.RemoveSecretAsync(user, ct);
+            await twoFactor.RemoveRecoveryCodesAsync(user, ct);
+        }
+        user.TwoFactorEnabled = false;
+        user.SecurityStamp = SlimUser.NewSecurityStamp();   // remembered devices and all sessions end
+        await store.UpdateSecurityStateAsync(user, ct);
+        await RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
+        Log.AdminTwoFactorReset(logger, user.Id);
+    }
+
+    public async Task UnlockAsync(SlimUser user, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+        user.FailedLoginAttempts = 0;
+        user.LockoutEndUtc = null;
+        await store.ResetFailedLoginAttemptsAsync(user, ct);
+        Log.AdminUnlocked(logger, user.Id);
+    }
+
     public Task<IResult?> ConfirmPasswordAsync(SlimUser user, string? password, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(user);

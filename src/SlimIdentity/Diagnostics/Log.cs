@@ -86,6 +86,21 @@ internal static partial class Log
     [LoggerMessage(4005, LogLevel.Information, "SlimIdentity: e-mail address of user {UserId} changed.")]
     public static partial void EmailChanged(ILogger logger, string userId);
 
+    [LoggerMessage(4007, LogLevel.Information, "SlimIdentity: administrator set the password of user {UserId} (change required: {MustChange}).")]
+    public static partial void AdminPasswordSet(ILogger logger, string userId, bool mustChange);
+
+    [LoggerMessage(4008, LogLevel.Information, "SlimIdentity: administrator created a password reset link for user {UserId}.")]
+    public static partial void AdminPasswordResetCreated(ILogger logger, string userId);
+
+    [LoggerMessage(4009, LogLevel.Information, "SlimIdentity: administrator reset two-factor authentication of user {UserId}.")]
+    public static partial void AdminTwoFactorReset(ILogger logger, string userId);
+
+    [LoggerMessage(4010, LogLevel.Information, "SlimIdentity: administrator unlocked user {UserId}.")]
+    public static partial void AdminUnlocked(ILogger logger, string userId);
+
+    [LoggerMessage(4011, LogLevel.Information, "SlimIdentity: user {UserId} replaced the password set by an administrator.")]
+    public static partial void ForcedPasswordChangeCompleted(ILogger logger, string userId);
+
     // ---------------------------------------------------------------- 5xxx external login
     [LoggerMessage(5001, LogLevel.Warning, "SlimIdentity: {Provider} login for existing account {UserId} not linked (unverified e-mail or auto-link disabled).")]
     public static partial void ExternalLoginConflict(ILogger logger, string provider, string userId);

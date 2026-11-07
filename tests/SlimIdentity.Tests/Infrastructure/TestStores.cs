@@ -101,6 +101,7 @@ public sealed class TestUserStore : ISlimUserStore
         stored.FailedLoginAttempts = user.FailedLoginAttempts;
         stored.LockoutEndUtc = user.LockoutEndUtc;
         stored.TwoFactorEnabled = user.TwoFactorEnabled;
+        stored.PasswordChangeRequired = user.PasswordChangeRequired;
         return Task.CompletedTask;
     }
 
@@ -123,7 +124,7 @@ public sealed class TestUserStore : ISlimUserStore
     {
         Id = u.Id, Email = u.Email, PasswordHash = u.PasswordHash, SecurityStamp = u.SecurityStamp,
         IsActive = u.IsActive, EmailConfirmed = u.EmailConfirmed, FailedLoginAttempts = u.FailedLoginAttempts,
-        LockoutEndUtc = u.LockoutEndUtc, TwoFactorEnabled = u.TwoFactorEnabled,
+        LockoutEndUtc = u.LockoutEndUtc, TwoFactorEnabled = u.TwoFactorEnabled, PasswordChangeRequired = u.PasswordChangeRequired,
     };
 }
 
@@ -222,7 +223,10 @@ public sealed class TestTwoFactorStore : ISlimTwoFactorStore
     }
 }
 
-public sealed record SentMail(string Kind, string To, string Payload);
+public sealed record SentMail(string Kind, string To, string Payload)
+{
+    public SlimEmailContext? Context { get; init; }
+}
 
 /// <summary>Records all mails; tests wait for them because most are sent by the background queue.</summary>
 public sealed class CapturingEmailSender : ISlimEmailSender
@@ -231,18 +235,18 @@ public sealed class CapturingEmailSender : ISlimEmailSender
 
     public IReadOnlyCollection<SentMail> Mails => _mails.ToArray();
 
-    public Task SendVerificationEmailAsync(string email, string link, CancellationToken ct) => Add("verification", email, link);
-    public Task SendPasswordResetEmailAsync(string email, string link, CancellationToken ct) => Add("password-reset", email, link);
-    public Task SendTwoFactorCodeAsync(string email, string code, CancellationToken ct) => Add("two-factor", email, code);
-    public Task SendEmailChangeConfirmationAsync(string newEmail, string link, CancellationToken ct) => Add("email-change", newEmail, link);
-    public Task SendEmailChangedNotificationAsync(string oldEmail, string newEmail, CancellationToken ct) => Add("email-changed", oldEmail, newEmail);
-    public Task SendAccountExistsEmailAsync(string email, CancellationToken ct) => Add("account-exists", email, "");
-    public Task SendLockoutNotificationEmailAsync(string email, DateTimeOffset lockoutEndUtc, CancellationToken ct) =>
-        Add("lockout", email, lockoutEndUtc.ToString("O"));
+    public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string link, CancellationToken ct) => Add(context, "verification", email, link);
+    public Task SendPasswordResetEmailAsync(SlimEmailContext context, string email, string link, CancellationToken ct) => Add(context, "password-reset", email, link);
+    public Task SendTwoFactorCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) => Add(context, "two-factor", email, code);
+    public Task SendEmailChangeConfirmationAsync(SlimEmailContext context, string newEmail, string link, CancellationToken ct) => Add(context, "email-change", newEmail, link);
+    public Task SendEmailChangedNotificationAsync(SlimEmailContext context, string oldEmail, string newEmail, CancellationToken ct) => Add(context, "email-changed", oldEmail, newEmail);
+    public Task SendAccountExistsEmailAsync(SlimEmailContext context, string email, CancellationToken ct) => Add(context, "account-exists", email, "");
+    public Task SendLockoutNotificationEmailAsync(SlimEmailContext context, string email, DateTimeOffset lockoutEndUtc, CancellationToken ct) =>
+        Add(context, "lockout", email, lockoutEndUtc.ToString("O"));
 
-    private Task Add(string kind, string to, string payload)
+    private Task Add(SlimEmailContext context, string kind, string to, string payload)
     {
-        _mails.Enqueue(new SentMail(kind, to, payload));
+        _mails.Enqueue(new SentMail(kind, to, payload) { Context = context });
         return Task.CompletedTask;
     }
 

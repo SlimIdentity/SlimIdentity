@@ -45,6 +45,7 @@ mobile apps, while leaving databases, ORMs (EF Core, Dapper) and domain models e
 | `FailedLoginAttempts` | `int` | Consecutive failures since the last successful sign-in (progressive lockout). |
 | `LockoutEndUtc` | `DateTimeOffset?` | End of the current lockout. |
 | `TwoFactorEnabled` | `bool` | The 2FA state machine applies after a correct password. |
+| `PasswordChangeRequired` | `bool` | Set by an administrator: the next sign-in must choose an own password first. |
 
 No profile or business data – that stays in the host's own user model.
 
@@ -53,7 +54,7 @@ No profile or business data – that stays in the host's own user model.
 | Interface | Required | Enables |
 | :--- | :--- | :--- |
 | `ISlimUserStore` | yes | everything (find, create, persist security state, atomic sign-in bookkeeping, change e-mail, host claims) |
-| `ISlimEmailSender` | yes | verification, reset, 2FA codes, e-mail change; optional "account exists", lockout and "address changed" notices |
+| `ISlimEmailSender` | yes, unless `WithoutEmail()` | verification, reset, 2FA codes, e-mail change; optional "account exists", lockout and "address changed" notices – each with a `SlimEmailContext` (account, culture, host data) |
 | `ISlimRefreshTokenStore` | – | `/refresh`, refresh tokens (hashes only, atomic consumption) |
 | `ISlimSessionStore` | – | server-side sessions, per-device logout, `/sessions` |
 | `ISlimTwoFactorStore` | – | `/login/2fa`, `/2fa/*` (encrypted TOTP secrets, recovery-code hashes, replay protection, single-use challenges) |

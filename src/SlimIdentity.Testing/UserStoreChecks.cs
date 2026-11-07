@@ -86,7 +86,7 @@ internal static class UserStoreChecks
             });
 
         await run.CheckAsync(Store, "UpdateSecurityStateAsync persists all security fields",
-            "Write PasswordHash, SecurityStamp, EmailConfirmed, FailedLoginAttempts, LockoutEndUtc and TwoFactorEnabled.",
+            "Write PasswordHash, SecurityStamp, EmailConfirmed, FailedLoginAttempts, LockoutEndUtc, TwoFactorEnabled and PasswordChangeRequired.",
             async () =>
             {
                 var user = await run.NewUserAsync();
@@ -97,6 +97,7 @@ internal static class UserStoreChecks
                 user.FailedLoginAttempts = 3;
                 user.LockoutEndUtc = lockoutEnd;
                 user.TwoFactorEnabled = true;
+                user.PasswordChangeRequired = true;
                 await stores.UseAsync<ISlimUserStore>(s => s.UpdateSecurityStateAsync(user, ct));
 
                 var saved = await run.ReloadAsync(user);
@@ -106,6 +107,7 @@ internal static class UserStoreChecks
                 Expect.Equal(3, saved.FailedLoginAttempts, "FailedLoginAttempts");
                 Expect.SameInstant(lockoutEnd, saved.LockoutEndUtc, "LockoutEndUtc");
                 Expect.Equal(true, saved.TwoFactorEnabled, "TwoFactorEnabled");
+                Expect.Equal(true, saved.PasswordChangeRequired, "PasswordChangeRequired");
             });
 
         await run.CheckAsync(Store, "IncrementFailedLoginAttemptsAsync counts parallel failures atomically",

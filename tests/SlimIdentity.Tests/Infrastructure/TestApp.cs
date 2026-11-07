@@ -19,6 +19,8 @@ public sealed class TestAppOptions
     public bool Sessions { get; init; } = true;
     public bool RefreshTokens { get; init; } = true;
     public bool TwoFactor { get; init; } = true;
+    /// <summary>Registers the capturing mail sender (off for hosts without mail).</summary>
+    public bool EmailSender { get; init; } = true;
     public Action<SlimIdentityOptions>? Configure { get; init; }
     /// <summary>Additional capabilities (API keys, password rules, external providers, …).</summary>
     public Action<SlimIdentityBuilder>? Builder { get; init; }
@@ -41,7 +43,7 @@ public sealed class TestApp : IAsyncDisposable
         App = app;
         Time = time;
         Users = (TestUserStore)app.Services.GetRequiredService<ISlimUserStore>();
-        Mail = (CapturingEmailSender)app.Services.GetRequiredService<ISlimEmailSender>();
+        Mail = app.Services.GetService<ISlimEmailSender>() as CapturingEmailSender ?? new CapturingEmailSender();
         Sessions = app.Services.GetService<ISlimSessionStore>() as TestSessionStore;
     }
 
@@ -72,8 +74,8 @@ public sealed class TestApp : IAsyncDisposable
                 o.TrustedOrigins.Add("https://app.test.local");
                 options.Configure?.Invoke(o);
             })
-            .AddUserStore<TestUserStore>(ServiceLifetime.Singleton)
-            .AddEmailSender<CapturingEmailSender>(ServiceLifetime.Singleton);
+            .AddUserStore<TestUserStore>(ServiceLifetime.Singleton);
+        if (options.EmailSender) slim.AddEmailSender<CapturingEmailSender>(ServiceLifetime.Singleton);
         if (options.RefreshTokens) slim.AddRefreshTokenStore<TestRefreshTokenStore>(ServiceLifetime.Singleton);
         if (options.Sessions) slim.AddSessionStore<TestSessionStore>(ServiceLifetime.Singleton);
         if (options.TwoFactor) slim.AddTwoFactorStore<TestTwoFactorStore>(ServiceLifetime.Singleton);

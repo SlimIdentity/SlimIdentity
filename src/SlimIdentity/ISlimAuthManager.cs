@@ -47,6 +47,36 @@ public interface ISlimAuthManager
     /// </code></example>
     Task<IResult?> ConfirmPasswordAsync(SlimUser user, string? password, CancellationToken ct = default);
 
+    // ---------------------------------------------------------------- administration (authorize the caller yourself!)
+
+    /// <summary>
+    /// Administrator: sets the password of <paramref name="user"/> – e.g. a start password for an account you created,
+    /// on hosts without mail. With <paramref name="mustChange"/> (default) the next sign-in answers
+    /// <c>password_change_required</c> and issues no session until the user has chosen an own password. All sessions
+    /// and pending links of the user end; a lockout is cleared. Returns <c>null</c>, or <c>400</c> with the violated
+    /// password rules. Prefer <see cref="CreatePasswordResetAsync"/> where you can: then you never know the password.
+    /// </summary>
+    Task<IResult?> SetPasswordAsync(SlimUser user, string password, bool mustChange = true, CancellationToken ct = default);
+
+    /// <summary>
+    /// Administrator: a single-use link with which <paramref name="user"/> chooses a new password
+    /// (<c>POST /auth/reset-password</c>) – for hosts without mail, handed over by chat, ticket or in person. Valid for
+    /// <paramref name="lifetime"/> (default <c>Tokens.PasswordResetTokenLifetime</c>, at most 7 days) and only until the
+    /// security stamp changes. Unlike a mailed reset it is <b>no</b> proof that the user controls the mailbox: an
+    /// unconfirmed account stays unconfirmed.
+    /// </summary>
+    Task<SlimPasswordReset> CreatePasswordResetAsync(SlimUser user, TimeSpan? lifetime = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Administrator: removes the second factor of <paramref name="user"/> (authenticator, recovery codes, remembered
+    /// devices) – after the phone and the recovery codes are lost. All sessions of the user end; the next sign-in needs
+    /// the password only, and the user can set up 2FA again.
+    /// </summary>
+    Task ResetTwoFactorAsync(SlimUser user, CancellationToken ct = default);
+
+    /// <summary>Administrator: ends a lockout of <paramref name="user"/> and resets the failed-attempt counter.</summary>
+    Task UnlockAsync(SlimUser user, CancellationToken ct = default);
+
     /// <summary>
     /// Ends the current session: removes the auth cookie, consumes the refresh token (if given) and – with
     /// <see cref="ISlimSessionStore"/> – revokes the server-side session so a copied cookie / token stops working too.

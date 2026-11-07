@@ -44,7 +44,7 @@ Copy the store from the samples rather than writing it from scratch – the rule
 [How SlimIdentity works](how-it-works.md#your-part-the-stores).
 
 `SlimUser` is a plain transfer object with the security fields only (`Id`, `Email`, `PasswordHash`, `SecurityStamp`,
-`IsActive`, `EmailConfirmed`, `FailedLoginAttempts`, `LockoutEndUtc`, `TwoFactorEnabled`). Your own user entity stays
+`IsActive`, `EmailConfirmed`, `FailedLoginAttempts`, `LockoutEndUtc`, `TwoFactorEnabled`, `PasswordChangeRequired`). Your own user entity stays
 yours – map it in the store.
 
 ## 3. Implement (or stub) the e-mail sender

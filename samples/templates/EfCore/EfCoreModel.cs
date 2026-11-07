@@ -20,6 +20,7 @@ public class AppUser
     public int FailedLoginAttempts { get; set; }
     public DateTimeOffset? LockoutEndUtc { get; set; }
     public bool TwoFactorEnabled { get; set; }
+    public bool PasswordChangeRequired { get; set; }   // set by an administrator, cleared by the next own password
     public string? TotpSecret { get; set; }            // encrypted by SlimIdentity
     public long? LastTwoFactorCodeAt { get; set; }     // replay protection (unix milliseconds)
     public long? LastTwoFactorChallengeAt { get; set; } // single-use sign-in challenge (unix milliseconds)
@@ -86,6 +87,9 @@ public class OutboxMail
     public string Kind { get; set; } = "";         // verification, password-reset, …
     public string To { get; set; } = "";
     public string Payload { get; set; } = "";      // link / code
+    public string? UserId { get; set; }            // SlimEmailContext – persisted, the worker runs after the request
+    public string Culture { get; set; } = "";
+    public string ItemsJson { get; set; } = "{}";
     public DateTimeOffset CreatedUtc { get; set; }
     public DateTimeOffset? SentUtc { get; set; }
     public int Attempts { get; set; }

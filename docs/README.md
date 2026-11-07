@@ -19,6 +19,7 @@
 - [External login (OAuth / OIDC)](guides/external-login.md) – Google, Entra ID, Keycloak, account linking
 - [Invitations](guides/invitations.md) – invite-only registration, "complete your registration"
 - [Admin features](guides/admin-features.md) – impersonation, sudo mode, bans, API keys
+- [Running without e-mail](guides/without-email.md) – internal services: accounts, start passwords and resets by an administrator
 - [LDAP and legacy passwords](guides/ldap-and-legacy-passwords.md)
 - [Client certificates (mTLS)](guides/client-certificates.md)
 - [Data Protection key ring](guides/data-protection.md) – required for production

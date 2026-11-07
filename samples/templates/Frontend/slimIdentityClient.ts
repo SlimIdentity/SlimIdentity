@@ -19,9 +19,10 @@ export interface AuthResponse {
 }
 
 export interface LoginChallenge {
-  status: "invalid_credentials" | "requires_two_factor";
+  status: "invalid_credentials" | "requires_two_factor" | "password_change_required";
   preAuthToken?: string;
-  twoFactorMethod?: "totp" | "email";
+  twoFactorMethod?: "totp" | "email" | "recovery";
+  passwordChangeToken?: string;
 }
 
 export interface SessionInfo {
@@ -60,7 +61,9 @@ export function checkPassword(password: string, p: PasswordPolicy): string[] {
 
 export type LoginResult =
   | { kind: "ok"; auth: AuthResponse }
-  | { kind: "two_factor"; preAuthToken: string; method: "totp" | "email" }
+  | { kind: "two_factor"; preAuthToken: string; method: "totp" | "email" | "recovery" }
+  /** The password was set by an administrator: ask for an own one, then call completePasswordChange. */
+  | { kind: "password_change"; passwordChangeToken: string }
   | { kind: "locked"; until: string }
   | { kind: "error"; status: string };
 
@@ -126,6 +129,15 @@ export const cookieAuth = {
   /** "Remember this device" sets a cookie (if TwoFactor.RememberDeviceLifetime is configured on the server). */
   async loginTwoFactor(preAuthToken: string, code: string, rememberDevice = false): Promise<LoginResult> {
     const r = await cookieFetch("/auth/login/2fa", { method: "POST", body: JSON.stringify({ preAuthToken, code, rememberDevice }) });
+    return toLoginResult(r);
+  },
+
+  /** After { kind: "password_change" }: sets the own password – the result is the session or the 2FA challenge. */
+  async completePasswordChange(passwordChangeToken: string, newPassword: string): Promise<LoginResult> {
+    const r = await cookieFetch("/auth/login/password-change", {
+      method: "POST",
+      body: JSON.stringify({ token: passwordChangeToken, newPassword }),
+    });
     return toLoginResult(r);
   },
 
@@ -269,6 +281,18 @@ export const bearerAuth = {
     return result;
   },
 
+  /** After { kind: "password_change" }: sets the own password – the result is the session or the 2FA challenge. */
+  async completePasswordChange(passwordChangeToken: string, newPassword: string): Promise<LoginResult> {
+    const r = await fetch(`${AUTH}/login/password-change`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: passwordChangeToken, newPassword }),
+    });
+    const result = await toLoginResult(r);
+    if (result.kind === "ok") storeTokens(result.auth);
+    return result;
+  },
+
   /**
    * Social login for bearer clients: full-page navigation with a PKCE challenge (RFC 7636, S256). The verifier stays
    * in this tab; whoever intercepts the redirect gets a code that is worthless without it.
@@ -327,6 +351,8 @@ async function toLoginResult(r: Response): Promise<LoginResult> {
   if (r.ok) return { kind: "ok", auth: body as AuthResponse };
   if (r.status === 401 && body.status === "requires_two_factor")
     return { kind: "two_factor", preAuthToken: body.preAuthToken, method: body.twoFactorMethod };
+  if (r.status === 401 && body.status === "password_change_required")
+    return { kind: "password_change", passwordChangeToken: body.passwordChangeToken };
   // only with SignIn.RevealAccountState = true – by default locked accounts answer like a wrong password
   if (r.status === 423) return { kind: "locked", until: body.lockoutEndUtc };
   return { kind: "error", status: body.status ?? `http_${r.status}` };

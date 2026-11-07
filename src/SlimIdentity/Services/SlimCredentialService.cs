@@ -116,7 +116,7 @@ internal sealed class SlimCredentialService(
         {
             var email = user.Email;
             var end = user.LockoutEndUtc.Value;
-            await mail.SendAsync(SlimMailKinds.LockoutNotification, email, (s, c) => s.SendLockoutNotificationEmailAsync(email, end, c), ct);
+            await mail.SendAsync(SlimEmailKinds.LockoutNotification, email, user.Id, (s, x, c) => s.SendLockoutNotificationEmailAsync(x, email, end, c), ct);
         }
         return true;
     }
@@ -151,12 +151,13 @@ internal sealed class SlimCredentialService(
         }
     }
 
-    /// <summary>Sets a new password, rotates the stamp and clears lockout state (does not persist).</summary>
+    /// <summary>Sets a new password, rotates the stamp, clears lockout state and a pending forced change (does not persist).</summary>
     public void ApplyNewPassword(SlimUser user, string newPassword)
     {
         user.PasswordHash = hasher.HashPassword(user, newPassword);
         user.SecurityStamp = SlimUser.NewSecurityStamp();
         user.FailedLoginAttempts = 0;
         user.LockoutEndUtc = null;
+        user.PasswordChangeRequired = false;
     }
 }

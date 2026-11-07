@@ -31,7 +31,7 @@ internal sealed class SlimMailThrottle(TimeProvider time)
             sent = _sent.GetOrAdd(key, _ => new Queue<DateTimeOffset>());
         }
 
-        var limit = kind == SlimMailKinds.TwoFactorCode ? TwoFactorCodesPerRecipient : PerKindAndRecipient;
+        var limit = kind == SlimEmailKinds.TwoFactorCode ? TwoFactorCodesPerRecipient : PerKindAndRecipient;
         lock (sent)
         {
             while (sent.Count > 0 && now - sent.Peek() >= Window) sent.Dequeue();
@@ -53,14 +53,3 @@ internal sealed class SlimMailThrottle(TimeProvider time)
     }
 }
 
-/// <summary>Mail kinds (metric tag <c>kind</c> and throttle key).</summary>
-internal static class SlimMailKinds
-{
-    public const string Verification = "verification";
-    public const string PasswordReset = "password-reset";
-    public const string AccountExists = "account-exists";
-    public const string EmailChange = "email-change";
-    public const string EmailChanged = "email-changed";
-    public const string LockoutNotification = "lockout-notification";
-    public const string TwoFactorCode = "two-factor-code";
-}

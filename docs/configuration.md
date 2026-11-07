@@ -81,6 +81,7 @@ All defaults are the secure choice. The options are listed in three tiers – mo
 | `ExternalLogin.DefaultReturnUrl` | `/` | Redirect target without `returnUrl`. |
 | `Email.SendInBackground` | `true` | Verification, reset, "account exists" and lockout mails are queued (uniform response times). Turn off only with an outbox sender. |
 | `Email.QueueCapacity` | `1000` | Mails beyond this are dropped and logged. |
+| `TwoFactor.AllowEmailCodes` | `true` | 6-digit codes by e-mail as second factor. `false` leaves authenticator apps only (e-mail is the weakest factor); always off with `WithoutEmail()`. |
 
 ## Fixed by design
 
@@ -138,7 +139,9 @@ If the old secret leaked, do not list it in `PreviousJwtSecrets` – every token
 | Method | Effect |
 | :--- | :--- |
 | `AddUserStore<T>()` | **Required.** |
-| `AddEmailSender<T>()` / `AddNullEmailSender()` | **Required.** The null sender logs links and codes; it stops the start in the `Production` environment unless `AddNullEmailSender(allowInProduction: true)`. |
+| `AddEmailSender<T>()` / `AddNullEmailSender()` | **Required** unless `WithoutEmail()`. The null sender logs links and codes; it stops the start in the `Production` environment unless `AddNullEmailSender(allowInProduction: true)`. |
+| `WithoutEmail(allowSelfRegistration = false)` | Host without mail server: no sender, no mail-based endpoints – [guide](guides/without-email.md). |
+| `AddEmailContextEnricher<T>()` | Adds host data (tenant, brand) to the `SlimEmailContext` of every mail. |
 | `AddRefreshTokenStore<T>()` | `/refresh`, refresh tokens in bearer responses. |
 | `AddSessionStore<T>()` | Server-side sessions, `/sessions`. |
 | `AddTwoFactorStore<T>()` | `/login/2fa`, `/2fa/*`. |

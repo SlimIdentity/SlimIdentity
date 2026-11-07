@@ -20,6 +20,10 @@ internal sealed class SlimIdentityOptionsValidator : IValidateOptions<SlimIdenti
         if (e.DefaultUseCookies && !e.AllowCookieAuth)
             f.Add("Endpoints.DefaultUseCookies is true but cookie auth is disabled.");
 
+        if (!o.Email.Enabled && e.EnableRegistration && o.SignIn.RequireConfirmedEmail)
+            f.Add("SignIn.RequireConfirmedEmail with WithoutEmail(allowSelfRegistration: true): self-registered users could never " +
+                "confirm their address. Turn one of them off.");
+
         // Tokens
         if (o.JwtEnabled)
         {

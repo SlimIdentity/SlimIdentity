@@ -16,6 +16,7 @@ working – users do not have to reset their passwords. The migration is mostly 
 | `AccessFailedCount` | `FailedLoginAttempts` | |
 | `LockoutEnd` | `LockoutEndUtc` | ignore it if `LockoutEnabled` is false for a user |
 | `TwoFactorEnabled` | `TwoFactorEnabled` | |
+| – | `PasswordChangeRequired` | new; `false` for migrated users |
 | – | `IsActive` | new; map from your own flag (e.g. not deleted) or always `true` |
 | `AspNetUserRoles` + `AspNetRoles` | `GetClaimsAsync` | return `ClaimTypes.Role` claims |
 | `AspNetUserClaims` | `GetClaimsAsync` | return them as additional claims |

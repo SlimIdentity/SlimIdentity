@@ -8,8 +8,9 @@ namespace SlimIdentity.Endpoints;
 /// <summary>Login state machine: password → (2FA) → session; refresh rotation; logout.</summary>
 internal sealed class SlimLoginHandlers(
     ISlimUserStore store,
-    ISlimEmailSender emailSender,
     SlimMailThrottle mailThrottle,
+    SlimEmailDispatcher mailDispatcher,
+    SlimPasswordPolicy passwordPolicy,
     SlimCredentialService credentials,
     SlimAuthManager authManager,
     SlimWorkflowTokens workflow,
@@ -22,6 +23,7 @@ internal sealed class SlimLoginHandlers(
 {
     internal const string MethodTotp = "totp";
     internal const string MethodEmail = "email";
+    internal const string MethodRecovery = "recovery";
 
     private SlimIdentityOptions O => options.Value;
     private HttpContext Http => httpContextAccessor.HttpContext!;
@@ -124,6 +126,21 @@ internal sealed class SlimLoginHandlers(
             return (SlimResults.Status("email_not_confirmed", "The e-mail address has not been confirmed yet.", StatusCodes.Status403Forbidden), false);
         }
 
+        // a password set by an administrator: no session (not even a remembered device) before the user chose an own one
+        if (user.PasswordChangeRequired)
+        {
+            metrics.Login("password_change_required", cookies);
+            var lifetime = SlimIdentityDefaults.PreAuthTokenLifetime;
+            return (SlimResults.Challenge(new SlimLoginChallengeResponse
+            {
+                Status = "password_change_required",
+                Message = "The password was set by an administrator. Choose your own password to continue.",
+                PasswordChangeToken = workflow.Protect(SlimWorkflowTokens.PasswordChangePurpose,
+                    new SlimPasswordChangePayload(user.Id, user.SecurityStamp, cookies, request.RememberMe), lifetime),
+                ExpiresIn = (int)lifetime.TotalSeconds,
+            }), false);
+        }
+
         // remembered device: the second factor was passed on this device before - the password was just verified
         if (user.TwoFactorEnabled && services.GetService<SlimTwoFactorService>() is { } twoFactor
             && twoFactor.IsRememberedDevice(user, Http, request.TwoFactorRememberToken))
@@ -166,21 +183,27 @@ internal sealed class SlimLoginHandlers(
         {
             method = MethodTotp;
         }
+        else if (!O.EmailCodesEnabled)
+        {
+            // e-mail codes cannot be sent (WithoutEmail, AllowEmailCodes = false): only a recovery code completes the
+            // sign-in – or an administrator resets the second factor
+            method = MethodRecovery;
+        }
         else
         {
             method = MethodEmail;
             var code = SlimTotp.GenerateNumericCode();
             codeHash = HashEmailCode(user.Id, code, issuedAt);
             // sent inline (the user waits for it); over the per-recipient limit the challenge is issued without a mail
-            if (mailThrottle.TryAcquire(SlimMailKinds.TwoFactorCode, user.Email))
+            if (mailThrottle.TryAcquire(SlimEmailKinds.TwoFactorCode, user.Email))
             {
-                await emailSender.SendTwoFactorCodeAsync(user.Email, code, ct);
-                metrics.Mail(SlimMailKinds.TwoFactorCode, "sent");
+                await services.GetRequiredService<ISlimEmailSender>().SendTwoFactorCodeAsync(mailDispatcher.CreateContext(SlimEmailKinds.TwoFactorCode, user.Id), user.Email, code, ct);
+                metrics.Mail(SlimEmailKinds.TwoFactorCode, "sent");
             }
             else
             {
-                Log.MailThrottled(logger, SlimMailKinds.TwoFactorCode);
-                metrics.Mail(SlimMailKinds.TwoFactorCode, "throttled");
+                Log.MailThrottled(logger, SlimEmailKinds.TwoFactorCode);
+                metrics.Mail(SlimEmailKinds.TwoFactorCode, "throttled");
             }
         }
 
@@ -191,11 +214,56 @@ internal sealed class SlimLoginHandlers(
         return new SlimLoginChallengeResponse
         {
             Status = "requires_two_factor",
-            Message = method == MethodTotp ? "Enter the code from your authenticator app." : "A code has been sent to your e-mail address.",
+            Message = method switch
+            {
+                MethodTotp => "Enter the code from your authenticator app.",
+                MethodRecovery => "Enter one of your recovery codes. If you have none left, ask your administrator to reset two-factor authentication.",
+                _ => "A code has been sent to your e-mail address.",
+            },
             PreAuthToken = token,
             TwoFactorMethod = method,
             ExpiresIn = (int)lifetime.TotalSeconds,
         };
+    }
+
+    // ------------------------------------------------------------------ POST /login/password-change
+
+    public async Task<IResult> CompletePasswordChangeAsync(SlimPasswordChangeLoginRequest? request, CancellationToken ct)
+    {
+        if (request is null || !workflow.TryUnprotect<SlimPasswordChangePayload>(SlimWorkflowTokens.PasswordChangePurpose, request.Token, out var payload))
+            return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
+
+        // ends in a cookie sign-in without carrying a cookie – only the signed token knows (as on /login/2fa)
+        if (payload.UseCookies && SlimCsrfEndpointFilter.Validate(Http.Request, O, logger) is { } csrfError) return csrfError;
+
+        // the stamp rotates with the new password: the token works once, and a newer administrator password kills it
+        var user = await store.FindByIdAsync(payload.Uid, ct);
+        if (user is null || !user.IsActive || !user.PasswordChangeRequired || !SlimHashing.FixedTimeEquals(user.SecurityStamp, payload.Stamp))
+            return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
+
+        if (await passwordPolicy.ValidateAsync(request.NewPassword, user.Email, ct, "newPassword") is { } errors)
+            return SlimResults.Validation(errors);
+        if (await credentials.VerifyPasswordAsync(user, request.NewPassword, ct) != SlimPasswordCheck.Failed)
+            return SlimResults.BadRequest("password_unchanged", "Choose a password different from the one set by the administrator.");
+
+        credentials.ApplyNewPassword(user, request.NewPassword);
+        await store.UpdateSecurityStateAsync(user, ct);
+        await authManager.RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
+        Log.ForcedPasswordChangeCompleted(logger, user.Id);
+
+        if (!SlimModes.TryResolve(O, payload.UseCookies, out var cookies, out var modeError)) return modeError!;
+        if (user.TwoFactorEnabled)
+        {
+            var challenge = await BeginTwoFactorAsync(user, cookies, payload.RememberMe, ct);
+            metrics.Login("requires_two_factor", cookies);
+            return challenge is null
+                ? Results.Problem(statusCode: 500, title: "Two-factor authentication is enabled for this user but ISlimTwoFactorStore is not registered.")
+                : SlimResults.Challenge(challenge);
+        }
+
+        var result = await authManager.SignInCoreAsync(user, cookies, payload.RememberMe, SlimAuthManager.MethodPassword, null, null, true, ct);
+        metrics.Login(result.Succeeded ? "success" : "rejected", cookies);
+        return ToResult(result);
     }
 
     // ------------------------------------------------------------------ POST /login/2fa

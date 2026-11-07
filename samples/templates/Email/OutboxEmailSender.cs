@@ -11,6 +11,8 @@
 //
 // Entity: OutboxMail in samples/templates/EfCore/EfCoreModel.cs. Packages: Microsoft.EntityFrameworkCore + provider.
 
+using System.Globalization;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -23,18 +25,23 @@ namespace MyApp.Mail;
 /// <summary>Writes every mail into the outbox table – nothing is sent inside the request.</summary>
 public sealed class OutboxEmailSender(AppDbContext db, TimeProvider time) : ISlimEmailSender
 {
-    public Task SendVerificationEmailAsync(string email, string link, CancellationToken ct) => AddAsync("verification", email, link, ct);
-    public Task SendPasswordResetEmailAsync(string email, string link, CancellationToken ct) => AddAsync("password-reset", email, link, ct);
-    public Task SendTwoFactorCodeAsync(string email, string code, CancellationToken ct) => AddAsync("two-factor", email, code, ct);
-    public Task SendEmailChangeConfirmationAsync(string newEmail, string link, CancellationToken ct) => AddAsync("email-change", newEmail, link, ct);
-    public Task SendEmailChangedNotificationAsync(string oldEmail, string newEmail, CancellationToken ct) => AddAsync("email-changed", oldEmail, newEmail, ct);
-    public Task SendAccountExistsEmailAsync(string email, CancellationToken ct) => AddAsync("account-exists", email, "", ct);
-    public Task SendLockoutNotificationEmailAsync(string email, DateTimeOffset lockoutEndUtc, CancellationToken ct) =>
-        AddAsync("lockout", email, lockoutEndUtc.ToString("O"), ct);
+    public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string link, CancellationToken ct) => AddAsync(context, email, link, ct);
+    public Task SendPasswordResetEmailAsync(SlimEmailContext context, string email, string link, CancellationToken ct) => AddAsync(context, email, link, ct);
+    public Task SendTwoFactorCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) => AddAsync(context, email, code, ct);
+    public Task SendEmailChangeConfirmationAsync(SlimEmailContext context, string newEmail, string link, CancellationToken ct) => AddAsync(context, newEmail, link, ct);
+    public Task SendEmailChangedNotificationAsync(SlimEmailContext context, string oldEmail, string newEmail, CancellationToken ct) => AddAsync(context, oldEmail, newEmail, ct);
+    public Task SendAccountExistsEmailAsync(SlimEmailContext context, string email, CancellationToken ct) => AddAsync(context, email, "", ct);
+    public Task SendLockoutNotificationEmailAsync(SlimEmailContext context, string email, DateTimeOffset lockoutEndUtc, CancellationToken ct) =>
+        AddAsync(context, email, lockoutEndUtc.ToString("O"), ct);
 
-    private async Task AddAsync(string kind, string to, string payload, CancellationToken ct)
+    // the context (language, account, tenant) is persisted with the mail – the worker runs long after the request
+    private async Task AddAsync(SlimEmailContext context, string to, string payload, CancellationToken ct)
     {
-        db.OutboxMails.Add(new OutboxMail { Kind = kind, To = to, Payload = payload, CreatedUtc = time.GetUtcNow() });
+        db.OutboxMails.Add(new OutboxMail
+        {
+            Kind = context.Kind, To = to, Payload = payload, CreatedUtc = time.GetUtcNow(),
+            UserId = context.UserId, Culture = context.Culture.Name, ItemsJson = JsonSerializer.Serialize(context.Items),
+        });
         await db.SaveChangesAsync(ct);
     }
 }
@@ -58,14 +65,23 @@ public sealed class OutboxMailWorker(IServiceScopeFactory scopes, TimeProvider t
             {
                 try
                 {
+                    var context = new SlimEmailContext
+                    {
+                        Kind = mail.Kind,
+                        UserId = mail.UserId,
+                        Culture = CultureInfo.GetCultureInfo(mail.Culture),
+                        Items = JsonSerializer.Deserialize<Dictionary<string, string>>(mail.ItemsJson) ?? [],
+                    };
                     await (mail.Kind switch
                     {
-                        "verification" => transport.SendVerificationEmailAsync(mail.To, mail.Payload, stoppingToken),
-                        "password-reset" => transport.SendPasswordResetEmailAsync(mail.To, mail.Payload, stoppingToken),
-                        "two-factor" => transport.SendTwoFactorCodeAsync(mail.To, mail.Payload, stoppingToken),
-                        "email-change" => transport.SendEmailChangeConfirmationAsync(mail.To, mail.Payload, stoppingToken),
-                        "email-changed" => transport.SendEmailChangedNotificationAsync(mail.To, mail.Payload, stoppingToken),
-                        "account-exists" => transport.SendAccountExistsEmailAsync(mail.To, stoppingToken),
+                        SlimEmailKinds.Verification => transport.SendVerificationEmailAsync(context, mail.To, mail.Payload, stoppingToken),
+                        SlimEmailKinds.PasswordReset => transport.SendPasswordResetEmailAsync(context, mail.To, mail.Payload, stoppingToken),
+                        SlimEmailKinds.TwoFactorCode => transport.SendTwoFactorCodeAsync(context, mail.To, mail.Payload, stoppingToken),
+                        SlimEmailKinds.EmailChange => transport.SendEmailChangeConfirmationAsync(context, mail.To, mail.Payload, stoppingToken),
+                        SlimEmailKinds.EmailChanged => transport.SendEmailChangedNotificationAsync(context, mail.To, mail.Payload, stoppingToken),
+                        SlimEmailKinds.AccountExists => transport.SendAccountExistsEmailAsync(context, mail.To, stoppingToken),
+                        SlimEmailKinds.LockoutNotification => transport.SendLockoutNotificationEmailAsync(context, mail.To,
+                            DateTimeOffset.Parse(mail.Payload, CultureInfo.InvariantCulture), stoppingToken),
                         _ => Task.CompletedTask,
                     });
                     mail.SentUtc = time.GetUtcNow();

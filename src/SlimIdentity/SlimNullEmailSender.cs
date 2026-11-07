@@ -7,49 +7,49 @@ namespace SlimIdentity;
 public sealed class SlimNullEmailSender(ILogger<SlimNullEmailSender> logger) : ISlimEmailSender
 {
     /// <inheritdoc />
-    public Task SendVerificationEmailAsync(string email, string verificationTokenOrLink, CancellationToken ct)
+    public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string verificationTokenOrLink, CancellationToken ct)
     {
         Log.NullMailVerification(logger, email, verificationTokenOrLink);
         return Task.CompletedTask;
     }
 
     /// <inheritdoc />
-    public Task SendPasswordResetEmailAsync(string email, string resetTokenOrLink, CancellationToken ct)
+    public Task SendPasswordResetEmailAsync(SlimEmailContext context, string email, string resetTokenOrLink, CancellationToken ct)
     {
         Log.NullMailPasswordReset(logger, email, resetTokenOrLink);
         return Task.CompletedTask;
     }
 
     /// <inheritdoc />
-    public Task SendTwoFactorCodeAsync(string email, string code, CancellationToken ct)
+    public Task SendTwoFactorCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct)
     {
         Log.NullMailTwoFactorCode(logger, email, code);
         return Task.CompletedTask;
     }
 
     /// <inheritdoc />
-    public Task SendEmailChangeConfirmationAsync(string newEmail, string confirmationTokenOrLink, CancellationToken ct)
+    public Task SendEmailChangeConfirmationAsync(SlimEmailContext context, string newEmail, string confirmationTokenOrLink, CancellationToken ct)
     {
         Log.NullMailEmailChange(logger, newEmail, confirmationTokenOrLink);
         return Task.CompletedTask;
     }
 
     /// <inheritdoc />
-    public Task SendEmailChangedNotificationAsync(string oldEmail, string newEmail, CancellationToken ct)
+    public Task SendEmailChangedNotificationAsync(SlimEmailContext context, string oldEmail, string newEmail, CancellationToken ct)
     {
         Log.NullMailEmailChanged(logger, oldEmail, newEmail);
         return Task.CompletedTask;
     }
 
     /// <inheritdoc />
-    public Task SendAccountExistsEmailAsync(string email, CancellationToken ct)
+    public Task SendAccountExistsEmailAsync(SlimEmailContext context, string email, CancellationToken ct)
     {
         Log.NullMailAccountExists(logger, email);
         return Task.CompletedTask;
     }
 
     /// <inheritdoc />
-    public Task SendLockoutNotificationEmailAsync(string email, DateTimeOffset lockoutEndUtc, CancellationToken ct)
+    public Task SendLockoutNotificationEmailAsync(SlimEmailContext context, string email, DateTimeOffset lockoutEndUtc, CancellationToken ct)
     {
         Log.NullMailLockout(logger, email, lockoutEndUtc);
         return Task.CompletedTask;

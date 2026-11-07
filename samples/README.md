@@ -34,7 +34,7 @@ against your real database checks all of the following, including the parallel c
 - `CreateAsync` returns `null` if the address is already taken (unique index on the normalized address,
   `ON CONFLICT DO NOTHING` / catch the unique violation) – concurrent registrations then get the uniform answer.
 - `UpdateSecurityStateAsync` persists only the security fields of `SlimUser`
-  (PasswordHash, SecurityStamp, EmailConfirmed, FailedLoginAttempts, LockoutEndUtc, TwoFactorEnabled).
+  (PasswordHash, SecurityStamp, EmailConfirmed, FailedLoginAttempts, LockoutEndUtc, TwoFactorEnabled, PasswordChangeRequired).
 - The sign-in bookkeeping methods touch **only their own columns**, in a single statement:
   `IncrementFailedLoginAttemptsAsync` (`SET failed = failed + 1 … RETURNING failed`), `SetLockoutEndAsync`,
   `ResetFailedLoginAttemptsAsync` and `UpdatePasswordHashAsync` (`… WHERE password_hash = @currentHash`). Never
