@@ -20,8 +20,8 @@ Without OpenTelemetry you can watch the counters live: `dotnet-counters monitor 
 
 | Instrument | Tags | Meaning |
 | :--- | :--- | :--- |
-| `slimidentity.logins` | `result` (`success`, `invalid_password`, `unknown_user`, `inactive`, `locked_out`, `requires_two_factor`, `email_not_confirmed`, `rejected`), `mode` (`cookie`, `bearer`) | Password sign-in attempts |
-| `slimidentity.two_factor.verifications` | `method` (`totp`, `email`, `recovery`, `remembered_device`), `result` (`success`, `failure`, `challenge_reused`) | Second-factor attempts and skips on remembered devices |
+| `slimidentity.logins` | `result` (`success`, `invalid_password`, `unknown_user`, `inactive`, `locked_out`, `requires_two_factor`, `email_not_confirmed`, `rejected`, `attempts_queued`), `mode` (`cookie`, `bearer`) | Password sign-in attempts |
+| `slimidentity.two_factor.verifications` | `method` (`totp`, `email`, `recovery`, `remembered_device`), `result` (`success`, `failure`, `challenge_reused`, `attempts_queued`) | Second-factor attempts and skips on remembered devices |
 | `slimidentity.lockouts` | – | Account lockouts |
 | `slimidentity.token_refreshes` | `result` (`success`, `invalid`, `reuse_detected`, `session_expired`) | Refresh-token rotations |
 | `slimidentity.sign_outs` | `scope` (`session`, `everywhere`) | Logouts and session revocations |
@@ -42,6 +42,7 @@ answer does not (enumeration protection). Keep metrics internal.
 
 - `token_refreshes{result="reuse_detected"}` > 0 – a refresh token was replayed (theft or a buggy client).
 - Spikes of `logins{result="invalid_password"|"unknown_user"}` or `lockouts` – credential stuffing.
+- `attempts_queued` – many parallel attempts against one account (more than 8 waiting); they were refused unevaluated.
 - `rate_limit.rejections` rising for normal traffic – limits too tight, or the proxy hides client IPs.
 - `mails{result="failed"|"dropped"}` > 0 or a growing `mail_queue.length` – mail delivery problem.
 - `impersonations` – for the audit trail.

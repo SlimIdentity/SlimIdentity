@@ -68,11 +68,12 @@ internal sealed class SlimCredentialService(
     /// </summary>
     public async Task<IResult?> ConfirmPasswordAsync(SlimUser user, string? password, HttpContext http, CancellationToken ct)
     {
-        using var attempt = await gate.EnterAsync(SlimAttemptGate.KeyFor(user.Email), ct);
+        var now = time.GetUtcNow();
+        using var attempt = await gate.TryEnterAsync(user.Id, ct);
+        if (attempt is null) return Http.SlimResults.BadRequest("invalid_password", "The password is incorrect.");   // queue full: not evaluated
         // re-read inside the gate: a queued predecessor may just have locked the account
         var current = await store.FindByIdAsync(user.Id, ct) ?? user;
 
-        var now = time.GetUtcNow();
         if (current.IsLockedOut(now)) return Http.SlimResults.Locked(http, current.LockoutEndUtc!.Value, now);
 
         if (await VerifyPasswordAsync(current, password, ct) != SlimPasswordCheck.Failed) return null;
@@ -83,9 +84,11 @@ internal sealed class SlimCredentialService(
             : Http.SlimResults.BadRequest("invalid_password", "The password is incorrect.");
     }
 
-    /// <summary>Serializes the credential attempts of one account in this instance (see <see cref="SlimAttemptGate"/>).</summary>
-    public Task<SlimAttemptGate.Lease> EnterAttemptAsync(string email, CancellationToken ct) =>
-        gate.EnterAsync(SlimAttemptGate.KeyFor(email), ct);
+    /// <summary>
+    /// Serializes the credential attempts of one account in this instance (see <see cref="SlimAttemptGate"/>);
+    /// <c>null</c> when too many attempts are queued - answer as for a failed attempt without evaluating it.
+    /// </summary>
+    public Task<SlimAttemptGate.Lease?> TryEnterAttemptAsync(string userId, CancellationToken ct) => gate.TryEnterAsync(userId, ct);
 
     /// <summary>
     /// Counts a failed attempt. Every <c>MaxFailedAttempts</c> consecutive failures lock the account; the duration

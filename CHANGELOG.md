@@ -84,6 +84,13 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
 - Workflow tokens (links, challenges, exchange codes, refresh tokens) carry their own expiry, checked against the
   injected `TimeProvider`. Tokens issued before this change are no longer accepted.
 
+### Security (external review round 2)
+
+- The attempt queue of an account is keyed by its user id: spellings of one address (`User@…`, `USER@…`) no longer
+  get queues of their own. At most 8 attempts wait per account; further ones are refused without being evaluated
+  (metric result `attempts_queued`), and refused attempts burn their dummy hash outside the queue.
+- Every answer under `/auth` carries `Cache-Control: no-store`.
+
 All packages of the repository (`SlimIdentity`, `SlimIdentity.EntityFrameworkCore`, `SlimIdentity.Testing`) are released
 together with the same version.
 

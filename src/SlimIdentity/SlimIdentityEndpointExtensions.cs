@@ -10,6 +10,18 @@ namespace SlimIdentity;
 /// <summary>Endpoint mapping: <c>app.MapSlimIdentityApi()</c> and <c>.RequireSlimCsrf()</c>.</summary>
 public static class SlimIdentityEndpointExtensions
 {
+    /// <summary>
+    /// Answers carry tokens, recovery codes, TOTP secrets or account state – no browser, proxy or CDN may store them
+    /// (RFC 6749 §5.1, OAuth 2.1). Set before the endpoint runs, so it covers error and CSRF answers too.
+    /// </summary>
+    private static ValueTask<object?> NoStore(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+    {
+        var headers = context.HttpContext.Response.Headers;
+        headers.CacheControl = "no-store";
+        headers.Pragma = "no-cache";
+        return next(context);
+    }
+
     private static readonly IAuthorizeData[] SlimAuthorize =
         [new AuthorizeAttribute { AuthenticationSchemes = SlimIdentityDefaults.UserScheme }];   // never API keys
 
@@ -40,6 +52,7 @@ public static class SlimIdentityEndpointExtensions
 
         var group = endpoints.MapGroup(o.RoutePrefix)
             .WithTags(SlimIdentityDefaults.OpenApiTag)
+            .AddEndpointFilter(NoStore)
             .AddEndpointFilter<RouteGroupBuilder, SlimCsrfEndpointFilter>();
 
         // OpenAPI: every state-changing endpoint can answer 403 csrf_validation_failed in cookie mode

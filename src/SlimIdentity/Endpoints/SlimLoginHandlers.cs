@@ -38,14 +38,53 @@ internal sealed class SlimLoginHandlers(
         // Oversized passwords are never hashed (DoS) – identical answer for known and unknown accounts.
         if (request.Password.Length > O.Password.MaximumLength) return Failed("invalid_password");
 
-        // lockout check, verification and counting form one step per account – parallel guesses queue up here instead
-        // of all passing the lockout check before the first failure is recorded (unknown accounts queue the same way)
-        using var attempt = await credentials.EnterAttemptAsync(email, ct);
-        var user = await store.FindByEmailAsync(email, ct);
-        if (user is null)
+        var found = await store.FindByEmailAsync(email, ct);
+        if (found is null)
         {
             credentials.BurnDummyHash(request.Password); // timing-attack mitigation
             return Failed("unknown_user");
+        }
+
+        // Lockout check, verification and counting form one step per account (keyed by the user id - every spelling of
+        // the address the store treats as equal shares it). Parallel guesses queue up instead of all passing the
+        // lockout check before the first failure is recorded; a full queue is answered like a wrong password.
+        IResult result;
+        bool burnDummyHash;
+        using (var attempt = await credentials.TryEnterAttemptAsync(found.Id, ct))
+        {
+            if (attempt is null)
+            {
+                metrics.Login("attempts_queued", cookies);
+                (result, burnDummyHash) = (SlimResults.InvalidCredentials(), true);
+            }
+            else
+            {
+                // re-read inside the gate: a queued predecessor may just have locked the account
+                (result, burnDummyHash) = await LoginWithinGateAsync(await store.FindByIdAsync(found.Id, ct), request, cookies, ct);
+            }
+        }
+
+        // outside the gate: refused attempts must not occupy the account's queue for a full hashing time
+        if (burnDummyHash) credentials.BurnDummyHash(request.Password);
+        return result;
+
+        IResult Failed(string reason)
+        {
+            metrics.Login(reason, cookies);
+            return SlimResults.InvalidCredentials();
+        }
+    }
+
+    /// <summary>
+    /// The password step for one account, run inside its attempt gate. <c>BurnDummyHash</c>: the caller burns the time of
+    /// a verification after leaving the gate (account gone, inactive or locked).
+    /// </summary>
+    private async Task<(IResult Result, bool BurnDummyHash)> LoginWithinGateAsync(SlimUser? user, SlimLoginRequest request, bool cookies, CancellationToken ct)
+    {
+        if (user is null)
+        {
+            metrics.Login("unknown_user", cookies);
+            return (SlimResults.InvalidCredentials(), true);
         }
 
         // Inactive / locked accounts: by default indistinguishable from a wrong password (same answer, same hashing time).
@@ -55,16 +94,14 @@ internal sealed class SlimLoginHandlers(
         if (!user.IsActive)
         {
             metrics.Login("inactive", cookies);
-            if (reveal) return SlimResults.Status("account_disabled", "The account is disabled.", StatusCodes.Status403Forbidden);
-            credentials.BurnDummyHash(request.Password);
-            return SlimResults.InvalidCredentials();
+            return reveal
+                ? (SlimResults.Status("account_disabled", "The account is disabled.", StatusCodes.Status403Forbidden), false)
+                : (SlimResults.InvalidCredentials(), true);
         }
         if (user.IsLockedOut(now))
         {
             metrics.Login("locked_out", cookies);
-            if (reveal) return SlimResults.Locked(Http, user.LockoutEndUtc!.Value, now);
-            credentials.BurnDummyHash(request.Password);
-            return SlimResults.InvalidCredentials();
+            return reveal ? (SlimResults.Locked(Http, user.LockoutEndUtc!.Value, now), false) : (SlimResults.InvalidCredentials(), true);
         }
 
         var check = await credentials.VerifyPasswordAsync(user, request.Password, ct);
@@ -72,10 +109,10 @@ internal sealed class SlimLoginHandlers(
         {
             metrics.Login("invalid_password", cookies);
             var locked = await credentials.RegisterFailureAsync(user, ct);
-            return locked && reveal ? SlimResults.Locked(Http, user.LockoutEndUtc!.Value, now) : SlimResults.InvalidCredentials();
+            return (locked && reveal ? SlimResults.Locked(Http, user.LockoutEndUtc!.Value, now) : SlimResults.InvalidCredentials(), false);
         }
 
-        // With 2FA the lockout counter is only reset after the second factor – otherwise a known
+        // With 2FA the lockout counter is only reset after the second factor - otherwise a known
         // password would allow unlimited guessing of the 6-digit code.
         await credentials.RegisterSuccessAsync(user, request.Password,
             rehash: check == SlimPasswordCheck.SuccessRehashNeeded,
@@ -84,10 +121,10 @@ internal sealed class SlimLoginHandlers(
         if (O.SignIn.RequireConfirmedEmail && !user.EmailConfirmed)
         {
             metrics.Login("email_not_confirmed", cookies);
-            return SlimResults.Status("email_not_confirmed", "The e-mail address has not been confirmed yet.", StatusCodes.Status403Forbidden);
+            return (SlimResults.Status("email_not_confirmed", "The e-mail address has not been confirmed yet.", StatusCodes.Status403Forbidden), false);
         }
 
-        // remembered device: the second factor was passed on this device before – the password was just verified
+        // remembered device: the second factor was passed on this device before - the password was just verified
         if (user.TwoFactorEnabled && services.GetService<SlimTwoFactorService>() is { } twoFactor
             && twoFactor.IsRememberedDevice(user, Http, request.TwoFactorRememberToken))
         {
@@ -95,27 +132,21 @@ internal sealed class SlimLoginHandlers(
             metrics.TwoFactor("remembered_device", "success");
             var remembered = await authManager.SignInCoreAsync(user, cookies, request.RememberMe, SlimAuthManager.MethodRememberedDevice, null, null, true, ct);
             metrics.Login(remembered.Succeeded ? "success" : "rejected", cookies);
-            return ToResult(remembered);
+            return (ToResult(remembered), false);
         }
 
         if (user.TwoFactorEnabled)
         {
             var challenge = await BeginTwoFactorAsync(user, cookies, request.RememberMe, ct);
             metrics.Login("requires_two_factor", cookies);
-            return challenge is null
+            return (challenge is null
                 ? Results.Problem(statusCode: 500, title: "Two-factor authentication is enabled for this user but ISlimTwoFactorStore is not registered.")
-                : SlimResults.Challenge(challenge);
+                : SlimResults.Challenge(challenge), false);
         }
 
         var result = await authManager.SignInCoreAsync(user, cookies, request.RememberMe, SlimAuthManager.MethodPassword, null, null, true, ct);
         metrics.Login(result.Succeeded ? "success" : "rejected", cookies);
-        return ToResult(result);
-
-        IResult Failed(string reason)
-        {
-            metrics.Login(reason, cookies);
-            return SlimResults.InvalidCredentials();
-        }
+        return (ToResult(result), false);
     }
 
     /// <summary>Creates the pre-auth token (and sends the e-mail code if no authenticator is configured).</summary>
@@ -182,9 +213,14 @@ internal sealed class SlimLoginHandlers(
         var user = await store.FindByIdAsync(payload.Uid, ct);
         if (user is null) return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
 
-        // one attempt per account at a time (shared with the password step); re-read inside the gate, a queued
-        // predecessor may just have locked the account
-        using var attempt = await credentials.EnterAttemptAsync(user.Email, ct);
+        // one attempt per account at a time (shared with the password step); a full queue answers like a wrong code
+        // without evaluating it. Re-read inside the gate: a queued predecessor may just have locked the account.
+        using var attempt = await credentials.TryEnterAttemptAsync(user.Id, ct);
+        if (attempt is null)
+        {
+            metrics.TwoFactor(payload.Method, "attempts_queued");
+            return SlimResults.Status("invalid_two_factor_code", "The code is invalid.", StatusCodes.Status401Unauthorized);
+        }
         user = await store.FindByIdAsync(payload.Uid, ct);
         if (user is null || !user.IsActive || !SlimHashing.FixedTimeEquals(user.SecurityStamp, payload.Stamp))
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);

@@ -15,7 +15,8 @@ Test names refer to `tests/SlimIdentity.Tests` (`Integration/…`, `Unit/Propert
 
 | ID | Attack → expected | Status |
 | :--- | :--- | :--- |
-| A1 | Many parallel wrong passwords → counter exact, lockout applies, no guess beyond the threshold is evaluated | covered – `Concurrency.Parallel_failed_logins_are_all_counted`, `ReviewRound1.R3_parallel_password_guesses_beyond_the_threshold_are_not_evaluated` (40 parallel), conformance (atomic increment). **Fixed** (review round 1): up to 14 of 40 parallel guesses were verified |
+| A1 | Many parallel wrong passwords → counter exact, lockout applies, no guess beyond the threshold is evaluated | covered – `Concurrency.Parallel_failed_logins_are_all_counted`, `ReviewRound1.R3_parallel_password_guesses_beyond_the_threshold_are_not_evaluated` (40 parallel), conformance (atomic increment). **Fixed** (review round 1): up to 14 of 40 parallel guesses were verified; `ReviewRound2.Different_spellings_of_one_address_share_the_attempt_gate` (**fixed** in round 2: 40 spellings of one address bypassed the gate) |
+| A1b | Many parallel attempts keep an account's queue busy | covered – `ReviewRound2.The_queue_of_one_account_is_limited` (at most 8 waiting, the rest refused unevaluated; refused attempts burn their dummy hash outside the queue) |
 | A2 | Locked account + correct password → not evaluated, answer identical to a wrong password | covered – `Login.Lockout_is_progressive_and_hidden_by_default` |
 | A3 | Unknown / known / inactive / locked → same answer and statistically same time | covered – `Login.Wrong_password_unknown_user_and_inactive_user_get_identical_answers`; timing `Timing.A3_…` (opt-in before a release: `SLIMIDENTITY_TIMING=1`, Mann-Whitney over interleaved requests). Last run: medians 47.8–47.9 ms, \|z\| ≤ 0.95 |
 | A4 | Address variants: case, Unicode normalization, whitespace, `+tag`, homoglyphs | covered – `AttackScenario.A4_*`. **Fixed:** NFC and NFD forms of one address created two accounts; addresses are now trimmed and NFC-normalized. `+tag` and homoglyphs are different addresses by design. |
@@ -93,6 +94,7 @@ Test names refer to `tests/SlimIdentity.Tests` (`Integration/…`, `Unit/Propert
 | F4b | Intercepted exchange code (deep link, history, malicious app) | covered – `ReviewRound1.C1_bearer_external_login_requires_a_pkce_challenge`, `…C1_the_exchange_code_travels_in_the_fragment_and_is_worthless_without_the_verifier`. **Fixed** (review round 1): the code is bound to a PKCE challenge (S256) and travels in the fragment |
 | F5 | Missing or forged `state` / correlation (OAuth CSRF) | design – handled by the ASP.NET Core remote handlers |
 | F6 | Several instances without a shared store → replay window | covered – with a refresh-token store the code is single-use across instances; without one, start-up warning `8004` ([several instances](guides/multiple-instances.md)), `DeploymentDiagnostics.External_login_without_refresh_store_is_reported_in_production` |
+| F8 | Answers with tokens or secrets stored by a browser, proxy or CDN cache | covered – `ReviewRound2.Responses_with_secrets_are_never_cached` (`Cache-Control: no-store` on `/auth`; **fixed** in review round 2) |
 | F7 | Credentials or codes in logs, referrers, URL history | covered – `ExternalLogin.New_external_user_…`, `ReviewRound1.R6_no_pre_auth_token_in_the_query_after_external_login_with_2fa` (secrets only in the fragment – **fixed** in review round 1), `LogSecrecy.No_secret_or_address_is_ever_logged` |
 
 ## G. Admin, impersonation, API keys
