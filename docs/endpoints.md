@@ -56,7 +56,7 @@ required in cookie mode – `#slim_status=requires_two_factor&preAuthToken=…&m
 | `POST /change-password` ⏱ 🔒 | `currentPassword`, `newPassword` | `200` new session for this device – others end | `400 invalid_password`, `400` validation, `403 not_allowed_while_impersonating`, `423 locked_out` |
 | `POST /change-email` ⏱ 🔒 | `newEmail`, `password` | `200 email_change_requested` (always – also for taken addresses); link goes to the new address | `400 email_unchanged`, `400 invalid_password`, `400` validation, `403` during impersonation, `423 locked_out` |
 | `POST /confirm-email-change` ⏱ | `token` | `200 email_changed` – address changed, confirmed, all sessions end, old address notified | `400 invalid_token`, `400 email_taken` |
-| `GET /password-policy` | – | `200` `minimumLength`, `maximumLength`, `requireDigit`, `requireLowercase`, `requireUppercase`, `requireNonAlphanumeric`, `hasAdditionalRules` – for hints and live validation in the front end | – |
+| `GET /password-policy` | – | `200` `minimumLength`, `maximumLength`, `hasAdditionalRules` – for hints and live validation in the front end (no composition rules, NIST SP 800-63B) | – |
 | `GET /me` 🔒 | – | `200` `id`, `email`, `isImpersonating`, `impersonatorId`, `authenticationMethod`, `sudoUntil`, `claims` | `401` |
 
 With `WithoutEmail()` the mail-based routes are not mapped: `/forgot-password`, `/verify-email`, `/resend-verification`,
@@ -83,7 +83,7 @@ Links are created by the host with `ISlimAuthManager.CreateInvitationAsync` – 
 
 | Endpoint | Body | Success | Errors |
 | :--- | :--- | :--- | :--- |
-| `GET /2fa` | – | `200` `enabled`, `method`, `hasAuthenticator` | – |
+| `GET /2fa` | – | `200` `enabled`, `method` (`totp`, `email` or `recovery` – no codes can be sent, set up an authenticator), `hasAuthenticator` | – |
 | `POST /2fa/setup` | – | `200` `sharedKey`, `authenticatorUri`, `setupToken` (nothing stored yet) | `403` during impersonation |
 | `POST /2fa/enable` ⏱ | `setupToken`, `code`, `password` | `200` `recoveryCodes` + refreshed `session` | `400 invalid_password`, `400 invalid_token`, `400 invalid_two_factor_code`, `423` |
 | `POST /2fa/enable-email` ⏱ | `password` | `200` `recoveryCodes` + `session` | `400 invalid_password`, `423` |

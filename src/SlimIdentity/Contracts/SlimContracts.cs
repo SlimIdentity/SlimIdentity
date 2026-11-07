@@ -187,7 +187,11 @@ public sealed record SlimMeResponse(
 
 /// <summary>Body of <c>GET /auth/2fa</c>.</summary>
 /// <param name="Enabled">Whether 2FA is enabled.</param>
-/// <param name="Method"><c>totp</c> or <c>email</c> when enabled.</param>
+/// <param name="Method">
+/// When enabled: <c>totp</c>, <c>email</c>, or <c>recovery</c> – e-mail codes are switched off (<c>WithoutEmail()</c>,
+/// <c>TwoFactor.AllowEmailCodes = false</c>) and the account has no authenticator, so only a recovery code signs in;
+/// suggest setting up an authenticator app.
+/// </param>
 /// <param name="HasAuthenticator">Whether an authenticator app is configured.</param>
 public sealed record SlimTwoFactorStatusResponse(bool Enabled, string? Method, bool HasAuthenticator);
 

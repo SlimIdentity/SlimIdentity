@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using SlimIdentity.Tests.Infrastructure;
 
 namespace SlimIdentity.Tests.Integration;
@@ -103,5 +104,24 @@ public sealed class WithoutEmailTests
 
         Assert.Equal("requires_two_factor", challenge.Str("status"));
         Assert.Equal("recovery", challenge.Str("twoFactorMethod"));
+    }
+
+    [Theory]
+    [InlineData(true)]    // WithoutEmail()
+    [InlineData(false)]   // mail available, TwoFactor.AllowEmailCodes = false
+    public async Task The_2fa_status_reports_recovery_when_codes_cannot_be_sent(bool withoutEmail)
+    {
+        // review finding F-07: GET /2fa said "email" while the sign-in already asked for a recovery code
+        await using var app = await TestApp.StartAsync(withoutEmail
+            ? Mailless()
+            : new TestAppOptions { Configure = o => o.TwoFactor.AllowEmailCodes = false });
+        var me = app.CreateClient();
+        me.BearerToken = (await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword)).AccessToken;
+        var user = app.Users.Get(TestApp.UserEmail);
+        user.TwoFactorEnabled = true;   // e-mail codes from earlier – no authenticator
+        await app.Users.UpdateSecurityStateAsync(user, default);
+
+        var status = await (await me.GetAsync("/auth/2fa")).Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+        Assert.Equal("recovery", status.Str("method"));
     }
 }

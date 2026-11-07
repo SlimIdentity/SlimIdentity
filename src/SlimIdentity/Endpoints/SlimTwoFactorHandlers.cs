@@ -29,7 +29,11 @@ internal sealed class SlimTwoFactorHandlers(
         if (user is null) return error!;
 
         var hasAuthenticator = (await twoFactor.GetSecretAsync(user, ct)).Configured;
-        var method = user.TwoFactorEnabled ? (hasAuthenticator ? SlimLoginHandlers.MethodTotp : SlimLoginHandlers.MethodEmail) : null;
+        // the same decision as the sign-in (BeginTwoFactorAsync): without e-mail codes only a recovery code helps
+        var method = !user.TwoFactorEnabled ? null
+            : hasAuthenticator ? SlimLoginHandlers.MethodTotp
+            : O.EmailCodesEnabled ? SlimLoginHandlers.MethodEmail
+            : SlimLoginHandlers.MethodRecovery;
         return Results.Ok(new SlimTwoFactorStatusResponse(user.TwoFactorEnabled, method, hasAuthenticator));
     }
 

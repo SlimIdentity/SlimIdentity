@@ -114,6 +114,12 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
   (metric result `attempts_queued`), and refused attempts burn their dummy hash outside the queue.
 - Every answer under `/auth` carries `Cache-Control: no-store`.
 
+### Fixed
+
+- `GET /auth/2fa` reports `method: recovery` (like the sign-in challenge) when e-mail codes are switched off and the
+  account has no authenticator; it said `email` before. The endpoint reference no longer lists password-policy fields
+  that do not exist (`require*`).
+
 All packages of the repository (`SlimIdentity`, `SlimIdentity.EntityFrameworkCore`, `SlimIdentity.Testing`) are released
 together with the same version.
 
