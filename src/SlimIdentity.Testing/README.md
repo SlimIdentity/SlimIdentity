@@ -38,7 +38,7 @@ Works with xUnit, NUnit, MSTest or a console app – the package has no test-fra
 | `ISlimRefreshTokenStore` | single use, **also in parallel**; expired tokens rejected |
 | `ISlimSessionStore` | round trip; touch; revoke one / all / all but current |
 | `ISlimExternalLoginStore` | lookup by provider and key; list per user; remove only the user's own link |
-| `ISlimPasskeyStore` | credential ids unique, **also in parallel**; `TryRecordUseAsync` single use per challenge and compare-and-set on the counter, **also in parallel**; list, rename and remove per user |
+| `ISlimPasskeyStore` | credential ids unique, **also in parallel**; `TryRecordUseAsync` single use per challenge and compare-and-set on the counter, **also in parallel**; list, rename and remove per user; `RemovePasskeysAsync` removes all of one user only |
 
 A failed run reads like this:
 

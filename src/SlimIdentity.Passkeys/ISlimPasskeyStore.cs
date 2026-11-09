@@ -1,8 +1,9 @@
 namespace SlimIdentity;
 
 /// <summary>
-/// Optional capability: passkeys (WebAuthn) – sign-in without a password, phishing-resistant, counted as multi-factor.
-/// Registering it maps <c>/passkeys/*</c>. Credential ids are unique across all users.
+/// Store of the <c>SlimIdentity.Passkeys</c> package: passkeys (WebAuthn) – sign-in without a password,
+/// phishing-resistant, counted as multi-factor. Register it with <c>AddPasskeyStore&lt;T&gt;()</c>, which maps
+/// <c>/passkeys/*</c>. Credential ids are unique across all users.
 /// </summary>
 public interface ISlimPasskeyStore
 {
@@ -28,6 +29,12 @@ public interface ISlimPasskeyStore
 
     /// <summary>Removes a passkey of <b>this</b> user. Returns <c>false</c> if it does not belong to the user.</summary>
     Task<bool> RemovePasskeyAsync(string userId, byte[] credentialId, CancellationToken ct);
+
+    /// <summary>
+    /// Removes every passkey of the user – when the owner of the address proves the mailbox for the first time
+    /// (pre-account hijacking: whoever registered the account before must keep no way in).
+    /// </summary>
+    Task RemovePasskeysAsync(string userId, CancellationToken ct);
 }
 
 /// <summary>A registered passkey. SlimIdentity stores only the public key – the private key never leaves the device.</summary>

@@ -544,6 +544,13 @@ public class SlimEfPasskeyStore<TContext, TKey>(SlimEfContext<TContext> context)
         return await Passkeys.Where(OfUser(key)).Where(p => p.CredentialIdHash == hash).ExecuteDeleteAsync(ct).ConfigureAwait(false) == 1;
     }
 
+    /// <inheritdoc />
+    public async Task RemovePasskeysAsync(string userId, CancellationToken ct)
+    {
+        if (!SlimEf.TryParseKey<TKey>(userId, out var key)) return;
+        await Passkeys.Where(OfUser(key)).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+    }
+
     private static SlimPasskey Map(SlimPasskeyEntity<TKey> p) => new()
     {
         UserId = SlimEf.KeyToString(p.UserId), CredentialId = p.CredentialId, PublicKey = p.PublicKey, SignCount = (uint)p.SignCount,

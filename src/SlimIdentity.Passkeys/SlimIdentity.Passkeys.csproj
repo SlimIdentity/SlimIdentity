@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>SlimIdentity.Passkeys</RootNamespace>
+    <EnableRequestDelegateGenerator>true</EnableRequestDelegateGenerator>
+  </PropertyGroup>
+
+  <!-- NuGet package (shared metadata: src/Directory.Build.props) -->
+  <PropertyGroup>
+    <PackageId>SlimIdentity.Passkeys</PackageId>
+    <Description>Passkeys (WebAuthn) for SlimIdentity: sign-in with Face ID, fingerprint or device PIN – phishing-resistant, multi-factor on its own, no user name needed. Registration for signed-in users, discoverable sign-in, rename and remove in the sign-in methods. ES256 and RS256, every check of WebAuthn Level 2 without attestation, atomic single use per challenge, clone detection. No third-party dependency, Native AOT compatible.</Description>
+    <PackageTags>aspnetcore;authentication;slimidentity;passkeys;webauthn;fido2;aot</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <!-- released with the same version; the package uses internals of the core and checks the version at startup -->
+    <ProjectReference Include="..\SlimIdentity\SlimIdentity.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <InternalsVisibleTo Include="SlimIdentity.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -3,7 +3,7 @@ using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
-using SlimIdentity.Security;
+using SlimIdentity.Passkeys;
 using SlimIdentity.Tests.Infrastructure;
 
 namespace SlimIdentity.Tests.Integration;
@@ -15,10 +15,9 @@ public sealed class PasskeyTests
 
     private static TestAppOptions WithPasskeys(Action<SlimIdentityBuilder>? more = null) => new()
     {
-        Configure = o => o.Passkeys.RelyingPartyId = "test.local",
         Builder = b =>
         {
-            b.AddPasskeyStore<TestPasskeyStore>(ServiceLifetime.Singleton);
+            b.AddPasskeyStore<TestPasskeyStore>(ServiceLifetime.Singleton).AddPasskeys(o => o.RelyingPartyId = "test.local");
             more?.Invoke(b);
         },
     };
@@ -243,8 +242,74 @@ public sealed class PasskeyTests
         await using var app = await TestApp.StartAsync(WithPasskeys());
         using var key = new SoftwarePasskey { CountUp = true };
         await RegisterAsync(app, await SignedInAsync(app), key);
+        var store = (TestPasskeyStore)app.App.Services.GetRequiredService<ISlimPasskeyStore>();
         app.Users.SetActive(app.Users.Get(TestApp.UserEmail).Id, false);
+
         Assert.Equal(HttpStatusCode.Unauthorized, (await LoginAsync(app, key)).Status);
+        // the refused sign-in leaves no trace on the passkey (counter, last use)
+        var stored = await store.FindPasskeyAsync(key.CredentialId, default);
+        Assert.Null(stored!.LastUsedUtc);
+        Assert.Equal(0u, stored.SignCount);
+    }
+
+    [Fact]
+    public async Task A_weak_rsa_key_is_refused_even_when_padded_to_2048_bit()
+    {
+        await using var app = await TestApp.StartAsync(WithPasskeys());
+        using var weak = new SoftwarePasskey(rsa: true, rsaBits: 1024);
+        var refused = await RegisterAsync(app, await SignedInAsync(app), weak, expected: HttpStatusCode.BadRequest);
+        Assert.Equal("invalid_passkey", refused.Str("status"));
+    }
+
+    // ------------------------------------------------------------------ pre-account hijacking
+
+    /// <summary>
+    /// A passkey can only be added to a confirmed account – but a host may have run without mail, imported accounts
+    /// or reset the confirmation. Whoever registered before the owner proves the mailbox keeps no passkey.
+    /// </summary>
+    [Fact]
+    public async Task The_registrants_passkeys_do_not_survive_the_owners_mailbox_proof()
+    {
+        await using var app = await TestApp.StartAsync(WithPasskeys());
+        using var key = new SoftwarePasskey();
+        await RegisterAsync(app, await SignedInAsync(app), key);
+        var user = app.Users.Get(TestApp.UserEmail);
+        user.EmailConfirmed = false;                       // e.g. imported, or mail switched on later
+        await app.Users.UpdateSecurityStateAsync(user, default);
+
+        await app.CreateClient().PostAsync("/auth/forgot-password", new { email = TestApp.UserEmail });
+        var token = (await app.Mail.WaitForAsync("password-reset", TestApp.UserEmail)).Payload;
+        await app.CreateClient().PostJsonAsync("/auth/reset-password", new { token, newPassword = "Owner-Pass-456" });
+
+        Assert.Empty(await app.App.Services.GetRequiredService<ISlimPasskeyStore>().GetPasskeysAsync(user.Id, default));
+        Assert.Equal(HttpStatusCode.Unauthorized, (await LoginAsync(app, key)).Status);
+    }
+
+    [Fact]
+    public async Task The_registrants_passkeys_do_not_survive_a_verified_external_sign_in_of_the_owner()
+    {
+        await using var app = await TestApp.StartAsync(WithPasskeys(b =>
+        {
+            b.AddExternalLoginStore<TestExternalLoginStore>(ServiceLifetime.Singleton);
+            b.Authentication.AddScheme<FakeOAuthOptions, FakeOAuthHandler>("Fake", o => o.Claims =
+            [
+                new Claim(ClaimTypes.NameIdentifier, "owner-1"),
+                new Claim(ClaimTypes.Email, TestApp.UserEmail),
+                new Claim("email_verified", "true"),
+            ]);
+        }));
+        using var key = new SoftwarePasskey();
+        await RegisterAsync(app, await SignedInAsync(app), key);
+        var user = app.Users.Get(TestApp.UserEmail);
+        user.EmailConfirmed = false;
+        await app.Users.UpdateSecurityStateAsync(user, default);
+
+        var browser = app.CreateClient();
+        var challenge = await browser.GetAsync("/auth/login/Fake?useCookies=true&returnUrl=/done");
+        await browser.GetAsync(challenge.Headers.Location!.OriginalString);
+
+        Assert.True(app.Users.Get(TestApp.UserEmail).EmailConfirmed);   // the owner took the account over
+        Assert.Empty(await app.App.Services.GetRequiredService<ISlimPasskeyStore>().GetPasskeysAsync(user.Id, default));
     }
 
     // ------------------------------------------------------------------ management
@@ -311,5 +376,15 @@ public sealed class PasskeyTests
             Builder = b => b.AddPasskeyStore<TestPasskeyStore>(ServiceLifetime.Singleton),
         }));
         Assert.Contains("RelyingPartyId", error.ToString());
+    }
+
+    [Fact]
+    public async Task AddPasskeys_without_a_store_fails_at_the_start()
+    {
+        var error = await Assert.ThrowsAnyAsync<Exception>(() => TestApp.StartAsync(new TestAppOptions
+        {
+            Builder = b => b.AddPasskeys(o => o.RelyingPartyId = "test.local"),
+        }));
+        Assert.Contains("AddPasskeyStore", error.ToString());
     }
 }

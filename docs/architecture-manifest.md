@@ -59,7 +59,7 @@ No profile or business data – that stays in the host's own user model.
 | `ISlimSessionStore` | – | server-side sessions, per-device logout, `/sessions` |
 | `ISlimTwoFactorStore` | – | `/login/2fa`, `/2fa/*` (encrypted TOTP secrets, recovery-code hashes, replay protection, single-use challenges) |
 | `ISlimExternalLoginStore` | – | OAuth/OIDC login and account linking (also used for client certificates) |
-| `ISlimPasskeyStore` | – | passkeys (WebAuthn): `/passkeys/*`, public keys only, atomic single use per challenge |
+| `ISlimPasskeyStore` (package `SlimIdentity.Passkeys`) | – | passkeys (WebAuthn): `/passkeys/*`, public keys only, atomic single use per challenge |
 | `ISlimApiKeyStore` | – | `X-API-Key` authentication (key hashes only) |
 | `ISlimCustomPasswordValidator` | – | LDAP / legacy password verification |
 | `ISlimPasswordRule` (any number) | – | additional rules for new passwords (e.g. breached-password check) |
@@ -111,6 +111,7 @@ app.MapSlimIdentityApi();
 src/SlimIdentity/                          the main package
 src/SlimIdentity.Testing/                  package: conformance checks for store implementations (test projects only)
 src/SlimIdentity.EntityFrameworkCore/      package: EF Core stores on the host's DbContext and user entity
+src/SlimIdentity.Passkeys/                 package: passkeys (WebAuthn) – CBOR, COSE keys, the ceremonies
 tests/SlimIdentity.EntityFrameworkCore.Tests/  conformance of the EF Core package on SQLite, PostgreSQL, SQL Server
 tests/SlimIdentity.Tests/                  unit and integration tests (in-memory host, fake clock, fake OAuth provider)
 tests/SlimIdentity.Samples.Tests/          compiles the copy-paste templates; conformance of the EF Core stores (SQLite)
@@ -159,6 +160,7 @@ Deliberately not part of the package (extra dependency, highly deployment specif
 | Narrow store methods for sign-in bookkeeping | Sign-ins are slow (hashing) and parallel; writing back the whole user could undo a concurrent password change, and read-modify-write would lose failed attempts. One small statement each is easy to implement atomically in any database. |
 | Few options, secure behaviour fixed | Every switch is something to understand and a way to weaken the protection. JWT is enabled by its secret, all links derive from one `BaseUrl`, one `TrustedOrigins` list serves CSRF and redirects; CSRF, reuse detection and protocol lifetimes are not configurable. |
 | EF Core stores as a package: an interface on the host's entity, not a base class or a fixed table | The host keeps its user entity, table and key type (`Guid`, `int`, `long`, `string`); SlimIdentity only needs thirteen properties besides the key. Generics are fine here – they stay inside the optional package, the core API remains generic-free. |
+| Passkeys as a package of their own | Most hosts – internal services, B2B apps – never offer passkeys; they should neither ship nor review CBOR and WebAuthn code. The package uses internals of the core instead of a public "issue a session" API that hosts could misuse, and therefore insists on the core's exact version. Own code instead of Fido2NetLib or ASP.NET Core Identity's `PasskeyHandler`: no third-party dependency, Native AOT, and the Identity handler needs a `UserManager`. |
 | Store contracts are checked by a test kit, not just documented | The guarantees that matter (atomicity, uniqueness, single use) are invisible in normal operation; `SlimIdentity.Testing` makes them verifiable against the real database. Separate package, so test code never ships to production. |
 | No password composition rules | NIST SP 800-63B: length and a breached-password check beat character classes; classic rules remain possible as an `ISlimPasswordRule`. |
 | `CreateAsync` returns `null` for a taken address | The unique index decides, not a prior lookup – concurrent registrations get the uniform answer instead of an error. |

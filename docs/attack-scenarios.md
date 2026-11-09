@@ -72,6 +72,7 @@ Test names refer to `tests/SlimIdentity.Tests` (`Integration/…`, `Unit/Propert
 | D13 | Forged passkey sign-in (origin, RP id, type, challenge, no user verification, foreign signature, foreign user handle, unknown credential) | covered – `Passkey.Forged_sign_ins_are_rejected`, `…An_unknown_passkey_is_rejected` |
 | D14 | Replayed passkey assertion, cloned authenticator (counter goes back) | covered – `Passkey.A_replayed_sign_in_is_rejected`, `…A_counter_that_goes_back_is_rejected`, conformance (`TryRecordUseAsync` single use and compare-and-set, also parallel) |
 | D15 | Stolen session adds a passkey, or removes the last way in | covered – `Passkey.Adding_a_passkey_needs_the_password_a_confirmed_address_and_no_impersonation`, `…The_last_way_in_stays_across_passkeys_and_external_logins`, `…Someone_elses_passkey_cannot_be_renamed_or_removed` |
+| D16 | Passkey of a pre-registered account survives the owner's mailbox proof; weak RSA key padded to look like 2048 bit; refused sign-in leaves a trace on the passkey | covered – `Passkey.The_registrants_passkeys_do_not_survive_the_owners_mailbox_proof`, `…a_verified_external_sign_in_of_the_owner`, `…A_weak_rsa_key_is_refused_even_when_padded_to_2048_bit`, `…An_inactive_account_and_a_vetoing_guard_get_no_session`, conformance (`RemovePasskeysAsync`). **Fixed** (external review round 3) |
 
 ## E. Workflow tokens (reset, verification, invitation, e-mail change)
 

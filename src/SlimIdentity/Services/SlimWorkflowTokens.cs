@@ -21,8 +21,6 @@ internal sealed class SlimWorkflowTokens(IDataProtectionProvider provider, TimeP
     public const string TwoFactorSetupPurpose = "SlimIdentity.TwoFactorSetup.v1";
     public const string ExternalExchangePurpose = "SlimIdentity.ExternalExchange.v1";
     public const string ExternalLinkPurpose = "SlimIdentity.ExternalLink.v1";
-    public const string PasskeyRegistrationPurpose = "SlimIdentity.PasskeyRegistration.v1";
-    public const string PasskeyLoginPurpose = "SlimIdentity.PasskeyLogin.v1";
     public const string RefreshTokenPurpose = "SlimIdentity.RefreshToken.v1";
     public const string InvitationPurpose = "SlimIdentity.Invitation.v1";
     public const string EmailChangePurpose = "SlimIdentity.EmailChange.v1";
@@ -38,17 +36,26 @@ internal sealed class SlimWorkflowTokens(IDataProtectionProvider provider, TimeP
     public static string BuildLink(string? template, string token) =>
         template is null ? token : template.Replace("{token}", Uri.EscapeDataString(token), StringComparison.Ordinal);
 
-    public string Protect<T>(string purpose, T payload, TimeSpan lifetime)
+    public string Protect<T>(string purpose, T payload, TimeSpan lifetime) => Protect(purpose, payload, lifetime, TypeInfo<T>());
+
+    /// <summary>For payloads of other SlimIdentity packages (their own source-generated context).</summary>
+    public string Protect<T>(string purpose, T payload, TimeSpan lifetime, JsonTypeInfo<T> typeInfo)
     {
         var expires = (time.GetUtcNow() + lifetime).ToUnixTimeMilliseconds();
         return provider.CreateProtector(purpose).Protect(
-            string.Concat(FormatPrefix, expires.ToString(CultureInfo.InvariantCulture), ".", JsonSerializer.Serialize(payload, TypeInfo<T>())));
+            string.Concat(FormatPrefix, expires.ToString(CultureInfo.InvariantCulture), ".", JsonSerializer.Serialize(payload, typeInfo)));
     }
 
     public bool TryUnprotect<T>(string purpose, string? token, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out T? payload) where T : class =>
-        TryUnprotect(purpose, token, out payload, out _);
+        TryUnprotect(purpose, token, TypeInfo<T>(), out payload, out _);
 
-    public bool TryUnprotect<T>(string purpose, string? token, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out T? payload, out DateTimeOffset expiresAt) where T : class
+    public bool TryUnprotect<T>(string purpose, string? token, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out T? payload, out DateTimeOffset expiresAt) where T : class =>
+        TryUnprotect(purpose, token, TypeInfo<T>(), out payload, out expiresAt);
+
+    public bool TryUnprotect<T>(string purpose, string? token, JsonTypeInfo<T> typeInfo, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out T? payload) where T : class =>
+        TryUnprotect(purpose, token, typeInfo, out payload, out _);
+
+    private bool TryUnprotect<T>(string purpose, string? token, JsonTypeInfo<T> typeInfo, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out T? payload, out DateTimeOffset expiresAt) where T : class
     {
         payload = null;
         expiresAt = default;
@@ -69,7 +76,7 @@ internal sealed class SlimWorkflowTokens(IDataProtectionProvider provider, TimeP
                 return false;
             }
 
-            payload = JsonSerializer.Deserialize(plaintext.AsSpan(separator + 1), TypeInfo<T>());
+            payload = JsonSerializer.Deserialize(plaintext.AsSpan(separator + 1), typeInfo);
             return payload is not null;
         }
         catch (Exception ex) when (ex is CryptographicException or JsonException or FormatException)
@@ -92,10 +99,6 @@ internal sealed record SlimRememberDevicePayload(string Uid, string Stamp, long 
 internal sealed record SlimEmailChangePayload(string Uid, string OldEmail, string NewEmail, string Stamp);
 internal sealed record SlimTwoFactorSetupPayload(string Uid, string Secret, string Stamp);
 /// <summary><c>CodeChallenge</c>: PKCE S256 challenge – the code is redeemable only with the matching verifier.</summary>
-/// <summary>A pending passkey registration: the challenge, bound to the account and its security stamp.</summary>
-internal sealed record SlimPasskeyRegistrationPayload(string Uid, string Stamp, string Challenge);
-/// <summary>A pending passkey sign-in: the challenge and when it was issued (unix ms – each counts once per passkey).</summary>
-internal sealed record SlimPasskeyLoginPayload(string Challenge, long IssuedAt);
 /// <summary>An external identity to be linked to the signed-in account; PKCE-bound like the exchange code.</summary>
 internal sealed record SlimExternalLinkPayload(string Provider, string ProviderKey, string Nonce, string CodeChallenge);
 internal sealed record SlimExchangePayload(string Uid, string Stamp, string Provider, string Nonce, string CodeChallenge);

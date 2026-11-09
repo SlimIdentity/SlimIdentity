@@ -10,7 +10,7 @@
 //       .AddExternalLoginStore<EfCoreExternalLoginStore>()
 //       .AddApiKeyStore<EfCoreApiKeyStore>()
 //       .AddSessionStore<EfCoreSessionStore>()
-//       .AddPasskeyStore<EfCorePasskeyStore>()           // with o.Passkeys.RelyingPartyId (or Links.BaseUrl)
+//       .AddPasskeyStore<EfCorePasskeyStore>()           // package SlimIdentity.Passkeys; relying party: Links.BaseUrl or AddPasskeys(o => …)
 //       .AddEmailSender<MailKitEmailSender>();
 
 using System.Data.Common;
@@ -440,6 +440,12 @@ public sealed class EfCorePasskeyStore(IdentityDb identity) : ISlimPasskeyStore
     {
         var (id, hash) = (Guid.Parse(userId), Hash(credentialId));
         return await db.Passkeys.Where(p => p.UserId == id && p.CredentialIdHash == hash).ExecuteDeleteAsync(ct) == 1;
+    }
+
+    public async Task RemovePasskeysAsync(string userId, CancellationToken ct)
+    {
+        if (!Guid.TryParse(userId, out var id)) return;
+        await db.Passkeys.Where(p => p.UserId == id).ExecuteDeleteAsync(ct);
     }
 
     private static SlimPasskey Map(UserPasskey p) => new()

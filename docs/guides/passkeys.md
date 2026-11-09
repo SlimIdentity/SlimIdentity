@@ -6,19 +6,25 @@ on its own** (possession of the device + biometrics / PIN), so no second factor 
 
 ## Setup
 
+Passkeys are a package of their own – the core contains no WebAuthn code:
+
+```bash
+dotnet add package SlimIdentity.Passkeys --prerelease   # always the same version as SlimIdentity
+```
+
 ```csharp
-builder.Services.AddSlimIdentity(o =>
-    {
-        o.Links.BaseUrl = "https://app.example.com";        // front end – trusted origin, and the default RP id
-        // o.Passkeys.RelyingPartyId = "example.com";        // optional: a parent domain shared by several front ends
-        // o.Passkeys.RelyingPartyName = "Example";          // shown by the authenticator (default: TwoFactor.AuthenticatorIssuer)
-    })
+builder.Services.AddSlimIdentity(o => o.Links.BaseUrl = "https://app.example.com")   // front end – trusted origin, default RP id
     .AddEntityFrameworkStores<AppDbContext, AppUser, Guid>(o => o.Passkeys = true)   // opt in; the SlimPasskeys table is always in the model
     // or .AddPasskeyStore<MyPasskeyStore>() – templates for EF Core and Dapper in samples/templates
+    .AddPasskeys(o =>                                                                // optional
+    {
+        o.RelyingPartyId = "example.com";     // a parent domain shared by several front ends (default: host of Links.BaseUrl)
+        o.RelyingPartyName = "Example";       // shown by the authenticator (default: TwoFactor.AuthenticatorIssuer)
+    });
 ```
 
 - **Opt-in** – passkeys are off until you register a passkey store (EF Core: `o.Passkeys = true`): they need the
-  decision below and a front end that offers them.
+  decision below and a front end that offers them. The package checks at start-up that it has the core's version.
 - **Relying party id (RP id)** – the domain passkeys are bound to: the front end's host or a parent domain of it.
   **Choose it once:** changing it later makes every registered passkey unusable. Without it the start fails.
 - **Origins** – the page that runs the ceremony must be a trusted origin ([`TrustedOrigins`, `Links.BaseUrl` or your
@@ -57,6 +63,11 @@ one and never removes the last way in.
 TypeScript: `addPasskey(name, password)`, `loginWithPasskey()`, `signInMethods()`, `renamePasskey(id, name)`,
 `removePasskey(id, password)`.
 
+**Taking over an account** – when the owner of an address proves the mailbox for the first time (password reset of an
+unconfirmed account, verified external sign-in), every passkey of the account is removed together with the password,
+2FA and external logins: whoever registered the address before keeps no way in. Passkeys can only be added to confirmed
+accounts anyway; this covers accounts imported or created while mail was off.
+
 ## What is checked
 
 Following Web Authentication Level 2 (§7.1 registration, §7.2 authentication):
@@ -67,9 +78,10 @@ Following Web Authentication Level 2 (§7.1 registration, §7.2 authentication):
 | Origin trusted and within the RP id | ✓ | ✓ |
 | RP id hash in the authenticator data | ✓ | ✓ |
 | User present **and** verified (biometrics / PIN) | ✓ | ✓ |
-| Public key: ES256 (P-256) or RS256 (≥ 2048 bit); credential id unique | ✓ | |
+| Public key: ES256 (P-256) or RS256 (modulus of at least 2048 bit – zero padding does not count); credential id unique | ✓ | |
 | Registration state bound to the account and its security stamp | ✓ | |
 | Signature over authenticator data + client data hash with the stored key | | ✓ |
+| Account active and (with `RequireConfirmedEmail`) confirmed – before the use is recorded | | ✓ |
 | User handle matches the passkey's owner | | ✓ |
 | Signature counter increases (if the authenticator counts) – else a cloned key is assumed | | ✓ |
 | Each challenge counts once per passkey (atomic in the store) – no replay | | ✓ |
@@ -80,6 +92,7 @@ acceptable. Ed25519 keys are not offered – .NET has no built-in support, and p
 ## Your own store
 
 `ISlimPasskeyStore` – start from the templates (`EfCorePasskeyStore`, `DapperPasskeyStore`) and verify it with
-`SlimIdentity.Testing`. Two rules matter: credential ids are unique (`AddPasskeyAsync` returns `false`, also under
-concurrency), and `TryRecordUseAsync` is a single compare-and-set statement (same counter **and** a newer challenge).
+`SlimIdentity.Testing`. Three rules matter: credential ids are unique (`AddPasskeyAsync` returns `false`, also under
+concurrency), `TryRecordUseAsync` is a single compare-and-set statement (same counter **and** a newer challenge), and
+`RemovePasskeysAsync` removes every passkey of the user (account takeover above).
 Key the table by the SHA-256 of the credential id – ids can be up to 1023 bytes, more than SQL Server allows in a key.

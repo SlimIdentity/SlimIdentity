@@ -32,8 +32,8 @@ the provided samples and verify your stores with the
 - **Server-side sessions** (optional): real per-device logout, device list, sign out everywhere.
 - **Brute-force protection**: per-client rate limiting plus progressive account lockout; uniform answers and timing
   against account enumeration; pluggable password rules (e.g. breached-password check).
-- **Passkeys**: sign-in with Face ID, fingerprint or device PIN – phishing-resistant, multi-factor on its own, no
-  user name needed; managed next to password and external logins.
+- **Passkeys** (package `SlimIdentity.Passkeys`): sign-in with Face ID, fingerprint or device PIN –
+  phishing-resistant, multi-factor on its own, no user name needed; managed next to password and external logins.
 - **2FA**: TOTP (authenticator apps), e-mail codes, recovery codes – secrets encrypted at rest, every code usable once.
 - **External login**: any ASP.NET Core OAuth/OIDC handler (Google, Microsoft Entra ID, Keycloak, …) with safe account linking.
 - **Registration with business data**: company, name, terms – validated by you, created with the account in one
@@ -104,6 +104,7 @@ Without Docker: `dotnet run --project samples/SlimIdentity.Demo` → <http://loc
 | :--- | :--- |
 | `SlimIdentity` | The endpoints, flows and security mechanisms. No database dependency; Native AOT compatible. |
 | `SlimIdentity.EntityFrameworkCore` | All stores on your `DbContext` and user entity (EF Core itself is not AOT compatible). |
+| `SlimIdentity.Passkeys` | Passkeys (WebAuthn) – optional; the core contains no WebAuthn code. Native AOT compatible. |
 | `SlimIdentity.Testing` | Conformance checks for your own store implementations – for test projects. |
 
 All packages are released together with the same version.

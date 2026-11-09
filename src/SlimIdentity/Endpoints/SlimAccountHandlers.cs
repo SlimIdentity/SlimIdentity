@@ -123,6 +123,8 @@ internal sealed class SlimAccountHandlers(
             }
             if (services.GetService<ISlimExternalLoginStore>() is { } externalLogins)
                 await externalLogins.RemoveExternalLoginsAsync(user.Id, ct);
+            if (services.GetService<ISlimPasskeySignInMethods>() is { } passkeys)
+                await passkeys.RemoveAllAsync(user.Id, ct);
             user.EmailConfirmed = true;
         }
         await store.UpdateSecurityStateAsync(user, ct);

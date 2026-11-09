@@ -1,12 +1,12 @@
 using System.Buffers.Binary;
 using System.Buffers.Text;
 using System.Formats.Cbor;
-using System.Text.Json;
+using System.Numerics;
 
-namespace SlimIdentity.Security;
+namespace SlimIdentity.Passkeys;
 
 /// <summary>
-/// The WebAuthn checks SlimIdentity needs (Web Authentication Level 2, §7.1 registration, §7.2 authentication):
+/// The WebAuthn checks SlimIdentity.Passkeys needs (Web Authentication Level 2, §7.1 registration, §7.2 authentication):
 /// client data, authenticator data, COSE public keys (ES256, RS256) and assertion signatures. Attestation statements
 /// are not evaluated – SlimIdentity requests <c>attestation: "none"</c> and does not trust authenticator models.
 /// </summary>
@@ -159,7 +159,10 @@ internal static class SlimWebAuthn
 
         if (kty == 2 && alg == Es256 && crv == 1 && minus2 is { Length: 32 } && minus3 is { Length: 32 })
             return ECDsa.Create(new ECParameters { Curve = ECCurve.NamedCurves.nistP256, Q = new ECPoint { X = minus2, Y = minus3 } });
-        if (kty == 3 && alg == Rs256 && minus1 is { Length: >= 256 } && minus2 is { Length: > 0 })
+        // the bit length of the modulus counts, not its encoded length: zero bytes in front would pass a weak key off
+        // as 2048 bit (RSA.KeySize only counts the bytes)
+        if (kty == 3 && alg == Rs256 && minus1 is not null && minus2 is { Length: > 0 }
+            && new BigInteger(minus1, isUnsigned: true, isBigEndian: true).GetBitLength() >= 2048)
         {
             var rsa = RSA.Create();
             rsa.ImportParameters(new RSAParameters { Modulus = minus1, Exponent = minus2 });

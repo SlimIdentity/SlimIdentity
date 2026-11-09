@@ -1,20 +1,24 @@
 using System.Buffers.Text;
 using SlimIdentity.Contracts;
+using SlimIdentity.Diagnostics;
+using SlimIdentity.Endpoints;
 using SlimIdentity.Http;
 using SlimIdentity.Security;
 using SlimIdentity.Services;
 
-namespace SlimIdentity.Endpoints;
+namespace SlimIdentity.Passkeys;
 
 /// <summary>
 /// Passkeys (WebAuthn): registration for the signed-in account, sign-in without a user name (discoverable
-/// credentials), renaming. Every check of Web Authentication Level 2 §7.1/§7.2 that matters without attestation:
-/// type, challenge, origin, RP id hash, user presence and verification, algorithm, signature, counter, single use.
+/// credentials), renaming and removal. Every check of Web Authentication Level 2 §7.1/§7.2 that matters without
+/// attestation: type, challenge, origin, RP id hash, user presence and verification, algorithm, signature, counter,
+/// single use.
 /// </summary>
 internal sealed class SlimPasskeyHandlers(
     ISlimPasskeyStore passkeys,
     ISlimUserStore store,
     SlimAccountHandlers account,
+    SlimSignInMethodHandlers signInMethods,
     SlimCredentialService credentials,
     SlimLoginHandlers login,
     SlimAuthManager authManager,
@@ -22,6 +26,7 @@ internal sealed class SlimPasskeyHandlers(
     SlimHookRunner hooks,
     SlimMetrics metrics,
     IOptions<SlimIdentityOptions> options,
+    IOptions<SlimPasskeyOptions> passkeyOptions,
     TimeProvider time,
     IServiceProvider services,
     IHttpContextAccessor httpContextAccessor,
@@ -32,8 +37,8 @@ internal sealed class SlimPasskeyHandlers(
 
     private SlimIdentityOptions O => options.Value;
     private HttpContext Http => httpContextAccessor.HttpContext!;
-    private string RpId => O.Passkeys.EffectiveRelyingPartyId(O.Links)
-        ?? throw new InvalidOperationException("SlimIdentity: set Passkeys.RelyingPartyId (or Links.BaseUrl).");
+    private string RpId => passkeyOptions.Value.EffectiveRelyingPartyId(O.Links)
+        ?? throw new InvalidOperationException("SlimIdentity: set the relying party id of the passkeys (or Links.BaseUrl).");
 
     // ------------------------------------------------------------------ registration (signed in)
 
@@ -45,16 +50,16 @@ internal sealed class SlimPasskeyHandlers(
         if (O.Email.Enabled && !user.EmailConfirmed)
             return SlimResults.Status("email_not_confirmed", "Confirm your e-mail address before adding a passkey.", StatusCodes.Status403Forbidden);
         // a new way in: a stolen session alone must not add one
-        if (HasPassword(user) && await credentials.ConfirmPasswordAsync(user, request?.Password, Http, ct) is { } failure)
+        if (signInMethods.HasPassword(user) && await credentials.ConfirmPasswordAsync(user, request?.Password, Http, ct) is { } failure)
             return failure;
 
         var challenge = SlimWebAuthn.NewChallenge();
         var existing = await passkeys.GetPasskeysAsync(user.Id, ct);
-        var state = workflow.Protect(SlimWorkflowTokens.PasskeyRegistrationPurpose,
-            new SlimPasskeyRegistrationPayload(user.Id, user.SecurityStamp, challenge), CeremonyLifetime);
+        var state = workflow.Protect(SlimPasskeyPurposes.Registration, new SlimPasskeyRegistrationPayload(user.Id, user.SecurityStamp, challenge),
+            CeremonyLifetime, SlimPasskeyJsonContext.Default.SlimPasskeyRegistrationPayload);
 
         return Results.Ok(new SlimPasskeyCreationOptionsResponse(new SlimPasskeyCreationOptions(
-            new SlimPasskeyRelyingParty(RpId, O.Passkeys.RelyingPartyName ?? O.TwoFactor.AuthenticatorIssuer),
+            new SlimPasskeyRelyingParty(RpId, passkeyOptions.Value.RelyingPartyName ?? O.TwoFactor.AuthenticatorIssuer),
             new SlimPasskeyUser(Base64Url.EncodeToString(Encoding.UTF8.GetBytes(user.Id)), user.Email, user.Email),
             challenge,
             [new(PublicKey, SlimWebAuthn.Es256), new(PublicKey, SlimWebAuthn.Rs256)],
@@ -71,20 +76,20 @@ internal sealed class SlimPasskeyHandlers(
         if (user is null) return error!;
 
         if (request?.Credential is not { Type: PublicKey } credential
-            || !workflow.TryUnprotect<SlimPasskeyRegistrationPayload>(SlimWorkflowTokens.PasskeyRegistrationPurpose, request.State, out var state)
+            || !workflow.TryUnprotect(SlimPasskeyPurposes.Registration, request.State, SlimPasskeyJsonContext.Default.SlimPasskeyRegistrationPayload, out var state)
             || !string.Equals(state.Uid, user.Id, StringComparison.Ordinal)
             || !SlimUser.IsSameSecurityState(state.Stamp, user.SecurityStamp))
             return Rejected("registration", "state");
 
         // §7.1 steps 5–14: client data
-        var clientDataJson = SlimWebAuthn.FromBase64Url(credential.Response.ClientDataJson);
+        var clientDataJson = SlimWebAuthn.FromBase64Url(credential.Response?.ClientDataJson);
         if (clientDataJson is null || SlimWebAuthn.ParseClientData(clientDataJson) is not { } clientData) return Rejected("registration", "client data");
         if (clientData.Type != "webauthn.create") return Rejected("registration", "type");
         if (!SlimHashing.FixedTimeEquals(clientData.Challenge, state.Challenge)) return Rejected("registration", "challenge");
         if (!OriginAllowed(clientData)) return Rejected("registration", "origin");
 
         // §7.1 steps 15–21: authenticator data (attestation statement not evaluated: attestation "none")
-        var attestation = SlimWebAuthn.FromBase64Url(credential.Response.AttestationObject);
+        var attestation = SlimWebAuthn.FromBase64Url(credential.Response!.AttestationObject);
         if (attestation is null || SlimWebAuthn.AuthenticatorDataOfAttestation(attestation) is not { } authDataBytes
             || SlimWebAuthn.ParseAuthenticatorData(authDataBytes) is not { CredentialId: { } credentialId, CredentialPublicKey: { } publicKey } authData)
             return Rejected("registration", "authenticator data");
@@ -116,8 +121,8 @@ internal sealed class SlimPasskeyHandlers(
     public IResult LoginOptions()
     {
         var challenge = SlimWebAuthn.NewChallenge();
-        var state = workflow.Protect(SlimWorkflowTokens.PasskeyLoginPurpose,
-            new SlimPasskeyLoginPayload(challenge, time.GetUtcNow().ToUnixTimeMilliseconds()), CeremonyLifetime);
+        var state = workflow.Protect(SlimPasskeyPurposes.Login, new SlimPasskeyLoginPayload(challenge, time.GetUtcNow().ToUnixTimeMilliseconds()),
+            CeremonyLifetime, SlimPasskeyJsonContext.Default.SlimPasskeyLoginPayload);
         return Results.Ok(new SlimPasskeyRequestOptionsResponse(
             new SlimPasskeyRequestOptions(challenge, RpId, (int)CeremonyLifetime.TotalMilliseconds, "required", []), state));
     }
@@ -125,19 +130,19 @@ internal sealed class SlimPasskeyHandlers(
     public async Task<IResult> LoginAsync(SlimPasskeyLoginRequest? request, bool? useCookies, CancellationToken ct)
     {
         if (!SlimModes.TryResolve(O, useCookies, out var cookies, out var modeError)) return modeError!;
-        if (request?.Credential is not { Type: PublicKey } credential
-            || !workflow.TryUnprotect<SlimPasskeyLoginPayload>(SlimWorkflowTokens.PasskeyLoginPurpose, request.State, out var state))
+        if (request?.Credential is not { Type: PublicKey, Response: { } response } credential
+            || !workflow.TryUnprotect(SlimPasskeyPurposes.Login, request.State, SlimPasskeyJsonContext.Default.SlimPasskeyLoginPayload, out var state))
             return Failed("state");
 
         // §7.2 steps 10–15: client data
-        var clientDataJson = SlimWebAuthn.FromBase64Url(credential.Response.ClientDataJson);
+        var clientDataJson = SlimWebAuthn.FromBase64Url(response.ClientDataJson);
         if (clientDataJson is null || SlimWebAuthn.ParseClientData(clientDataJson) is not { } clientData) return Failed("client data");
         if (clientData.Type != "webauthn.get") return Failed("type");
         if (!SlimHashing.FixedTimeEquals(clientData.Challenge, state.Challenge)) return Failed("challenge");
         if (!OriginAllowed(clientData)) return Failed("origin");
 
         // §7.2 steps 16–18: authenticator data
-        var authDataBytes = SlimWebAuthn.FromBase64Url(credential.Response.AuthenticatorData);
+        var authDataBytes = SlimWebAuthn.FromBase64Url(response.AuthenticatorData);
         if (authDataBytes is null || SlimWebAuthn.ParseAuthenticatorData(authDataBytes) is not { } authData) return Failed("authenticator data");
         if (!SlimWebAuthn.IsForRelyingParty(authData, RpId)) return Failed("rp id");
         if (!authData.UserPresent || !authData.UserVerified) return Failed("user verification");
@@ -146,12 +151,12 @@ internal sealed class SlimPasskeyHandlers(
         if (SlimWebAuthn.FromBase64Url(credential.RawId) is not { } credentialId
             || await passkeys.FindPasskeyAsync(credentialId, ct) is not { } passkey)
             return Failed("unknown credential");
-        if (credential.Response.UserHandle is { Length: > 0 } handle
+        if (response.UserHandle is { Length: > 0 } handle
             && !string.Equals(handle, Base64Url.EncodeToString(Encoding.UTF8.GetBytes(passkey.UserId)), StringComparison.Ordinal))
             return Failed("user handle");
 
         // §7.2 step 20: the signature
-        var signature = SlimWebAuthn.FromBase64Url(credential.Response.Signature);
+        var signature = SlimWebAuthn.FromBase64Url(response.Signature);
         if (signature is null || !SlimWebAuthn.VerifySignature(passkey.PublicKey, authDataBytes, clientDataJson, signature))
             return Failed("signature");
 
@@ -162,14 +167,15 @@ internal sealed class SlimPasskeyHandlers(
             return Failed("counter");
         }
 
-        // single use, atomically: this challenge must be newer than the last one used with this passkey
-        if (!await passkeys.TryRecordUseAsync(credentialId, passkey.SignCount, authData.SignCount, state.IssuedAt, time.GetUtcNow(), ct))
-            return Failed("replay");
-
+        // the account before anything is recorded: an inactive or unconfirmed account leaves no trace on its passkey
         var user = await store.FindByIdAsync(passkey.UserId, ct);
         if (user is not { IsActive: true }) return Failed("account");
         if (O.SignIn.RequireConfirmedEmail && !user.EmailConfirmed)
             return SlimResults.Status("email_not_confirmed", "The e-mail address has not been confirmed yet.", StatusCodes.Status403Forbidden);
+
+        // single use, atomically: this challenge must be newer than the last one used with this passkey
+        if (!await passkeys.TryRecordUseAsync(credentialId, passkey.SignCount, authData.SignCount, state.IssuedAt, time.GetUtcNow(), ct))
+            return Failed("replay");
 
         // possession + user verification: multi-factor on its own – no second factor follows
         var result = await authManager.SignInCoreAsync(user, cookies, request.RememberMe, SlimAuthManager.MethodPasskey, null, null, true, ct);
@@ -184,7 +190,7 @@ internal sealed class SlimPasskeyHandlers(
         }
     }
 
-    // ------------------------------------------------------------------ rename
+    // ------------------------------------------------------------------ sign-in methods: rename, remove
 
     public async Task<IResult> RenameAsync(SlimPasskeyRenameRequest? request, CancellationToken ct)
     {
@@ -192,15 +198,43 @@ internal sealed class SlimPasskeyHandlers(
         if (user is null) return error!;
         if (CleanName(request?.Name) is not { } name)
             return SlimResults.BadRequest("invalid_name", "The name must have 1–64 characters.");
-        return SlimWebAuthn.FromBase64Url(request!.Id) is { } id && await passkeys.RenamePasskeyAsync(user.Id, id, name, ct)
+        return SlimWebAuthn.FromBase64Url(request?.Id) is { } id && await passkeys.RenamePasskeyAsync(user.Id, id, name, ct)
             ? SlimResults.Status("passkey_renamed")
-            : SlimResults.Status("passkey_not_found", "This passkey is not registered for your account.", StatusCodes.Status404NotFound);
+            : NotFound();
+    }
+
+    public async Task<IResult> RemoveAsync(SlimRemovePasskeyRequest? request, CancellationToken ct)
+    {
+        var (user, error) = await account.LoadCurrentUserAsync(forbidImpersonation: true, ct);
+        if (user is null) return error!;
+        if (SlimWebAuthn.FromBase64Url(request?.Id) is not { } id) return NotFound();
+        if (!(await passkeys.GetPasskeysAsync(user.Id, ct)).Any(p => p.CredentialId.AsSpan().SequenceEqual(id))) return NotFound();
+
+        if (signInMethods.HasPassword(user))
+        {
+            // the password stays a way in – confirming it is what keeps a stolen session from cutting the owner's methods
+            if (await credentials.ConfirmPasswordAsync(user, request?.Password, Http, ct) is { } failure) return failure;
+            if (!await passkeys.RemovePasskeyAsync(user.Id, id, ct)) return NotFound();
+        }
+        else
+        {
+            // no password: passkeys and external logins are the only ways in – check and remove as one step per account
+            using var attempt = await credentials.TryEnterAttemptAsync(user.Id, ct);
+            if (attempt is null) return SlimSignInMethodHandlers.LastMethod();
+            var remaining = await passkeys.GetPasskeysAsync(user.Id, ct);
+            if (!remaining.Any(p => p.CredentialId.AsSpan().SequenceEqual(id))) return NotFound();
+            var external = services.GetService<ISlimExternalLoginStore>() is { } externalStore
+                ? (await externalStore.GetExternalLoginsAsync(user.Id, ct)).Count : 0;
+            if (remaining.Count + external <= 1) return SlimSignInMethodHandlers.LastMethod();
+            if (!await passkeys.RemovePasskeyAsync(user.Id, id, ct)) return NotFound();
+        }
+
+        Log.PasskeyRemoved(logger, user.Id);
+        await hooks.RaiseAsync(SlimEventTypes.PasskeyRemoved, user.Id, SlimAuthManager.MethodPasskey, ct: ct);
+        return SlimResults.Status("passkey_removed");
     }
 
     // ------------------------------------------------------------------ helpers
-
-    private bool HasPassword(SlimUser user) =>
-        !string.IsNullOrEmpty(user.PasswordHash) || services.GetService<ISlimCustomPasswordValidator>() is not null;
 
     /// <summary>The page that ran the ceremony: trusted (origin policy, or the API's own origin) and within the RP id.</summary>
     private bool OriginAllowed(SlimWebAuthn.ClientData clientData)
@@ -216,6 +250,9 @@ internal sealed class SlimPasskeyHandlers(
         var trimmed = name?.Trim();
         return string.IsNullOrEmpty(trimmed) || trimmed.Length > 64 || trimmed.Any(char.IsControl) ? null : trimmed;
     }
+
+    private static IResult NotFound() =>
+        SlimResults.Status("passkey_not_found", "This passkey is not registered for your account.", StatusCodes.Status404NotFound);
 
     private IResult Rejected(string ceremony, string reason)
     {

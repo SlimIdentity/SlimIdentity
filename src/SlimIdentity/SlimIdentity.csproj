@@ -25,6 +25,8 @@
   <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
     <InternalsVisibleTo Include="SlimIdentity.Tests" />
+    <!-- the other packages of this repository, always released with the same version (they check it at start-up) -->
+    <InternalsVisibleTo Include="SlimIdentity.Passkeys" />
   </ItemGroup>
 
 </Project>

@@ -99,5 +99,21 @@ internal static class PasskeyStoreChecks
                 Expect.True(await stores.UseAsync<ISlimPasskeyStore, bool>(s => s.RemovePasskeyAsync(user.Id, passkey.CredentialId, ct)), "remove refused");
                 Expect.True(await stores.UseAsync<ISlimPasskeyStore, SlimPasskey?>(s => s.FindPasskeyAsync(passkey.CredentialId, ct)) is null, "The removed passkey is still found.");
             });
+
+        await run.CheckAsync(Store, "RemovePasskeysAsync removes every passkey of its user only",
+            "DELETE … WHERE user_id = @userId (the owner proved the mailbox: the registrant's passkeys go).",
+            async () =>
+            {
+                var user = await run.NewUserAsync();
+                var other = await run.NewUserAsync();
+                var (a, b, c) = (NewPasskey(user.Id), NewPasskey(user.Id), NewPasskey(other.Id));
+                foreach (var p in new[] { a, b, c }) await stores.UseAsync<ISlimPasskeyStore, bool>(s => s.AddPasskeyAsync(p, ct));
+
+                await stores.UseAsync<ISlimPasskeyStore>(s => s.RemovePasskeysAsync(user.Id, ct));
+
+                Expect.Equal(0, (await stores.UseAsync<ISlimPasskeyStore, IReadOnlyList<SlimPasskey>>(s => s.GetPasskeysAsync(user.Id, ct))).Count, "passkeys of the user");
+                Expect.True(await stores.UseAsync<ISlimPasskeyStore, SlimPasskey?>(s => s.FindPasskeyAsync(a.CredentialId, ct)) is null, "A removed passkey is still found.");
+                Expect.Equal(1, (await stores.UseAsync<ISlimPasskeyStore, IReadOnlyList<SlimPasskey>>(s => s.GetPasskeysAsync(other.Id, ct))).Count, "passkeys of another user (must stay)");
+            });
     }
 }

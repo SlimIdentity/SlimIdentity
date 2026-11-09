@@ -90,11 +90,13 @@ First public release (1.0.0) in preparation.
   `ISlimAuthManager.RegisterAsync` gives host endpoints every rule of `/register` (validation, guards, uniform answer
   and mails, event). **Breaking:** `ISlimUserStore.CreateAsync(SlimNewUser, ct)` replaces `(email, passwordHash, ct)`;
   EF Core package `ISlimUserFactory<TUser>.Create(SlimNewUser)` (refuses a profile without a factory).
-- Passkeys (WebAuthn), opt-in: `ISlimPasskeyStore` (EF Core package table `SlimPasskeys`, `o.Passkeys = true`; EF Core and Dapper
+- Passkeys (WebAuthn), opt-in, in the separate package `SlimIdentity.Passkeys` (the core contains no WebAuthn code;
+  `AddPasskeyStore<T>()`, `AddPasskeys(o => …)`; checks at start-up that it has the core's version):
+  `ISlimPasskeyStore` (EF Core package table `SlimPasskeys`, `o.Passkeys = true`; EF Core and Dapper
   templates; conformance checks), registration for signed-in users (password, confirmed address), sign-in without user
   name (`amr: passkey`, multi-factor on its own), rename / remove in the sign-in methods with last-method protection.
   ES256 and RS256, every check of WebAuthn Level 2 §7.1/§7.2 without attestation, atomic single use per challenge,
-  clone detection by counter. Options `Passkeys.RelyingPartyId` / `RelyingPartyName`; TypeScript `addPasskey`,
+  clone detection by counter. Options `RelyingPartyId` / `RelyingPartyName` (`AddPasskeys`); TypeScript `addPasskey`,
   `loginWithPasskey`, `renamePasskey`, `removePasskey`. No third-party dependency (`System.Formats.Cbor` is part of
   ASP.NET Core).
 - Sign-in methods: `GET /auth/sign-in-methods` (password, linked external logins) and
@@ -145,6 +147,14 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
   `completeLink`). **Breaking** for users who relied on automatic linking of password accounts.
 - A second factor requires a confirmed address (`403 email_not_confirmed`, not with `WithoutEmail()`): neither can a
   registrant plant one, nor can a password reset through a compromised mailbox strip one from a legitimate user.
+
+### Security (external review round 3)
+
+- The first proof of the mailbox (password reset of an unconfirmed account, verified external sign-in) also removes
+  the account's passkeys – relevant for accounts imported or created while mail was off. `ISlimPasskeyStore` gains
+  `RemovePasskeysAsync` (checked by the conformance kit). **Breaking** for passkey stores.
+- RS256 passkeys need a modulus of at least 2048 bit; a weak key zero-padded to 256 bytes is refused.
+- A passkey sign-in checks the account (active, confirmed) before it records the use on the passkey.
 
 ### Fixed
 

@@ -8,7 +8,7 @@
 //       .AddSessionStore<DapperSessionStore>()
 //       .AddTwoFactorStore<DapperTwoFactorStore>()
 //       .AddExternalLoginStore<DapperExternalLoginStore>()
-//       .AddPasskeyStore<DapperPasskeyStore>()
+//       .AddPasskeyStore<DapperPasskeyStore>()             // package SlimIdentity.Passkeys
 //       .AddApiKeyStore<DapperApiKeyStore>();
 
 using System.Security.Claims;
@@ -416,6 +416,14 @@ public sealed class DapperPasskeyStore(NpgsqlDataSource db) : ISlimPasskeyStore
         return await c.ExecuteAsync(new CommandDefinition(
             "DELETE FROM passkeys WHERE credential_id_hash = @hash AND user_id = @userId::uuid",
             new { hash = Hash(credentialId), userId }, cancellationToken: ct)) == 1;
+    }
+
+    public async Task RemovePasskeysAsync(string userId, CancellationToken ct)
+    {
+        if (!Guid.TryParse(userId, out _)) return;
+        await using var c = await db.OpenConnectionAsync(ct);
+        await c.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM passkeys WHERE user_id = @userId::uuid", new { userId }, cancellationToken: ct));
     }
 
     private static SlimPasskey Map(Row r) => new()

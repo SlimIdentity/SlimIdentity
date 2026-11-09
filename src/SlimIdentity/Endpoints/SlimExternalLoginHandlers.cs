@@ -139,6 +139,8 @@ internal sealed class SlimExternalLoginHandlers(
                     // with the verified owner. Remove the password, every linked identity and every session; the owner
                     // can set a password later via reset.
                     await externalStore.RemoveExternalLoginsAsync(existing.Id, ct);
+                    if (services.GetService<ISlimPasskeySignInMethods>() is { } passkeys)
+                        await passkeys.RemoveAllAsync(existing.Id, ct);
                     existing.EmailConfirmed = true;
                     existing.PasswordHash = string.Empty;
                     existing.SecurityStamp = SlimUser.NewSecurityStamp();

@@ -17,9 +17,9 @@ public sealed class SoftwarePasskey : IDisposable
     private readonly ECDsa? _ec;
     private readonly RSA? _rsa;
 
-    public SoftwarePasskey(bool rsa = false)
+    public SoftwarePasskey(bool rsa = false, int rsaBits = 2048)
     {
-        if (rsa) _rsa = RSA.Create(2048); else _ec = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        if (rsa) _rsa = RSA.Create(rsaBits); else _ec = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         CredentialId = RandomNumberGenerator.GetBytes(16);
     }
 
@@ -130,7 +130,8 @@ public sealed class SoftwarePasskey : IDisposable
             w.WriteStartMap(4);
             w.WriteInt32(1); w.WriteInt32(3);        // kty: RSA
             w.WriteInt32(3); w.WriteInt32(-257);     // alg: RS256
-            w.WriteInt32(-1); w.WriteByteString(p.Modulus!);
+            // a modulus shorter than 256 bytes is sent zero-padded – a weak key that looks like 2048 bit
+            w.WriteInt32(-1); w.WriteByteString(p.Modulus!.Length >= 256 ? p.Modulus : [.. new byte[256 - p.Modulus.Length], .. p.Modulus]);
             w.WriteInt32(-2); w.WriteByteString(p.Exponent!);
         }
         w.WriteEndMap();
@@ -176,6 +177,13 @@ public sealed class TestPasskeyStore : ISlimPasskeyStore
         if (!_keys.TryGetValue(Key(credentialId), out var p) || p.UserId != userId) return Task.FromResult(false);
         p.Name = name;
         return Task.FromResult(true);
+    }
+
+    public Task RemovePasskeysAsync(string userId, CancellationToken ct)
+    {
+        foreach (var (id, p) in _keys)
+            if (p.UserId == userId) _keys.TryRemove(id, out _);
+        return Task.CompletedTask;
     }
 
     public Task<bool> RemovePasskeyAsync(string userId, byte[] credentialId, CancellationToken ct) =>

@@ -81,8 +81,6 @@ All defaults are the secure choice. The options are listed in three tiers – mo
 | `ExternalLogin.DefaultReturnUrl` | `/` | Redirect target without `returnUrl`. |
 | `Email.SendInBackground` | `true` | Verification, reset, "account exists" and lockout mails are queued (uniform response times). Turn off only with an outbox sender. |
 | `Email.QueueCapacity` | `1000` | Mails beyond this are dropped and logged. |
-| `Passkeys.RelyingPartyId` | host of `Links.BaseUrl` | Domain passkeys are bound to (front-end host or a parent domain). Required with a passkey store; never change it later. |
-| `Passkeys.RelyingPartyName` | `TwoFactor.AuthenticatorIssuer` | Name shown by the authenticator. |
 | `TwoFactor.AllowEmailCodes` | `true` | 6-digit codes by e-mail as second factor. `false` leaves authenticator apps only (e-mail is the weakest factor); always off with `WithoutEmail()`. |
 
 ## Fixed by design
@@ -152,7 +150,7 @@ If the old secret leaked, do not list it in `PreviousJwtSecrets` – every token
 | `AddSessionStore<T>()` | Server-side sessions, `/sessions`. |
 | `AddTwoFactorStore<T>()` | `/login/2fa`, `/2fa/*`. |
 | `AddExternalLoginStore<T>()` | `/login/{provider}`, `/login/external/exchange`. |
-| `AddPasskeyStore<T>()` | Passkeys: `/passkeys/*` – [guide](guides/passkeys.md). |
+| `AddPasskeyStore<T>()` / `AddPasskeys(o => …)` | Package `SlimIdentity.Passkeys`: `/passkeys/*` – [guide](guides/passkeys.md). Options `RelyingPartyId` (default: host of `Links.BaseUrl`; never change it later) and `RelyingPartyName` (default: `TwoFactor.AuthenticatorIssuer`). |
 | `AddApiKeyStore<T>()` | `X-API-Key` authentication. |
 | `AddConfigurationApiKeys(section)` | `X-API-Key` authentication for a fixed set of clients from configuration (hashes, scopes, roles, expiry) – no database. |
 | `AddCustomPasswordValidator<T>()` | LDAP / legacy password check. |

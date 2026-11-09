@@ -83,7 +83,7 @@ Links are created by the host with `ISlimAuthManager.CreateInvitationAsync` – 
 | `GET /sessions` 🔒 | `200` list of `id`, `mode`, `authenticationMethod`, `isCurrent`, `isImpersonation`, `createdUtc`, `lastSeenUtc`, `expiresUtc`, `userAgent`, `ipAddress` | `401` |
 | `DELETE /sessions/{id}` 🔒 | `200 session_revoked` (revoking the current one also deletes the cookie) | `404 session_not_found`, `403 not_allowed_while_impersonating` |
 
-## Passkeys (`ISlimPasskeyStore`)
+## Passkeys (package `SlimIdentity.Passkeys`, `ISlimPasskeyStore`)
 
 | Endpoint | Body | Success | Errors |
 | :--- | :--- | :--- | :--- |

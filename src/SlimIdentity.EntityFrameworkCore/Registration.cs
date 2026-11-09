@@ -15,7 +15,8 @@ public sealed class SlimEntityFrameworkOptions
     public bool ExternalLogins { get; set; } = true;
     /// <summary>
     /// <see cref="ISlimPasskeyStore"/>: passkeys (<c>/passkeys/*</c>). Default <c>false</c> – opt in deliberately: passkeys
-    /// need a relying party id that can never change (<c>Passkeys.RelyingPartyId</c>) and a front end that offers them.
+    /// need a relying party id that can never change (<c>AddPasskeys(o =&gt; o.RelyingPartyId = …)</c> or
+    /// <c>Links.BaseUrl</c>) and a front end that offers them.
     /// The <c>SlimPasskeys</c> table is part of the model either way, so switching them on needs no migration.
     /// </summary>
     public bool Passkeys { get; set; }

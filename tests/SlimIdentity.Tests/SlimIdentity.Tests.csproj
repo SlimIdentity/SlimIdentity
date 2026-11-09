@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\SlimIdentity\SlimIdentity.csproj" />
+    <ProjectReference Include="..\..\src\SlimIdentity.Passkeys\SlimIdentity.Passkeys.csproj" />
     <ProjectReference Include="..\..\src\SlimIdentity.Testing\SlimIdentity.Testing.csproj" />
   </ItemGroup>
 
