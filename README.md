@@ -22,36 +22,47 @@ the provided samples and verify your stores with the
 > independently audited yet. Please report security issues privately – see
 > [SECURITY.md](https://github.com/timmkautz/slimidentity/blob/main/SECURITY.md).
 
-## Features
+## In the box – the five-minute setup
+
+What `AddSlimIdentity()` + `MapSlimIdentityApi()` give you, with the EF Core package or one store of your own:
 
 - **Your database, your user entity** – the `SlimIdentity.EntityFrameworkCore` package stores everything in your
   `DbContext` (verified on SQLite, PostgreSQL and SQL Server); any other database via one interface
   (`ISlimUserStore`, ready-to-copy for Dapper). The core package has no database dependency at all.
 - **Cookies or JWT** per request: HttpOnly/Secure/SameSite cookies with CSRF protection, or access + refresh tokens
   with rotation, reuse detection and an absolute session lifetime.
-- **Server-side sessions** (optional): real per-device logout, device list, sign out everywhere.
+- **Server-side sessions**: real per-device logout, device list, sign out everywhere (EF Core package: included; own
+  stores: `ISlimSessionStore`).
+- **The account flows**: registration, e-mail verification, password reset and change, e-mail change – stateless,
+  single-use links.
 - **Brute-force protection**: per-client rate limiting plus progressive account lockout; uniform answers and timing
   against account enumeration; pluggable password rules (e.g. breached-password check).
-- **Passkeys** (package `SlimIdentity.Passkeys`): sign-in with Face ID, fingerprint or device PIN –
-  phishing-resistant, multi-factor on its own, no user name needed; managed next to password and external logins.
 - **2FA**: TOTP (authenticator apps), e-mail codes, recovery codes – secrets encrypted at rest, every code usable once.
-- **External login**: any ASP.NET Core OAuth/OIDC handler (Google, Microsoft Entra ID, Keycloak, …) with safe account linking.
-- **Registration with business data**: company, name, terms – validated by you, created with the account in one
-  transaction (or not at all).
-- **Workflows**: registration, e-mail verification, password reset/change, e-mail change, invitations – stateless,
-  single-use links.
-- **Admin tooling**: impersonation, step-up "sudo" mode, bans, start passwords with forced change, reset links,
-  2FA reset, API keys for machine-to-machine access.
-- **With or without mail**: localized mails with full context for your templates – or `WithoutEmail()` for internal
-  services where an administrator manages the accounts.
 - **Your database stays boring**: it only ever sees hashes and ciphertext – no usable tokens, codes or 2FA secrets.
 - **Framework native**: built-in cookie/JWT handlers, `PasswordHasher`, Data Protection and rate limiter;
-  `[Authorize]` and policies just work. Full OpenAPI metadata for client generation.
-- **Observable**: OpenTelemetry-ready metrics and structured logs with stable event ids – no extra dependency.
-- **Multi-tenant ready**: scoped stores keep tenants apart; trusted origins, CORS and mail links per tenant domain.
-- **Extensible, never weaker**: guards for sessions and registrations (tenants, IP allow-lists, company domains) and
-  security events for your audit trail – hooks can only tighten the flow.
-- **Native AOT** and trimming compatible; options validated at startup.
+  `[Authorize]` and policies just work. Full OpenAPI metadata, a TypeScript client to copy.
+- **Observable and lean**: OpenTelemetry-ready metrics, structured logs with stable event ids, Native AOT, options
+  validated at startup.
+
+## Switch on when you need it
+
+Each one is a line of configuration – nothing of it runs, or has to be understood, before you add it:
+
+| Capability | Add | Guide |
+| :--- | :--- | :--- |
+| Sign-in with Google, Entra ID, Keycloak, … | an OAuth/OIDC handler on `.Authentication` | [external login](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/external-login.md) |
+| Passkeys (Face ID, fingerprint, device PIN) | package `SlimIdentity.Passkeys` | [passkeys](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/passkeys.md) |
+| Business data at registration | `.AddRegistrationProfile<T>()` | [registration with business data](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/registration-profile.md) |
+| Invitations, start passwords, reset links, impersonation, sudo mode | `ISlimAuthManager` in your admin endpoints | [admin features](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/admin-features.md) |
+| Internal services without a mail server | `.WithoutEmail()` | [without e-mail](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/without-email.md) |
+| Tenants with their own domains | `.AddOriginPolicy<T>()`, `.AddLinkBuilder<T>()`, `.AddCorsPolicy()` | [multi-tenancy](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/multi-tenancy.md) |
+| Vetoes and an audit trail (tenants, IP allow-lists, company domains) | `.AddSignInGuard<T>()`, `.AddEventObserver<T>()` | [hooks](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/hooks.md) |
+| Sessions ended by the company's identity provider | `.AddBackChannelLogout(…)` | [external login](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/external-login.md) |
+| API keys for machine-to-machine calls | `.AddApiKeyStore<T>()` | [admin features](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/admin-features.md) |
+| LDAP / Active Directory, legacy password hashes | `.AddCustomPasswordValidator<T>()` | [LDAP](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/ldap-and-legacy-passwords.md) |
+| Smart cards and client certificates | a template to copy | [client certificates](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/client-certificates.md) |
+
+Hooks can only tighten the flow: a guard can refuse, an observer can only watch – none of them can skip a check.
 
 **Not an identity provider.** SlimIdentity signs users in to *your* application. It issues no tokens for other
 applications and has no consent screens, client registration or discovery document. For single sign-on across several
@@ -124,6 +135,7 @@ All packages are released together with the same version.
   [passkeys](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/passkeys.md) ·
   [external login](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/external-login.md) ·
   [registration with business data](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/registration-profile.md) ·
+  [the first administrator](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/seeding.md) ·
   [invitations](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/invitations.md) ·
   [admin features](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/admin-features.md) ·
   [without e-mail](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/without-email.md) ·
@@ -145,6 +157,7 @@ All packages are released together with the same version.
 After 1.0, roughly in this order – nothing here needs a breaking change:
 
 - Device-bound tokens (DPoP) for bearer clients.
+- Passkeys: accounts with a passkey only (registration without a password); a relying party per tenant domain.
 - API-key entity in the EF Core package; npm package of the TypeScript client if there is demand.
 
 ## Contributing

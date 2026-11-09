@@ -57,11 +57,13 @@ public sealed class EfCoreUserStore(IdentityDb identity) : ISlimUserStore
         }
         catch (DbUpdateException)
         {
-            // unique index on NormalizedEmail: a concurrent registration took the address – any other error is rethrown
-            db.Entry(user).State = EntityState.Detached;
+            // unique index on NormalizedEmail: a concurrent registration took the address – any other error is rethrown.
+            // Nothing was written: forget the account and whatever profile entities came with it.
+            db.ChangeTracker.Clear();
             if (await IsEmailTakenAsync(user.NormalizedEmail, null, ct)) return null;
             throw;
         }
+        db.ChangeTracker.Clear();   // the stores' own context: nothing stays tracked for later calls in this scope
         return Map(user);
     }
 
@@ -185,6 +187,7 @@ public sealed class EfCoreRefreshTokenStore(IdentityDb identity, TimeProvider ti
     {
         db.RefreshTokens.Add(new RefreshToken { TokenHash = tokenHash, UserId = Guid.Parse(userId), ExpiresAt = expiresAt });
         await db.SaveChangesAsync(ct);
+        db.ChangeTracker.Clear();
     }
 
     public async Task<string?> ValidateAndConsumeRefreshTokenAsync(string tokenHash, CancellationToken ct)
@@ -241,6 +244,7 @@ public sealed class EfCoreTwoFactorStore(IdentityDb identity) : ISlimTwoFactorSt
         await db.RecoveryCodes.Where(c => c.UserId == id).ExecuteDeleteAsync(ct);
         db.RecoveryCodes.AddRange(hashedCodes.Select(h => new RecoveryCode { UserId = id, CodeHash = h }));
         await db.SaveChangesAsync(ct);
+        db.ChangeTracker.Clear();
         await tx.CommitAsync(ct);
     }
 
@@ -268,6 +272,7 @@ public sealed class EfCoreExternalLoginStore(IdentityDb identity, ISlimUserStore
     {
         db.ExternalLogins.Add(new ExternalLogin { Provider = provider, ProviderKey = providerKey, UserId = Guid.Parse(userId) });
         await db.SaveChangesAsync(ct);
+        db.ChangeTracker.Clear();
     }
 
     public Task RemoveExternalLoginsAsync(string userId, CancellationToken ct)
@@ -310,6 +315,7 @@ public sealed class EfCoreSessionStore(IdentityDb identity) : ISlimSessionStore
             IpAddress = session.IpAddress, // personal data – drop it here if you do not need it
         });
         await db.SaveChangesAsync(ct);
+        db.ChangeTracker.Clear();
     }
 
     public async Task<SlimSession?> FindAsync(string sessionId, CancellationToken ct) =>
@@ -409,11 +415,12 @@ public sealed class EfCorePasskeyStore(IdentityDb identity) : ISlimPasskeyStore
         try
         {
             await db.SaveChangesAsync(ct);
+            db.ChangeTracker.Clear();
             return true;
         }
         catch (DbUpdateException)
         {
-            db.Entry(row).State = EntityState.Detached;   // registered concurrently (primary key)
+            db.ChangeTracker.Clear();   // registered concurrently (primary key)
             if (await db.Passkeys.AnyAsync(p => p.CredentialIdHash == hash, ct)) return false;
             throw;
         }

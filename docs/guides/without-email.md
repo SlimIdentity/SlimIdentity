@@ -27,6 +27,8 @@ silently losing password resets.
 Contradictions stop the start: a registered mail sender next to `WithoutEmail()`, or
 `allowSelfRegistration: true` together with `SignIn.RequireConfirmedEmail` (nobody could ever confirm).
 
+The very first administrator is created by code at start-up – see [seeding](seeding.md).
+
 ## The administrator's tools
 
 All on `ISlimAuthManager` – **you** decide who may call them (role, [sudo mode](admin-features.md#step-up-sudo-mode)):

@@ -17,7 +17,7 @@ public class AppUser : ISlimUserEntity<Guid>
     public string Email { get; set; } = "";
     public string NormalizedEmail { get; set; } = "";
     public string PasswordHash { get; set; } = "";
-    public string SecurityStamp { get; set; } = "";
+    public string SecurityStamp { get; set; } = SlimUser.NewSecurityStamp();   // also when you add users yourself
     public bool IsActive { get; set; } = true;
     public bool EmailConfirmed { get; set; }
     public int FailedLoginAttempts { get; set; }

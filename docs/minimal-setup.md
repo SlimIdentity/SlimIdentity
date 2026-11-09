@@ -57,6 +57,19 @@ app.Run();
 }
 ```
 
+**Front-end dev server on another port** (Vite on 5173, the API on 5001) – that is another origin, and the browser
+blocks the calls without CORS. Either let the dev server proxy `/auth` and `/api` to the API (one origin, nothing to
+configure – Vite: `server.proxy`), or allow the front end in the API – `Links.BaseUrl` is already a trusted origin:
+
+```csharp
+builder.Services.AddSlimIdentity(builder.Configuration.GetSection("SlimIdentity"))
+    .AddEntityFrameworkStores<AppDbContext, AppUser, Guid>()
+    .AddNullEmailSender()
+    .AddCorsPolicy();                               // credentialed CORS for the trusted origins
+// …
+app.UseCors(SlimIdentityDefaults.CorsPolicy);       // before UseAuthentication()
+```
+
 That is the complete configuration. Without a `Tokens.JwtSecret` the app uses **cookie sessions** – the right default
 for a browser front end on the same site. For mobile apps or token-based SPAs add a secret (at least 32 random bytes,
 from user secrets or a key vault) and JWT bearer tokens are enabled as well:
@@ -77,7 +90,7 @@ public class AppUser : ISlimUserEntity<Guid>
     public string Email { get; set; } = "";
     public string NormalizedEmail { get; set; } = "";
     public string PasswordHash { get; set; } = "";
-    public string SecurityStamp { get; set; } = "";
+    public string SecurityStamp { get; set; } = SlimUser.NewSecurityStamp();   // also when you add users yourself
     public bool IsActive { get; set; } = true;
     public bool EmailConfirmed { get; set; }
     public int FailedLoginAttempts { get; set; }
@@ -140,6 +153,8 @@ value); the [TypeScript client](../samples/templates/Frontend/slimIdentityClient
 3. **HTTPS** for the browser; behind a reverse proxy also `UseForwardedHeaders()` ([guide](guides/reverse-proxy.md)).
 4. `JwtSecret` (if used) only from a secret store, never from `appsettings.json` in the repository.
 5. Front end on another origin? Add it to `TrustedOrigins` and configure CORS ([guide](guides/spa-cookies.md)).
+6. **The first administrator** – created by code at start-up, with a start password or a reset link
+   ([seeding](guides/seeding.md)).
 
 ## Adding more later
 

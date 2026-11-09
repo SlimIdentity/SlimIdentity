@@ -84,6 +84,10 @@ First public release (1.0.0) in preparation.
 - Tenants with own domains: `ISlimOriginPolicy` (`AddOriginPolicy<T>()`) decides trusted origins per request for the
   CSRF check, `returnUrl` and CORS; `ISlimLinkBuilder` (`AddLinkBuilder<T>()`) builds mail, reset and invitation links
   per request. `AddCorsPolicy()` derives CORS from the same origins (`SlimIdentityDefaults.CorsPolicy`).
+- Guide "The first administrator": seeding by code at start-up (start password with forced change, or a reset link),
+  roles through the registration profile, database seeds. The minimal setup covers a front-end dev server on another
+  port (proxy or `AddCorsPolicy()`) and initializes `SecurityStamp` in the user entity; the README separates what is in
+  the box from what can be switched on.
 - Registration with business data: `/register` takes an optional `profile`, validated by the host's
   `ISlimRegistrationProfile` (`AddRegistrationProfile<T>()`) before anything is looked up (`400 profile.<field>`;
   refused without a hook) and passed to the store as `SlimNewUser.Profile` – account and profile are created together.

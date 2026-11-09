@@ -150,7 +150,7 @@ POST {{auth}}/2fa/enable
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
-{ "setupToken": "<setupToken>", "code": "123456" }
+{ "setupToken": "<setupToken>", "code": "123456", "password": "User1234!" }
 
 ###
 # login now answers 401 { status: "requires_two_factor", preAuthToken }

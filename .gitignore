@@ -430,3 +430,6 @@ FodyWeavers.xsd
 
 # local Claude Code preview configuration
 .claude/launch.json
+
+# Visual Studio creates launch profiles for test projects with the Web SDK – they are never used
+tests/**/Properties/launchSettings.json
