@@ -22,7 +22,9 @@ ready-to-copy implementation is in
 - **Machine-to-machine:** the certificate authenticates every request
   (`[Authorize(AuthenticationSchemes = "Certificate")]`). Inactive users are rejected.
 - **User login** (e.g. smart cards in a browser): `POST /api/login/certificate` exchanges a valid certificate for a
-  regular SlimIdentity session (cookie or JWT) via `ISlimAuthManager.SignInAsync`. Deactivated and locked users are
-  rejected; users with 2FA have to use the normal login.
+  regular SlimIdentity session (cookie or JWT, `amr: cert`) via `ISlimAuthManager.SignInAsync`, which applies the rules
+  of `/login`: deactivated, locked and unconfirmed accounts and administrator-set passwords are refused. Users with 2FA
+  get the challenge and complete it at `POST /auth/login/2fa`; for a smart card with PIN pass
+  `secondFactorVerified: true`.
 
 Certificate-bound access tokens (RFC 8705) are not supported.

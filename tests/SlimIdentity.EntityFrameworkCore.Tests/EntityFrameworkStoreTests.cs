@@ -158,6 +158,19 @@ public sealed class EntityFrameworkStoreTests
     }
 
     [Fact]
+    public async Task Counting_a_failure_of_a_user_deleted_meanwhile_is_no_error()
+    {
+        var file = SqliteFile();
+        await using var sp = await BuildAsync<GuidContext, GuidUser, Guid>(o => o.UseSqlite(file));
+        await using var scope = sp.CreateAsyncScope();
+        var store = scope.ServiceProvider.GetRequiredService<ISlimUserStore>();
+        var user = (await store.CreateAsync(new SlimNewUser { Email = "gone@test.local" }, default))!;
+        await scope.ServiceProvider.GetRequiredService<GuidContext>().Users.ExecuteDeleteAsync();   // deleted during the sign-in
+
+        Assert.Equal(0, await store.IncrementFailedLoginAttemptsAsync(user, default));
+    }
+
+    [Fact]
     public async Task A_profile_without_a_user_factory_is_refused_instead_of_lost()
     {
         var file = SqliteFile();

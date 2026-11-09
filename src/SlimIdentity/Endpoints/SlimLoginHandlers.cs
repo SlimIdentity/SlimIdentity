@@ -150,7 +150,7 @@ internal sealed class SlimLoginHandlers(
 
         // remembered device: the second factor was passed on this device before - the password was just verified
         if (user.TwoFactorEnabled && services.GetService<SlimTwoFactorService>() is { } twoFactor
-            && twoFactor.IsRememberedDevice(user, Http, request.TwoFactorRememberToken))
+            && twoFactor.IsRememberedDevice(user, Http, cookies, request.TwoFactorRememberToken))
         {
             await credentials.RegisterSuccessAsync(user, null, rehash: false, resetLockout: true, ct);
             metrics.TwoFactor("remembered_device", "success");

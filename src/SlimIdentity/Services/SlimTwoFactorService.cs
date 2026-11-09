@@ -22,14 +22,15 @@ internal sealed class SlimTwoFactorService(
     private string RememberCookieName => options.Value.Cookies.CookieName + ".2fa";
 
     /// <summary>
-    /// True if this request comes from a device the user remembered after a successful second factor: the cookie
-    /// (browser) or <paramref name="bearerToken"/> (apps) must belong to the user, match the current security stamp and
-    /// not be expired.
+    /// True if this request comes from a device the user remembered after a successful second factor: in cookie mode
+    /// the cookie (browser), otherwise <paramref name="bearerToken"/> (apps) – never the other one, so a browser's cookie
+    /// does not let token requests skip the second factor. It must belong to the user, match the current security
+    /// stamp and not be expired.
     /// </summary>
-    public bool IsRememberedDevice(SlimUser user, HttpContext http, string? bearerToken)
+    public bool IsRememberedDevice(SlimUser user, HttpContext http, bool cookieMode, string? bearerToken)
     {
         if (!RememberDeviceEnabled) return false;
-        var token = !string.IsNullOrEmpty(bearerToken) ? bearerToken : http.Request.Cookies[RememberCookieName];
+        var token = cookieMode ? http.Request.Cookies[RememberCookieName] : bearerToken;
         return workflow.TryUnprotect<SlimRememberDevicePayload>(SlimWorkflowTokens.RememberDevicePurpose, token, out var payload)
             && string.Equals(payload.Uid, user.Id, StringComparison.Ordinal)
             && SlimUser.IsSameSecurityState(payload.Stamp, user.SecurityStamp)

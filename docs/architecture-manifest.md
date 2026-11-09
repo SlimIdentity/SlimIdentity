@@ -135,7 +135,8 @@ Deliberately not part of the package (extra dependency, highly deployment specif
 4. **Mapping to users:** `ISlimExternalLoginStore` with provider `"certificate"` and the SHA-256 thumbprint (or SAN/UPN)
    as provider key, resolved in `OnCertificateValidated`.
 5. **Usage:** machine-to-machine – certificate scheme per request (like API keys); user login – a host endpoint that
-   calls `ISlimAuthManager.SignInAsync` after the certificate check (lockout, 2FA and sessions apply as usual).
+   calls `ISlimAuthManager.SignInAsync` after the certificate check – it refuses inactive, locked and unconfirmed
+   accounts and asks for the second factor like `/login`.
 6. Certificate-bound tokens (RFC 8705) are not planned.
 
 ## 10. Design decisions

@@ -73,6 +73,7 @@ Test names refer to `tests/SlimIdentity.Tests` (`Integration/…`, `Unit/Propert
 | D14 | Replayed passkey assertion, cloned authenticator (counter goes back) | covered – `Passkey.A_replayed_sign_in_is_rejected`, `…A_counter_that_goes_back_is_rejected`, conformance (`TryRecordUseAsync` single use and compare-and-set, also parallel) |
 | D15 | Stolen session adds a passkey, or removes the last way in | covered – `Passkey.Adding_a_passkey_needs_the_password_a_confirmed_address_and_no_impersonation`, `…The_last_way_in_stays_across_passkeys_and_external_logins`, `…Someone_elses_passkey_cannot_be_renamed_or_removed` |
 | D16 | Passkey of a pre-registered account survives the owner's mailbox proof; weak RSA key padded to look like 2048 bit; refused sign-in leaves a trace on the passkey | covered – `Passkey.The_registrants_passkeys_do_not_survive_the_owners_mailbox_proof`, `…a_verified_external_sign_in_of_the_owner`, `…A_weak_rsa_key_is_refused_even_when_padded_to_2048_bit`, `…Inconsistent_backup_flags_are_rejected`, `…An_inactive_account_and_a_vetoing_guard_get_no_session`, conformance (`RemovePasskeysAsync`). **Fixed** (external review round 3) |
+| D17 | A browser's "remember this device" cookie lets a bearer sign-in of the same browser skip the second factor | covered – `ReviewRound3.S3_a_bearer_sign_in_never_uses_the_browsers_remember_cookie`. **Fixed** (external review round 3) |
 
 ## E. Workflow tokens (reset, verification, invitation, e-mail change)
 
@@ -123,6 +124,7 @@ Test names refer to `tests/SlimIdentity.Tests` (`Integration/…`, `Unit/Propert
 | G6b | Password guessing on the host's sudo endpoint with a stolen session | covered – `HostEndpoint.R7_password_confirmation_on_host_endpoints_counts_towards_the_lockout` (`ISlimAuthManager.ConfirmPasswordAsync`; **fixed** in review round 1: the template verified with `IPasswordHasher`, without lockout) |
 | G7 | API key: prefix brute force, timing, revoked / expired key, key in logs | covered in part – `HostEndpoint.Api_key_authenticates_machine_clients`; 256-bit keys, only hashes stored and compared by lookup |
 | G8 | User-bound API key acts as the user on `/auth/*` (mints a session, signs out everywhere) | covered – `ReviewRound1.R5_an_api_key_cannot_act_as_the_user_on_the_account_endpoints`. **Fixed** (review round 1): account endpoints accept cookies and bearer tokens only |
+| G9 | A host endpoint signs a user in with `ISlimAuthManager.SignInAsync` after its own first factor (client certificate): locked, unconfirmed, forced password change, 2FA skipped | covered – `ReviewRound3.S2_SignInAsync_refuses_accounts_that_may_not_sign_in`, `…S2_SignInAsync_asks_for_the_second_factor_and_the_built_in_flow_completes_it`. **Fixed** (external review round 3) |
 
 ## H. Stores and infrastructure
 
@@ -140,6 +142,7 @@ Test names refer to `tests/SlimIdentity.Tests` (`Integration/…`, `Unit/Propert
 | H9 | A host hook weakens the flow (skips a check, issues a session, breaks sign-ins when it fails) | covered – by design hooks can only refuse or observe; `Hook.A_veto_ends_running_sessions_and_refreshes`, `…An_external_sign_in_is_vetoed_as_well`, `…A_failing_event_handler_changes_nothing`, `…Only_allowed_addresses_can_register` |
 | H10 | Revoked role still usable in a running session | covered – `ClaimsRefresh.A_cookie_session_loses_a_revoked_role_without_being_signed_out`, `…A_bearer_session_loses_a_revoked_role_at_once_and_its_refresh_issues_the_new_claims` (after `RefreshClaimsAsync`); without it the documented snapshot applies (`…Without_RefreshClaimsAsync_a_session_keeps_its_snapshot`) |
 | H11 | Unvalidated profile fields reach the database (mass assignment); half-created accounts (account without profile, orphaned profile rows after a lost race) | covered – `RegistrationProfile.Without_a_profile_hook_a_profile_is_refused`, `…A_valid_profile_reaches_the_store_with_the_account` (only the hook's object); EF Core package `A_registration_profile_is_saved_with_the_account_or_not_at_all`, `…A_profile_without_a_user_factory_is_refused_instead_of_lost` |
+| H12 | Unbounded in-memory state (one-time code registry) – memory growth, a full scan per request | covered – `ReviewRound3.S4_the_nonce_registry_is_bounded_and_stays_fast` (100,000 entries, fail closed). **Fixed** (external review round 3) |
 
 ## Prompt template for one scenario
 

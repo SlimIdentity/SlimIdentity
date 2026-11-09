@@ -157,6 +157,19 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
   `RemovePasskeysAsync` (checked by the conformance kit). **Breaking** for passkey stores.
 - RS256 passkeys need a modulus of at least 2048 bit; a weak key zero-padded to 256 bytes is refused.
 - A passkey sign-in checks the account (active, confirmed) before it records the use on the passkey.
+- `ISlimAuthManager.SignInAsync` applies the rules of `/login` after the first factor: inactive, locked, unconfirmed
+  (with `RequireConfirmedEmail`) accounts and administrator-set passwords are refused; with 2FA no session is issued –
+  `SlimAuthResult.TwoFactorChallenge` holds the challenge the client completes at `/login/2fa`. New parameters
+  `authenticationMethod` (the session's `amr`, e.g. `cert`) and `secondFactorVerified`. Before, a host endpoint could
+  issue a session for a locked account or skip the second factor; the client-certificate template did not check
+  confirmation and forced password changes. **Breaking** for callers that relied on the old behaviour.
+- The "remember this device" proof is taken only from its own mode: the cookie for cookie sign-ins, the token in the
+  body for bearer sign-ins – a browser's cookie no longer lets a token request skip the second factor.
+- The in-memory one-time-code registry (link codes, back-channel logout tokens, exchange codes without a refresh-token
+  store) is bounded (100,000 entries, purged at most once per second, full = refused) instead of growing and scanning
+  on every request.
+- EF Core package and template: counting a failed sign-in of a user deleted in the meantime returns 0 instead of
+  throwing.
 
 ### Fixed
 

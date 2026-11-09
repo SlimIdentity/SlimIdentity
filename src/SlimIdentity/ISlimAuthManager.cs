@@ -8,8 +8,28 @@ namespace SlimIdentity;
 /// </summary>
 public interface ISlimAuthManager
 {
-    /// <summary>Issues a regular cookie or a JWT pair for <paramref name="user"/>.</summary>
-    Task<SlimAuthResult> SignInAsync(SlimUser user, bool useCookies, bool isPersistent = false, CancellationToken ct = default);
+    /// <summary>
+    /// Signs <paramref name="user"/> in after <b>your</b> first factor – a client certificate, a magic link, your own
+    /// password check – with every rule of <c>/login</c> that follows it: inactive (<c>account_inactive</c>), locked
+    /// (<c>locked_out</c>), unconfirmed with <c>RequireConfirmedEmail</c> (<c>email_not_confirmed</c>) and
+    /// administrator-set passwords (<c>password_change_required</c>) are refused, sign-in guards apply. If the account
+    /// has 2FA, no session is issued: <see cref="SlimAuthResult.TwoFactorChallenge"/> holds the challenge – return it
+    /// with status 401, the client completes it at <c>POST /auth/login/2fa</c> like after a password. Pass
+    /// <paramref name="secondFactorVerified"/> only if your first factor already is multi-factor (smart card with PIN).
+    /// </summary>
+    /// <param name="user">The account, freshly loaded from the store.</param>
+    /// <param name="useCookies">Cookie (<c>true</c>) or JWT pair.</param>
+    /// <param name="isPersistent">Persistent cookie / remember me.</param>
+    /// <param name="authenticationMethod">The <c>amr</c> of the session, e.g. <c>cert</c> – lowercase letters, digits, <c>_</c>.</param>
+    /// <param name="secondFactorVerified">Your check already was multi-factor: no second factor is asked.</param>
+    /// <param name="ct">Cancellation.</param>
+    /// <example><code>
+    /// var result = await auth.SignInAsync(user, useCookies: true, authenticationMethod: "cert", ct: ct);
+    /// if (result.TwoFactorChallenge is { } challenge) return Results.Json(challenge, statusCode: 401);
+    /// return result.Succeeded ? Results.Ok(result.ToResponse(time.GetUtcNow())) : Results.Json(new { status = result.Error }, statusCode: 403);
+    /// </code></example>
+    Task<SlimAuthResult> SignInAsync(SlimUser user, bool useCookies, bool isPersistent = false, string authenticationMethod = "pwd",
+        bool secondFactorVerified = false, CancellationToken ct = default);
 
     /// <summary>
     /// Admin impersonation: signs in as <paramref name="targetUser"/> but keeps <paramref name="impersonatorUserId"/>

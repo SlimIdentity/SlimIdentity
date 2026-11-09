@@ -76,7 +76,8 @@ public sealed class EfCoreUserStore(IdentityDb identity) : ISlimUserStore
         // portable compare-and-set loop (with raw SQL: UPDATE … SET failed = failed + 1 … RETURNING failed)
         while (true)
         {
-            var current = await db.Users.AsNoTracking().Where(u => u.Id == id).Select(u => u.FailedLoginAttempts).FirstAsync(ct);
+            if (await db.Users.AsNoTracking().Where(u => u.Id == id).Select(u => (int?)u.FailedLoginAttempts).FirstOrDefaultAsync(ct) is not { } current)
+                return 0;   // deleted during the sign-in
             var updated = await db.Users.Where(u => u.Id == id && u.FailedLoginAttempts == current)
                 .ExecuteUpdateAsync(s => s.SetProperty(u => u.FailedLoginAttempts, current + 1), ct);
             if (updated == 1) return current + 1;

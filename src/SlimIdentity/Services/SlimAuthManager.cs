@@ -44,8 +44,40 @@ internal sealed class SlimAuthManager(
 
     // ------------------------------------------------------------------ public API
 
-    public Task<SlimAuthResult> SignInAsync(SlimUser user, bool useCookies, bool isPersistent = false, CancellationToken ct = default) =>
-        SignInCoreAsync(user, useCookies, isPersistent, MethodPassword, null, null, issueRefreshToken: true, ct);
+    public async Task<SlimAuthResult> SignInAsync(SlimUser user, bool useCookies, bool isPersistent = false, string authenticationMethod = MethodPassword,
+        bool secondFactorVerified = false, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+        if (!IsHostMethod(authenticationMethod))
+            throw new ArgumentException("SlimIdentity: the authentication method must be 1–32 lowercase letters, digits or '_' and not one " +
+                "SlimIdentity issues itself for special sessions (impersonation, api_key).", nameof(authenticationMethod));
+
+        // the rules of /login after the first factor – a host endpoint must not be a way around them
+        var refusal = !user.IsActive ? "account_inactive"
+            : user.IsLockedOut(time.GetUtcNow()) ? "locked_out"
+            : options.Value.SignIn.RequireConfirmedEmail && !user.EmailConfirmed ? "email_not_confirmed"
+            : user.PasswordChangeRequired ? "password_change_required"
+            : null;
+        if (refusal is not null)
+        {
+            await Hooks.RaiseAsync(SlimEventTypes.SignInFailed, user.Id, authenticationMethod, refusal, ct: ct);
+            return SlimAuthResult.Failed(refusal);
+        }
+
+        if (user.TwoFactorEnabled && !secondFactorVerified)
+        {
+            var challenge = await services.GetRequiredService<Endpoints.SlimLoginHandlers>().BeginTwoFactorAsync(user, useCookies, isPersistent, ct);
+            return challenge is null
+                ? SlimAuthResult.Failed("two_factor_unavailable")   // 2FA enabled, but no ISlimTwoFactorStore registered
+                : new SlimAuthResult { Succeeded = false, Error = "requires_two_factor", TwoFactorChallenge = challenge };
+        }
+
+        return await SignInCoreAsync(user, useCookies, isPersistent, authenticationMethod, null, null, issueRefreshToken: true, ct);
+    }
+
+    private static bool IsHostMethod(string? method) =>
+        method is { Length: > 0 and <= 32 } && method != MethodImpersonation && method != "api_key"
+        && method.All(c => c is (>= 'a' and <= 'z') or (>= '0' and <= '9') or '_');
 
     public async Task<SlimRegistrationResult> RegisterAsync(string email, string password, object? profile = null, CancellationToken ct = default)
     {

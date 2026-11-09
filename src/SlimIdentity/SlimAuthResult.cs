@@ -27,6 +27,11 @@ public sealed record SlimAuthResult
     public string? ErrorMessage { get; init; }
     /// <summary>A <see cref="ISlimSignInGuard"/> refused the session.</summary>
     public bool Vetoed { get; init; }
+    /// <summary>
+    /// <see cref="ISlimAuthManager.SignInAsync"/> for an account with 2FA: the challenge to return with status 401
+    /// (<see cref="Error"/> is <c>requires_two_factor</c>); the client completes it at <c>POST /auth/login/2fa</c>.
+    /// </summary>
+    public SlimLoginChallengeResponse? TwoFactorChallenge { get; init; }
 
     internal static SlimAuthResult Failed(string error) => new() { Succeeded = false, Error = error };
     internal static SlimAuthResult Veto(SlimVeto veto) => new() { Succeeded = false, Error = veto.Error, ErrorMessage = veto.Message, Vetoed = true };

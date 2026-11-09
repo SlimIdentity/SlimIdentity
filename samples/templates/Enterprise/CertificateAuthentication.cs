@@ -74,7 +74,8 @@ public static class CertificateAuthentication
 
     /// <summary>
     /// Exchanges a valid client certificate for a regular SlimIdentity session (cookie or JWT), e.g. for smart-card
-    /// logins in a browser. Lockout and deactivation are honoured; users with 2FA must use the normal login.
+    /// logins in a browser. SignInAsync applies the rules of /login: inactive, locked, unconfirmed accounts and
+    /// administrator-set passwords are refused; with 2FA the client gets the challenge and completes it at /auth/login/2fa.
     /// </summary>
     public static IEndpointRouteBuilder MapCertificateLogin(this IEndpointRouteBuilder app)
     {
@@ -84,12 +85,14 @@ public static class CertificateAuthentication
                 var result = await http.AuthenticateAsync(Scheme);
                 if (!result.Succeeded || result.Principal.GetSlimUserId() is not { } userId) return Results.Unauthorized();
 
-                var user = await store.FindByIdAsync(userId, ct);
-                if (user is not { IsActive: true } || user.IsLockedOut(time.GetUtcNow())) return Results.Unauthorized();
-                if (user.TwoFactorEnabled) return Results.BadRequest(new { status = "two_factor_required" });
+                if (await store.FindByIdAsync(userId, ct) is not { } user) return Results.Unauthorized();
 
-                var session = await auth.SignInAsync(user, useCookies ?? false, ct: ct);
-                return Results.Ok(session.ToResponse(time.GetUtcNow()));
+                // a smart card with PIN is multi-factor on its own: pass secondFactorVerified: true for such cards
+                var session = await auth.SignInAsync(user, useCookies ?? false, authenticationMethod: "cert", ct: ct);
+                if (session.TwoFactorChallenge is { } challenge) return Results.Json(challenge, statusCode: StatusCodes.Status401Unauthorized);
+                return session.Succeeded
+                    ? Results.Ok(session.ToResponse(time.GetUtcNow()))
+                    : Results.Json(new { status = session.Error }, statusCode: StatusCodes.Status403Forbidden);
             })
             .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
             .RequireSlimCsrf();

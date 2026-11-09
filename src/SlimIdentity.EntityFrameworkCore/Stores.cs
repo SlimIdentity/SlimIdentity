@@ -144,7 +144,9 @@ public class SlimEfUserStore<TContext, TUser, TKey>(SlimEfContext<TContext> cont
         // portable compare-and-set loop: no lost update, on every provider
         while (true)
         {
-            var current = await Update(user).Select(u => EF.Property<int>(u, Failed)).FirstAsync(ct).ConfigureAwait(false);
+            // the user may have been deleted during the sign-in: nothing to count (and no exception)
+            if (await Update(user).Select(u => (int?)EF.Property<int>(u, Failed)).FirstOrDefaultAsync(ct).ConfigureAwait(false) is not { } current)
+                return 0;
             var updated = await Update(user).Where(u => EF.Property<int>(u, Failed) == current)
                 .ExecuteUpdateAsync(s => s.SetProperty(u => EF.Property<int>(u, Failed), current + 1), ct).ConfigureAwait(false);
             if (updated == 1) return current + 1;

@@ -73,7 +73,8 @@ o.TwoFactor.RememberDeviceLifetime = TimeSpan.FromDays(30);   // max. 90 days
    routes. **Apps (bearer mode):** the response contains `twoFactorRememberToken` – store it in secure storage and send
    it as `twoFactorRememberToken` with `/auth/login`.
 3. Later sign-ins on that device with the correct password skip the second factor (`amr` = `mfa_remembered`), also
-   for external logins in the same browser.
+   for external logins in the same browser. Each proof counts only in its own mode: the cookie for cookie sign-ins,
+   the token for bearer sign-ins – a token request from a browser that has the cookie still asks for the second factor.
 
 Forgetting:
 

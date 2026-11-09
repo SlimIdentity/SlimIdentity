@@ -228,7 +228,7 @@ internal sealed class SlimExternalLoginHandlers(
         // the browser may carry a "remember this device" cookie from an earlier second factor
         var remembered = user.TwoFactorEnabled
             && services.GetService<SlimTwoFactorService>() is { } twoFactor
-            && twoFactor.IsRememberedDevice(user, Http, null);
+            && twoFactor.IsRememberedDevice(user, Http, cookieMode: true, null);   // only cookie sign-ins get here
 
         if (user.TwoFactorEnabled && !remembered)
         {
@@ -274,7 +274,7 @@ internal sealed class SlimExternalLoginHandlers(
         // second factor, exactly like at /auth/login: a remembered device (token in the body) skips it
         var remembered = user.TwoFactorEnabled
             && services.GetService<SlimTwoFactorService>() is { } twoFactor
-            && twoFactor.IsRememberedDevice(user, Http, request.TwoFactorRememberToken);
+            && twoFactor.IsRememberedDevice(user, Http, cookieMode: false, request.TwoFactorRememberToken);
         if (user.TwoFactorEnabled && !remembered)
         {
             var challenge = await login.BeginTwoFactorAsync(user, useCookies: false, rememberMe: false, ct);
