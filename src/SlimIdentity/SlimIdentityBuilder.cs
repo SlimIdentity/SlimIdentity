@@ -178,6 +178,18 @@ public sealed class SlimIdentityBuilder
         return this;
     }
 
+    /// <summary>
+    /// Accepts business data at <c>/register</c> (see <see cref="ISlimRegistrationProfile"/>): validates the
+    /// <c>profile</c> object and passes the result to <see cref="ISlimUserStore.CreateAsync"/>. One per application – a
+    /// second call replaces the first.
+    /// </summary>
+    public SlimIdentityBuilder AddRegistrationProfile<[DynamicallyAccessedMembers(Ctors)] TProfile>(ServiceLifetime lifetime = ServiceLifetime.Scoped)
+        where TProfile : class, ISlimRegistrationProfile
+    {
+        Services.Replace(ServiceDescriptor.Describe(typeof(ISlimRegistrationProfile), typeof(TProfile), lifetime));
+        return this;
+    }
+
     /// <summary>Adds an observer of security events (see <see cref="ISlimEventObserver"/>). Can be called several times.</summary>
     public SlimIdentityBuilder AddEventObserver<[DynamicallyAccessedMembers(Ctors)] TObserver>(ServiceLifetime lifetime = ServiceLifetime.Scoped)
         where TObserver : class, ISlimEventObserver

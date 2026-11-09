@@ -48,9 +48,8 @@ builder.Services.AddSlimIdentity(builder.Configuration.GetSection("SlimIdentity"
 ```
 
 Then create a migration (`dotnet ef migrations add SlimIdentity`). Besides the columns on your user table it adds
-`SlimRefreshTokens`, `SlimSessions`, `SlimRecoveryCodes`, `SlimExternalLogins` and `SlimPasskeys` (set
-the passkeys are opt-in: `AddEntityFrameworkStores<…>(o => o.Passkeys = true)` with `Passkeys.RelyingPartyId` or
-`Links.BaseUrl`).
+`SlimRefreshTokens`, `SlimSessions`, `SlimRecoveryCodes`, `SlimExternalLogins` and `SlimPasskeys` (passkeys are
+opt-in: `AddEntityFrameworkStores<…>(o => o.Passkeys = true)` with `Passkeys.RelyingPartyId` or `Links.BaseUrl`).
 
 The stores use their own `AppDbContext` instance per request (from `IDbContextFactory<AppDbContext>` if registered,
 otherwise from the same options), never the one your endpoints resolve: signing a user in never saves your pending
@@ -62,7 +61,9 @@ changes or detaches your entities.
 - `AddEntityFrameworkStores<…>(o => { o.TwoFactor = false; o.StoreClientInfo = false; })` – leave out stores (each one
   activates its endpoints) or drop user agent / IP address of sessions (personal data).
 - `ISlimUserClaimsProvider<AppUser>` (register it in DI) – roles, tenant id or other claims for cookies and tokens.
-- `ISlimUserFactory<AppUser>` – creates new users (registration, external login), e.g. with a tenant or defaults.
+- `ISlimUserFactory<AppUser>` – creates new users (registration, external login): tenant, defaults and the
+  [registration profile](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/registration-profile.md)
+  (`SlimNewUser.Profile`) – related entities are inserted in the same `SaveChanges` as the account.
 - Expired sessions and refresh tokens are not deleted automatically: run
   `DELETE FROM "SlimSessions" WHERE "ExpiresUtc" < now()` (and the same for `SlimRefreshTokens."ExpiresAt"`) periodically.
 - Prefer the copy-paste templates in the repository only if you need full control over the mapping.

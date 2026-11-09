@@ -84,6 +84,12 @@ First public release (1.0.0) in preparation.
 - Tenants with own domains: `ISlimOriginPolicy` (`AddOriginPolicy<T>()`) decides trusted origins per request for the
   CSRF check, `returnUrl` and CORS; `ISlimLinkBuilder` (`AddLinkBuilder<T>()`) builds mail, reset and invitation links
   per request. `AddCorsPolicy()` derives CORS from the same origins (`SlimIdentityDefaults.CorsPolicy`).
+- Registration with business data: `/register` takes an optional `profile`, validated by the host's
+  `ISlimRegistrationProfile` (`AddRegistrationProfile<T>()`) before anything is looked up (`400 profile.<field>`;
+  refused without a hook) and passed to the store as `SlimNewUser.Profile` – account and profile are created together.
+  `ISlimAuthManager.RegisterAsync` gives host endpoints every rule of `/register` (validation, guards, uniform answer
+  and mails, event). **Breaking:** `ISlimUserStore.CreateAsync(SlimNewUser, ct)` replaces `(email, passwordHash, ct)`;
+  EF Core package `ISlimUserFactory<TUser>.Create(SlimNewUser)` (refuses a profile without a factory).
 - Passkeys (WebAuthn), opt-in: `ISlimPasskeyStore` (EF Core package table `SlimPasskeys`, `o.Passkeys = true`; EF Core and Dapper
   templates; conformance checks), registration for signed-in users (password, confirmed address), sign-in without user
   name (`amr: passkey`, multi-factor on its own), rename / remove in the sign-in methods with last-method protection.

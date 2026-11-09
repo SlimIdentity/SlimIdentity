@@ -49,6 +49,21 @@ public interface ISlimAuthManager
     /// </code></example>
     Task<IResult?> ConfirmPasswordAsync(SlimUser user, string? password, CancellationToken ct = default);
 
+    /// <summary>
+    /// Registration for your own endpoint (several steps, captcha, your own form) with every rule of
+    /// <c>POST /register</c>: address and password rules, registration guards, no enumeration (an address that already
+    /// has an account gets the "account exists" mail, a new one the verification mail – the answer is the same),
+    /// the <c>user_created</c> event. <paramref name="profile"/> – your validated business data – reaches
+    /// <see cref="ISlimUserStore.CreateAsync"/> as <see cref="SlimNewUser.Profile"/>, so account and profile are
+    /// created together. Return <see cref="SlimRegistrationResult.Response"/>; <see cref="ISlimRegistrationProfile"/>
+    /// is not asked (validate your own input). Works on hosts with <c>Endpoints.EnableRegistration = false</c>.
+    /// </summary>
+    /// <example><code>
+    /// var result = await auth.RegisterAsync(form.Email, form.Password, new SignUpProfile(form.Company), ct);
+    /// return result.Response;
+    /// </code></example>
+    Task<SlimRegistrationResult> RegisterAsync(string email, string password, object? profile = null, CancellationToken ct = default);
+
     // ---------------------------------------------------------------- administration (authorize the caller yourself!)
 
     /// <summary>

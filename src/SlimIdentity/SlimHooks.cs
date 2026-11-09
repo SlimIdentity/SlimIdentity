@@ -74,6 +74,70 @@ public interface ISlimRegistrationGuard
     ValueTask<SlimVeto?> CheckAsync(SlimRegistrationContext context, CancellationToken ct);
 }
 
+/// <summary>What <see cref="ISlimRegistrationProfile"/> validates.</summary>
+public sealed class SlimRegistrationProfileContext
+{
+    /// <summary>The normalized address of the new account.</summary>
+    public required string Email { get; init; }
+    /// <summary>The <c>profile</c> object of the request as sent; <c>null</c> if it is missing or JSON <c>null</c>.</summary>
+    public JsonElement? Profile { get; init; }
+    /// <summary>The request (client IP, host name / tenant, headers).</summary>
+    public required HttpContext HttpContext { get; init; }
+}
+
+/// <summary>The answer of <see cref="ISlimRegistrationProfile"/>: the validated profile or field errors.</summary>
+public sealed class SlimProfileValidation
+{
+    private SlimProfileValidation(object? profile, IReadOnlyDictionary<string, string[]>? errors) => (Profile, Errors) = (profile, errors);
+
+    /// <summary>The validated profile, passed on as <see cref="SlimNewUser.Profile"/>.</summary>
+    public object? Profile { get; }
+    /// <summary>Field errors, keyed by the field inside the profile (answered as <c>profile.&lt;field&gt;</c>); <c>null</c> if valid.</summary>
+    public IReadOnlyDictionary<string, string[]>? Errors { get; }
+
+    /// <summary>Accepts the registration with <paramref name="profile"/> (your typed object; <c>null</c> for none).</summary>
+    public static SlimProfileValidation Valid(object? profile) => new(profile, null);
+
+    /// <summary>Refuses the registration with field errors (<c>400</c>).</summary>
+    public static SlimProfileValidation Invalid(IReadOnlyDictionary<string, string[]> errors)
+    {
+        ArgumentNullException.ThrowIfNull(errors);
+        if (errors.Count == 0) throw new ArgumentException("SlimIdentity: at least one error is required.", nameof(errors));
+        return new(null, errors);
+    }
+
+    /// <summary>Refuses the registration with one field error (<c>400</c>).</summary>
+    public static SlimProfileValidation Invalid(string field, string message) =>
+        Invalid(new Dictionary<string, string[]> { [field] = [message] });
+}
+
+/// <summary>
+/// Registration with business data: validates the optional <c>profile</c> object of <c>POST /register</c> (company,
+/// name, terms accepted, …) and turns it into your typed profile, which reaches <see cref="ISlimUserStore.CreateAsync"/>
+/// as <see cref="SlimNewUser.Profile"/> – account and profile are created together, or not at all. Asked before
+/// anything is looked up: decide from the request only, never from whether the address already has an account. Errors
+/// answer <c>400</c> with <c>profile.&lt;field&gt;</c> keys. Without this hook a <c>profile</c> is refused. Register
+/// with <c>AddRegistrationProfile&lt;T&gt;()</c> (one per application).
+/// </summary>
+/// <example><code>
+/// public sealed class CompanyProfile : ISlimRegistrationProfile
+/// {
+///     public ValueTask&lt;SlimProfileValidation&gt; ValidateAsync(SlimRegistrationProfileContext context, CancellationToken ct)
+///     {
+///         var company = context.Profile is { ValueKind: JsonValueKind.Object } p &amp;&amp; p.TryGetProperty("company", out var c)
+///             ? c.GetString()?.Trim() : null;
+///         return ValueTask.FromResult(string.IsNullOrEmpty(company) || company.Length &gt; 100
+///             ? SlimProfileValidation.Invalid("company", "The company is required (at most 100 characters).")
+///             : SlimProfileValidation.Valid(new SignUpProfile(company)));
+///     }
+/// }
+/// </code></example>
+public interface ISlimRegistrationProfile
+{
+    /// <summary>Validates the profile; also called without one (<see cref="SlimRegistrationProfileContext.Profile"/> <c>null</c>).</summary>
+    ValueTask<SlimProfileValidation> ValidateAsync(SlimRegistrationProfileContext context, CancellationToken ct);
+}
+
 /// <summary>A security event – reported after it happened. Contains ids only: no passwords, tokens, codes or addresses.</summary>
 public sealed class SlimEvent
 {

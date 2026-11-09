@@ -60,8 +60,9 @@ public sealed class StoreConformanceTests
         public Task<SlimUser?> FindByIdAsync(string userId, CancellationToken ct) =>
             Task.FromResult(_users.TryGetValue(userId, out var u) ? Copy(u) : null);
 
-        public async Task<SlimUser?> CreateAsync(string email, string passwordHash, CancellationToken ct)
+        public async Task<SlimUser?> CreateAsync(SlimNewUser newUser, CancellationToken ct)
         {
+            var (email, passwordHash) = (newUser.Email, newUser.PasswordHash);
             if (await FindByEmailAsync(email, ct) is not null) return null;
             await Task.Delay(5, ct);   // the gap between "check" and "insert"
             var user = new SlimUser { Id = Guid.NewGuid().ToString(), Email = email, PasswordHash = passwordHash };

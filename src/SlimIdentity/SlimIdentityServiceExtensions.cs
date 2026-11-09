@@ -63,6 +63,7 @@ public static class SlimIdentityServiceExtensions
         services.TryAddScoped<ISlimAuthManager>(sp => sp.GetRequiredService<SlimAuthManager>());
         services.TryAddScoped<SlimLoginHandlers>();
         services.TryAddScoped<SlimAccountHandlers>();
+        services.TryAddScoped<SlimRegistrationService>();
         services.TryAddScoped<SlimSignInMethodHandlers>();
 
         // ---------------------------------------------------------------- mail dispatch (enumeration-safe timing)

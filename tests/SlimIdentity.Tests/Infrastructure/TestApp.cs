@@ -122,7 +122,7 @@ public sealed class TestApp : IAsyncDisposable
 
         app.MapPost("/api/invite", async (InviteRequest request, ISlimUserStore store, ISlimAuthManager auth, CancellationToken ct) =>
             {
-                if (await store.CreateAsync(request.Email, string.Empty, ct) is not { } user) return Results.Conflict();
+                if (await store.CreateAsync(new SlimNewUser { Email = request.Email }, ct) is not { } user) return Results.Conflict();
                 return Results.Ok(await auth.CreateInvitationAsync(user, ct: ct));
             })
             .RequireAuthorization(p => p.RequireRole("Admin"));

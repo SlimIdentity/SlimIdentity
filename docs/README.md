@@ -21,6 +21,7 @@
 - [Invitations](guides/invitations.md) – invite-only registration, "complete your registration"
 - [Admin features](guides/admin-features.md) – impersonation, sudo mode, bans, API keys
 - [Running without e-mail](guides/without-email.md) – internal services: accounts, start passwords and resets by an administrator
+- [Registration with business data](guides/registration-profile.md) – validated profile, created with the account, own sign-up endpoints
 - [Hooks: guards and events](guides/hooks.md) – tenant and IP vetoes, registration rules, audit trail
 - [Roles and permissions](guides/roles-and-permissions.md) – groups to claims to policies, keeping claims current
 - [Multi-tenancy](guides/multi-tenancy.md) – scoped stores, trusted origins and links per tenant domain

@@ -33,6 +33,8 @@ against your real database checks all of the following, including the parallel c
   (`email.Normalize(NormalizationForm.FormC)`).
 - `CreateAsync` returns `null` if the address is already taken (unique index on the normalized address,
   `ON CONFLICT DO NOTHING` / catch the unique violation) – concurrent registrations then get the uniform answer.
+  `SlimNewUser.Profile` (your [registration profile](../docs/guides/registration-profile.md)) is written in the same
+  transaction – nothing of it when the address is taken.
 - `UpdateSecurityStateAsync` persists only the security fields of `SlimUser`
   (PasswordHash, SecurityStamp, EmailConfirmed, FailedLoginAttempts, LockoutEndUtc, TwoFactorEnabled, PasswordChangeRequired).
 - The sign-in bookkeeping methods touch **only their own columns**, in a single statement:
@@ -50,7 +52,7 @@ against your real database checks all of the following, including the parallel c
 - `ISlimSessionStore`: `FindAsync` must not return revoked sessions (deleting the row is enough); clean up expired rows
   regularly (`DELETE … WHERE expires_utc < now()`). `UserAgent` / `IpAddress` are personal data – only store them if
   your device list needs them.
-- Invited users are created with an empty `passwordHash` (`CreateAsync(email, "")`) before calling
+- Invited users are created with an empty `passwordHash` (`CreateAsync(new SlimNewUser { Email = email })`) before calling
   `CreateInvitationAsync`; a `null` result means the address is already registered.
 - Custom claims from `GetClaimsAsync`: `ClaimTypes.Role` is normalized to `role`; reserved claims
   (`sub`, `email`, `slim_stamp`, `amr`, `act`, `sid`, `auth_time`) are ignored.

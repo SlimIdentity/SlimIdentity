@@ -25,7 +25,7 @@ public interface ISlimUserStore
 {
     Task<SlimUser?> FindByEmailAsync(string email, CancellationToken ct);              // case-insensitive!
     Task<SlimUser?> FindByIdAsync(string userId, CancellationToken ct);
-    Task<SlimUser?> CreateAsync(string email, string passwordHash, CancellationToken ct); // null if the address is taken
+    Task<SlimUser?> CreateAsync(SlimNewUser newUser, CancellationToken ct);            // null if the address is taken
     Task UpdateSecurityStateAsync(SlimUser user, CancellationToken ct);                // persist the security fields only
     Task<bool> UpdateEmailAsync(SlimUser user, string newEmail, CancellationToken ct); // false if the address is taken
     Task<IReadOnlyCollection<Claim>> GetClaimsAsync(SlimUser user, CancellationToken ct); // roles, tenant id, …

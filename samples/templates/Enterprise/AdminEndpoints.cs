@@ -96,9 +96,9 @@ public static class AdminEndpoints
                 ISlimUserStore store, ISlimAuthManager auth, IInvitationMailer mailer, CancellationToken ct) =>
             {
                 // CreateAsync returns null if the address is taken (unique index) – no check-then-act race
-                if (await store.CreateAsync(req.Email, passwordHash: string.Empty, ct) is not { } user)
+                // the profile is written by the store together with the account (EF Core package: ISlimUserFactory)
+                if (await store.CreateAsync(new SlimNewUser { Email = req.Email, Profile = req }, ct) is not { } user)
                     return Results.Conflict(new { status = "already_exists" });
-                // TODO: business profile (DisplayName, tenant, roles …) for user.Id
                 var invitation = await auth.CreateInvitationAsync(user, TimeSpan.FromDays(14), ct); // link from Links.BaseUrl (or Links.InvitationUrl)
                 await mailer.SendInvitationAsync(req.Email, req.DisplayName, me.GetSlimEmail(), invitation.Link, invitation.ExpiresAt, ct);
                 return Results.Ok(new { status = "invited", user.Id, invitation.ExpiresAt });
@@ -110,11 +110,11 @@ public static class AdminEndpoints
         // Create an account without mail: the admin vouches for the address and hands over a reset link
         accounts.MapPost("/", async (CreateUserRequest req, ISlimUserStore store, ISlimAuthManager auth, CancellationToken ct) =>
             {
-                if (await store.CreateAsync(req.Email, passwordHash: string.Empty, ct) is not { } user)
+                // business data (DisplayName, roles …) as Profile – never the request itself, it holds the start password
+                if (await store.CreateAsync(new SlimNewUser { Email = req.Email }, ct) is not { } user)
                     return Results.Conflict(new { status = "already_exists" });
                 user.EmailConfirmed = true;   // the administrator vouches for the address
                 await store.UpdateSecurityStateAsync(user, ct);
-                // TODO: business profile (DisplayName, roles …) for user.Id
                 if (req.StartPassword is { } start)
                 {
                     // read out on the phone – the user must choose an own password at the first sign-in

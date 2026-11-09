@@ -185,7 +185,7 @@ app.MapPost("/api/admin/users/{userId}/ban", async (string userId, ISlimUserStor
 app.MapPost("/api/admin/invite", async (InviteRequest request, ISlimUserStore store, ISlimAuthManager auth, CancellationToken ct) =>
     {
         // CreateAsync returns null if the address is taken (unique index) – no separate check-then-act lookup
-        if (await store.CreateAsync(request.Email, passwordHash: string.Empty, ct) is not { } user)
+        if (await store.CreateAsync(new SlimNewUser { Email = request.Email }, ct) is not { } user)
             return Results.Conflict(new SlimStatusResponse("already_exists"));
         var invitation = await auth.CreateInvitationAsync(user, ct: ct);
         return Results.Ok(invitation);

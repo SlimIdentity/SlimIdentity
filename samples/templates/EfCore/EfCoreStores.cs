@@ -38,15 +38,18 @@ public sealed class EfCoreUserStore(IdentityDb identity) : ISlimUserStore
         return user is null ? null : Map(user);
     }
 
-    public async Task<SlimUser?> CreateAsync(string email, string passwordHash, CancellationToken ct)
+    public async Task<SlimUser?> CreateAsync(SlimNewUser newUser, CancellationToken ct)
     {
         var user = new AppUser
         {
-            Email = email,
-            NormalizedEmail = email.ToUpperInvariant(),
-            PasswordHash = passwordHash,
+            Email = newUser.Email,
+            NormalizedEmail = newUser.Email.ToUpperInvariant(),
+            PasswordHash = newUser.PasswordHash,
             SecurityStamp = SlimUser.NewSecurityStamp(),
         };
+        // registration profile (ISlimRegistrationProfile / ISlimAuthManager.RegisterAsync): copy it into the entity or
+        // attach related entities here – the SaveChanges below writes them together with the account
+        // if (newUser.Profile is SignUpProfile p) user.DisplayName = p.Name;
         db.Users.Add(user);
         try
         {

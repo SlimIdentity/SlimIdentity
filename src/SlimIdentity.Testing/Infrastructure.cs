@@ -61,7 +61,7 @@ internal sealed class ConformanceRun(StoreAccess access, SlimConformanceOptions 
     public async Task<SlimUser> NewUserAsync(string? email = null)
     {
         var address = email ?? NewEmail();
-        var user = await access.UseAsync<ISlimUserStore, SlimUser?>(s => s.CreateAsync(address, NewHash(), ct)).ConfigureAwait(false);
+        var user = await access.UseAsync<ISlimUserStore, SlimUser?>(s => s.CreateAsync(new SlimNewUser { Email = address, PasswordHash = NewHash() }, ct)).ConfigureAwait(false);
         return user ?? throw new ConformanceFailure($"CreateAsync returned null for the new address {address}.");
     }
 

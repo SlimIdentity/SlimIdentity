@@ -25,6 +25,7 @@ Test names refer to `tests/SlimIdentity.Tests` (`Integration/…`, `Unit/Propert
 | A7 | `X-Forwarded-For` spoofing to evade the rate limit → ignored without configured proxies | covered – `OpenScenario.A7_spoofed_forwarded_headers_do_not_reset_the_rate_limit`; trusted proxies are the host's `UseForwardedHeaders` ([guide](guides/reverse-proxy.md)); a forgotten configuration is reported (`8001`, `DeploymentDiagnostics.*`) |
 | A8 | IPv6 rotation within a /64 → one bucket | covered – `PropertyTests.All_addresses_of_one_ipv6_network_share_a_rate_limit_key` |
 | A9 | `/register` timing (write only for new addresses) | design – known limitation in the [security model](security.md#known-limitations); only measurable against the real database of a deployment, not in-process |
+| A10 | `/register` with a profile: its validation, or the profile itself, reveals or changes an existing account | covered – `RegistrationProfile.An_invalid_profile_answers_400_before_anything_is_looked_up` (same answer, no mail), `…An_existing_address_gets_the_uniform_answer_and_its_profile_is_dropped`, `…RegisterAsync_creates_the_account_with_its_profile_by_the_rules_of_register` (host endpoints) |
 
 ## B. Cookies and CSRF
 
@@ -137,6 +138,7 @@ Test names refer to `tests/SlimIdentity.Tests` (`Integration/…`, `Unit/Propert
 | H8 | Vulnerable dependencies, supply chain | covered – vulnerability check in CI, actions pinned to commit SHAs, Dependabot, CodeQL, NuGet Trusted Publishing |
 | H9 | A host hook weakens the flow (skips a check, issues a session, breaks sign-ins when it fails) | covered – by design hooks can only refuse or observe; `Hook.A_veto_ends_running_sessions_and_refreshes`, `…An_external_sign_in_is_vetoed_as_well`, `…A_failing_event_handler_changes_nothing`, `…Only_allowed_addresses_can_register` |
 | H10 | Revoked role still usable in a running session | covered – `ClaimsRefresh.A_cookie_session_loses_a_revoked_role_without_being_signed_out`, `…A_bearer_session_loses_a_revoked_role_at_once_and_its_refresh_issues_the_new_claims` (after `RefreshClaimsAsync`); without it the documented snapshot applies (`…Without_RefreshClaimsAsync_a_session_keeps_its_snapshot`) |
+| H11 | Unvalidated profile fields reach the database (mass assignment); half-created accounts (account without profile, orphaned profile rows after a lost race) | covered – `RegistrationProfile.Without_a_profile_hook_a_profile_is_refused`, `…A_valid_profile_reaches_the_store_with_the_account` (only the hook's object); EF Core package `A_registration_profile_is_saved_with_the_account_or_not_at_all`, `…A_profile_without_a_user_factory_is_refused_instead_of_lost` |
 
 ## Prompt template for one scenario
 

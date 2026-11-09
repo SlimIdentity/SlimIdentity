@@ -52,7 +52,7 @@ required in cookie mode – `#slim_status=requires_two_factor&preAuthToken=…&m
 
 | Endpoint | Body | Success | Errors |
 | :--- | :--- | :--- | :--- |
-| `POST /register` ⏱ | `email`, `password` | `200 registration_accepted` (always, also for existing addresses) | `400` validation, `403 <veto>` of a registration guard |
+| `POST /register` ⏱ | `email`, `password`, `profile` (optional object – [business data](guides/registration-profile.md)) | `200 registration_accepted` (always, also for existing addresses) | `400` validation (`profile.<field>` from your profile hook; `profile` if none is registered), `403 <veto>` of a registration guard |
 | `POST /verify-email` ⏱ | `token` | `200 email_confirmed` | `400 invalid_token` |
 | `POST /resend-verification` ⏱ | `email` | `200 verification_sent` (always) | – |
 | `POST /forgot-password` ⏱ | `email` | `200 reset_requested` (always) | – |

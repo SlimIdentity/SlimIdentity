@@ -8,7 +8,8 @@ No hook can skip a check, change the order of the flow or issue tokens itself.
 | :--- | :--- | :--- |
 | `ISlimSignInGuard` | `AddSignInGuard<T>()` | refuse a new session, a renewal or a running session |
 | `ISlimRegistrationGuard` | `AddRegistrationGuard<T>()` | refuse a new account (`/register`, external auto-registration) |
-| `ISlimEventObserver` | `AddEventObserver<T>()` | watch security events (audit trail, alerts, profile creation) |
+| `ISlimRegistrationProfile` | `AddRegistrationProfile<T>()` | validate business data of `/register` – [guide](registration-profile.md) |
+| `ISlimEventObserver` | `AddEventObserver<T>()` | watch security events (audit trail, alerts) |
 | `ISlimPasswordRule` | `AddPasswordRule<T>()` | refuse a new password |
 | `GetClaimsAsync` of your user store | – | add claims |
 
@@ -64,6 +65,9 @@ public sealed class CompanyDomainGuard : ISlimRegistrationGuard
 `/register` answers a veto with `403` and your code; an external auto-registration redirects with
 `slim_error=<code>`. **Decide from the request only** (address, `Provider`, headers such as a captcha token or an
 invitation code) – never from whether the address already has an account, or the answer reveals it.
+
+Business data for the new account (company, name, terms) is not a guard's job: `ISlimRegistrationProfile` validates
+it and your store writes it with the account – see [registration with business data](registration-profile.md).
 
 ## Events
 

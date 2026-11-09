@@ -47,6 +47,14 @@ internal sealed class SlimAuthManager(
     public Task<SlimAuthResult> SignInAsync(SlimUser user, bool useCookies, bool isPersistent = false, CancellationToken ct = default) =>
         SignInCoreAsync(user, useCookies, isPersistent, MethodPassword, null, null, issueRefreshToken: true, ct);
 
+    public async Task<SlimRegistrationResult> RegisterAsync(string email, string password, object? profile = null, CancellationToken ct = default)
+    {
+        var registration = services.GetRequiredService<SlimRegistrationService>();
+        var (normalized, invalid) = await registration.ValidateAsync(email, password, ct);
+        if (invalid is not null) return new SlimRegistrationResult(null, invalid, invalid);
+        return await registration.CreateAsync(normalized!, password, profile, ct);
+    }
+
     public async Task<SlimAuthResult> ImpersonateAsync(SlimUser targetUser, string impersonatorUserId, bool useCookies, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(targetUser);

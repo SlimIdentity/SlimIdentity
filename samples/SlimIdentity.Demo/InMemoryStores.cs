@@ -38,8 +38,9 @@ public sealed class InMemoryUserStore : ISlimUserStore
     public Task<SlimUser?> FindByIdAsync(string userId, CancellationToken ct) =>
         Task.FromResult(_users.TryGetValue(userId, out var u) ? Clone(u) : null);
 
-    public Task<SlimUser?> CreateAsync(string email, string passwordHash, CancellationToken ct)
+    public Task<SlimUser?> CreateAsync(SlimNewUser newUser, CancellationToken ct)
     {
+        var (email, passwordHash) = (newUser.Email, newUser.PasswordHash);
         lock (_users)
         {
             // "unique index": null if the address is taken (e.g. by a concurrent registration)

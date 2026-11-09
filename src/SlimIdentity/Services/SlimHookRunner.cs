@@ -41,6 +41,21 @@ internal sealed class SlimHookRunner(IHttpContextAccessor httpContextAccessor, I
         return null;
     }
 
+    /// <summary>
+    /// The host's <see cref="ISlimRegistrationProfile"/>. Without one, a sent profile is refused – nothing unvalidated
+    /// ever reaches the store.
+    /// </summary>
+    public async ValueTask<SlimProfileValidation> ValidateProfileAsync(string email, JsonElement? profile, CancellationToken ct)
+    {
+        if (profile is { ValueKind: JsonValueKind.Null or JsonValueKind.Undefined }) profile = null;
+        var http = httpContextAccessor.HttpContext;
+        if (http?.RequestServices.GetService<ISlimRegistrationProfile>() is not { } validator)
+            return profile is null
+                ? SlimProfileValidation.Valid(null)
+                : SlimProfileValidation.Invalid("", "No profile is accepted.");
+        return await validator.ValidateAsync(new SlimRegistrationProfileContext { Email = email, Profile = profile, HttpContext = http }, ct);
+    }
+
     public async ValueTask RaiseAsync(string type, string? userId, string? method = null, string? reason = null, string? actorId = null, CancellationToken ct = default)
     {
         var http = httpContextAccessor.HttpContext;

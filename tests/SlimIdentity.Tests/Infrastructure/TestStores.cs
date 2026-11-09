@@ -49,8 +49,12 @@ public sealed class TestUserStore : ISlimUserStore
     /// <summary>Called by <see cref="IncrementFailedLoginAttemptsAsync"/> before it counts (race simulation).</summary>
     public Action<string>? BeforeFailedAttempt { get; set; }
 
-    public Task<SlimUser?> CreateAsync(string email, string passwordHash, CancellationToken ct)
+    /// <summary>The profiles passed to <see cref="CreateAsync"/>, by user id.</summary>
+    public ConcurrentDictionary<string, object?> Profiles { get; } = new();
+
+    public Task<SlimUser?> CreateAsync(SlimNewUser newUser, CancellationToken ct)
     {
+        var (email, passwordHash) = (newUser.Email, newUser.PasswordHash);
         BeforeCreate?.Invoke(email);
         lock (_users)
         {
@@ -60,6 +64,7 @@ public sealed class TestUserStore : ISlimUserStore
             var user = new SlimUser { Id = Guid.NewGuid().ToString(), Email = email, PasswordHash = passwordHash };
             _users[user.Id] = user;
             _roles[user.Id] = [];
+            Profiles[user.Id] = newUser.Profile;
             return Task.FromResult<SlimUser?>(Clone(user));
         }
     }

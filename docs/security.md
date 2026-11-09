@@ -26,6 +26,7 @@ If you find a gap, please report it privately ([SECURITY.md](../SECURITY.md)).
 | Credential stuffing (one attempt per account from many IPs) | Lockout counts per account; optional lockout notification mail; optional breached-password rule for new passwords. A botnet with fresh IPs remains a residual risk – combine with 2FA or a WAF if you are a target. |
 | Weak or breached new passwords | Minimum length (NIST SP 800-63B, no composition rules) + pluggable `ISlimPasswordRule`s (sample: Have I Been Pwned with k-anonymity). |
 | Locking out a victim on purpose | Lockouts are short and grow slowly; the counter only matters after `MaxFailedAttempts` failures. (Device cookies are not implemented.) |
+| Mass assignment at registration | The `profile` of `/register` never reaches the store as sent: only what the host's `ISlimRegistrationProfile` returns does; without one a profile is refused. It is validated before anything is looked up, and discarded for an existing address (whose account stays untouched). |
 | Account enumeration | Identical answers for `/register`, `/forgot-password`, `/resend-verification`, `/change-email`; mails sent in the background; dummy hashing for unknown, inactive and locked accounts; `/login` hides inactive/locked state by default. |
 | Timing attacks on secrets | Constant-time comparison of tokens, stamps, TOTP codes; passwords via `PasswordHasher` (PBKDF2). |
 | Hash-flooding / DoS with huge passwords | Passwords longer than `Password.MaximumLength` are rejected before hashing. |

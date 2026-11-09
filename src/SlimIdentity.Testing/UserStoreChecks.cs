@@ -69,7 +69,7 @@ internal static class UserStoreChecks
             {
                 var email = run.NewEmail();
                 var first = await run.NewUserAsync(email);
-                var duplicate = await stores.UseAsync<ISlimUserStore, SlimUser?>(s => s.CreateAsync(email.ToUpperInvariant(), ConformanceRun.NewHash(), ct));
+                var duplicate = await stores.UseAsync<ISlimUserStore, SlimUser?>(s => s.CreateAsync(new SlimNewUser { Email = email.ToUpperInvariant(), PasswordHash = ConformanceRun.NewHash() }, ct));
                 Expect.True(duplicate is null, "CreateAsync created a second account for the same address (different casing).");
                 var found = await stores.UseAsync<ISlimUserStore, SlimUser?>(s => s.FindByEmailAsync(email, ct));
                 Expect.Equal(first.Id, found?.Id, "the original account after the duplicate attempt");
@@ -81,7 +81,7 @@ internal static class UserStoreChecks
             {
                 var email = run.NewEmail();
                 var results = await run.InParallelAsync(_ =>
-                    stores.UseAsync<ISlimUserStore, SlimUser?>(s => s.CreateAsync(email, ConformanceRun.NewHash(), ct)));
+                    stores.UseAsync<ISlimUserStore, SlimUser?>(s => s.CreateAsync(new SlimNewUser { Email = email, PasswordHash = ConformanceRun.NewHash() }, ct)));
                 Expect.Equal(1, results.Count(u => u is not null), "accounts created by parallel CreateAsync calls");
             });
 

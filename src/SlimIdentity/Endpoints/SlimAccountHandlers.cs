@@ -1,4 +1,3 @@
-using System.Net.Mail;
 using SlimIdentity.Contracts;
 using SlimIdentity.Http;
 using SlimIdentity.Security;
@@ -15,6 +14,7 @@ internal sealed class SlimAccountHandlers(
     SlimAuthManager authManager,
     SlimWorkflowTokens workflow,
     SlimHookRunner hooks,
+    SlimRegistrationService registration,
     SlimLinks links,
     SlimMetrics metrics,
     IOptions<SlimIdentityOptions> options,
@@ -23,8 +23,6 @@ internal sealed class SlimAccountHandlers(
     IServiceProvider services,
     ILogger<SlimAccountHandlers> logger)
 {
-    private const int MaxEmailLength = 256;
-
     private SlimIdentityOptions O => options.Value;
     private HttpContext Http => httpContextAccessor.HttpContext!;
 
@@ -32,51 +30,15 @@ internal sealed class SlimAccountHandlers(
 
     public async Task<IResult> RegisterAsync(SlimRegisterRequest? request, CancellationToken ct)
     {
-        var email = SlimEmailAddress.Normalize(request?.Email);
-        if (!IsValidEmail(email)) return InvalidEmail("email");
+        var (email, invalid) = await registration.ValidateAsync(request?.Email, request?.Password, ct);
+        if (invalid is not null) return invalid;
 
-        if (await passwordPolicy.ValidateAsync(request!.Password, email!, ct) is { } errors)
-            return SlimResults.Validation(errors);
+        // business data – validated from the request alone, before anything is looked up (no enumeration)
+        var profile = await hooks.ValidateProfileAsync(email!, request!.Profile, ct);
+        if (profile.Errors is { } errors)
+            return SlimResults.Validation(errors.ToDictionary(e => e.Key.Length == 0 ? "profile" : "profile." + e.Key, e => e.Value, StringComparer.Ordinal));
 
-        // the host's veto – decided from the request alone, before anything is looked up (no enumeration)
-        if (await hooks.CheckRegistrationAsync(email!, null, ct) is { } veto)
-            return SlimResults.Status(veto.Error, veto.Message ?? "Registration is not allowed.", StatusCodes.Status403Forbidden);
-
-        var accepted = SlimResults.Status("registration_accepted",
-            "If the address can be used, a confirmation e-mail has been sent.");
-
-        var existing = await store.FindByEmailAsync(email!, ct);
-        if (existing is not null)
-        {
-            // Enumeration prevention: identical response, comparable CPU time, a mail in both cases
-            // (sent in the background, so the mail server's latency is not observable).
-            credentials.HashPassword(new SlimUser { Email = email! }, request.Password);
-            Log.RegistrationForExistingAccount(logger, existing.Id);
-            return await AccountExistsAsync(existing.Email, existing.Id);
-        }
-
-        var hash = credentials.HashPassword(new SlimUser { Email = email! }, request.Password);
-        var user = await store.CreateAsync(email!, hash, ct);
-        if (user is null)
-        {
-            // a concurrent registration took the address between the lookup and the insert – same answer as above
-            Log.RegistrationRaceLost(logger);
-            return await AccountExistsAsync(email!, null);   // the winner of the race is not loaded
-        }
-        metrics.Registration("created");
-        await hooks.RaiseAsync(SlimEventTypes.UserCreated, user.Id, reason: "registration", ct: ct);
-
-        if (O.Endpoints.EnableEmailVerification && !user.EmailConfirmed)
-            await SendVerificationAsync(user, ct);
-
-        return accepted;
-
-        async Task<IResult> AccountExistsAsync(string existingEmail, string? existingUserId)
-        {
-            metrics.Registration("existing_account");
-            await mail.SendAsync(SlimEmailKinds.AccountExists, existingEmail, existingUserId, (s, x, c) => s.SendAccountExistsEmailAsync(x, existingEmail, c), ct);
-            return accepted;
-        }
+        return (await registration.CreateAsync(email!, request.Password, profile.Profile, ct)).Response;
     }
 
     // ------------------------------------------------------------------ POST /verify-email & /resend-verification
@@ -113,14 +75,7 @@ internal sealed class SlimAccountHandlers(
         return SlimResults.Status("verification_sent", "If the account exists and is unconfirmed, an e-mail has been sent.");
     }
 
-    internal async Task SendVerificationAsync(SlimUser user, CancellationToken ct)
-    {
-        var token = workflow.Protect(SlimWorkflowTokens.EmailVerificationPurpose,
-            new SlimEmailTokenPayload(user.Id, user.Email, user.SecurityStamp), O.Tokens.EmailVerificationTokenLifetime);
-        var email = user.Email;
-        var link = links.Build(SlimLinkKind.EmailVerification, token);
-        await mail.SendAsync(SlimEmailKinds.Verification, email, user.Id, (s, x, c) => s.SendVerificationEmailAsync(x, email, link, c), ct);
-    }
+    internal Task SendVerificationAsync(SlimUser user, CancellationToken ct) => registration.SendVerificationAsync(user, ct);
 
     // ------------------------------------------------------------------ POST /forgot-password & /reset-password
 
@@ -404,9 +359,7 @@ internal sealed class SlimAccountHandlers(
         return user is { IsActive: true } ? (user, null) : (null, Results.Unauthorized());
     }
 
-    private static bool IsValidEmail(string? email) =>
-        !string.IsNullOrEmpty(email) && email.Length <= MaxEmailLength && MailAddress.TryCreate(email, out _);
+    private static bool IsValidEmail(string? email) => SlimRegistrationService.IsValidEmail(email);
 
-    private static IResult InvalidEmail(string field) =>
-        SlimResults.Validation(new Dictionary<string, string[]> { [field] = ["A valid e-mail address is required."] });
+    private static IResult InvalidEmail(string field) => SlimRegistrationService.InvalidEmail(field);
 }

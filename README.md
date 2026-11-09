@@ -36,6 +36,8 @@ the provided samples and verify your stores with the
   user name needed; managed next to password and external logins.
 - **2FA**: TOTP (authenticator apps), e-mail codes, recovery codes – secrets encrypted at rest, every code usable once.
 - **External login**: any ASP.NET Core OAuth/OIDC handler (Google, Microsoft Entra ID, Keycloak, …) with safe account linking.
+- **Registration with business data**: company, name, terms – validated by you, created with the account in one
+  transaction (or not at all).
 - **Workflows**: registration, e-mail verification, password reset/change, e-mail change, invitations – stateless,
   single-use links.
 - **Admin tooling**: impersonation, step-up "sudo" mode, bans, start passwords with forced change, reset links,
@@ -120,6 +122,7 @@ All packages are released together with the same version.
   [2FA](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/two-factor.md) ·
   [passkeys](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/passkeys.md) ·
   [external login](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/external-login.md) ·
+  [registration with business data](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/registration-profile.md) ·
   [invitations](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/invitations.md) ·
   [admin features](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/admin-features.md) ·
   [without e-mail](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/without-email.md) ·

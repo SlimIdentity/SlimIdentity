@@ -176,7 +176,7 @@ internal sealed class SlimExternalLoginHandlers(
                     return Redirect(returnUrl, "slim_error", veto.Error);
                 }
 
-                user = await store.CreateAsync(email, string.Empty, ct);
+                user = await store.CreateAsync(new SlimNewUser { Email = email, Provider = provider }, ct);
                 if (user is null)
                 {
                     // the address was registered concurrently – never link silently; the next attempt follows the rules above

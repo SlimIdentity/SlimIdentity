@@ -36,7 +36,8 @@ public sealed record SlimLogoutRequest(string? RefreshToken = null);
 /// <summary>Body of <c>POST /auth/register</c>.</summary>
 /// <param name="Email">E-mail address of the new account.</param>
 /// <param name="Password">Password according to the password policy.</param>
-public sealed record SlimRegisterRequest(string Email, string Password);
+/// <param name="Profile">Optional business data, validated by the host's <see cref="ISlimRegistrationProfile"/>.</param>
+public sealed record SlimRegisterRequest(string Email, string Password, JsonElement? Profile = null);
 
 /// <summary>Body of <c>POST /auth/verify-email</c>.</summary>
 /// <param name="Token">Token from the verification mail.</param>

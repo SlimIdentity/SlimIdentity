@@ -13,11 +13,12 @@ public interface ISlimUserStore
     Task<SlimUser?> FindByIdAsync(string userId, CancellationToken ct);
 
     /// <summary>
-    /// Creates a user. <paramref name="passwordHash"/> is empty for users created through an external login or an
-    /// invitation. Must return the persisted user including its generated <see cref="SlimUser.Id"/>, or <c>null</c> if
-    /// the address is already taken (e.g. unique-index violation by a concurrent registration) – nothing must be created then.
+    /// Creates a user – together with <see cref="SlimNewUser.Profile"/>, your business data, in one transaction. Must
+    /// return the persisted user including its generated <see cref="SlimUser.Id"/>, or <c>null</c> if the address is
+    /// already taken (e.g. unique-index violation by a concurrent registration) – nothing must be created then, neither
+    /// the account nor its profile.
     /// </summary>
-    Task<SlimUser?> CreateAsync(string email, string passwordHash, CancellationToken ct);
+    Task<SlimUser?> CreateAsync(SlimNewUser newUser, CancellationToken ct);
 
     /// <summary>
     /// Persists all security fields of <paramref name="user"/>:
@@ -65,4 +66,28 @@ public interface ISlimUserStore
     /// <c>ClaimTypes.Role</c> is normalized to <c>role</c>; reserved SlimIdentity claims are ignored.
     /// </summary>
     Task<IReadOnlyCollection<Claim>> GetClaimsAsync(SlimUser user, CancellationToken ct);
+}
+
+/// <summary>What <see cref="ISlimUserStore.CreateAsync"/> creates.</summary>
+public sealed class SlimNewUser
+{
+    /// <summary>The address (as entered, trimmed); unique case-insensitively.</summary>
+    public required string Email { get; init; }
+
+    /// <summary>
+    /// The password hash – empty for accounts without a password (external login, invitation, created by an
+    /// administrator).
+    /// </summary>
+    public string PasswordHash { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Your business data for the new account: what <see cref="ISlimRegistrationProfile"/> returned for the
+    /// <c>profile</c> of <c>/register</c>, what your endpoint passed to <see cref="ISlimAuthManager.RegisterAsync"/>, or
+    /// what you set yourself. <c>null</c> without a profile (always for an external login). Write it in the same
+    /// transaction as the account.
+    /// </summary>
+    public object? Profile { get; init; }
+
+    /// <summary>The external provider an account is created for (automatic registration), else <c>null</c>.</summary>
+    public string? Provider { get; init; }
 }

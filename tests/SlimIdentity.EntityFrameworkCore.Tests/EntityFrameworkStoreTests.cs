@@ -35,7 +35,17 @@ public class GuidUser : ISlimUserEntity<Guid>
 
     public string Role { get; set; } = "member";         // business data of the host
     public string? DisplayName { get; set; }
+    public Company? Company { get; set; }                // a related entity, written with the account
 }
+
+public class Company
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Name { get; set; } = "";
+}
+
+/// <summary>A validated registration profile (what ISlimRegistrationProfile returns).</summary>
+public sealed record SignUpProfile(string Name, string Company);
 
 public class IntUser : ISlimUserEntity<int>
 {
@@ -58,6 +68,7 @@ public class IntUser : ISlimUserEntity<int>
 public sealed class GuidContext(DbContextOptions<GuidContext> options) : DbContext(options)
 {
     public DbSet<GuidUser> Users => Set<GuidUser>();
+    public DbSet<Company> Companies => Set<Company>();
     protected override void OnModelCreating(ModelBuilder b) => b.ApplySlimIdentity<GuidUser, Guid>();
 }
 
@@ -78,7 +89,9 @@ public sealed class RoleClaims : ISlimUserClaimsProvider<GuidUser>
 
 public sealed class NamedUsers : ISlimUserFactory<GuidUser>
 {
-    public GuidUser Create() => new() { DisplayName = "new member" };
+    public GuidUser Create(SlimNewUser user) => user.Profile is SignUpProfile p
+        ? new() { DisplayName = p.Name, Company = new Company { Name = p.Company } }
+        : new() { DisplayName = "new member" };
 }
 
 // ---------------------------------------------------------------------------------------------- tests
@@ -91,12 +104,14 @@ public sealed class EntityFrameworkStoreTests
             DataSource = Path.Combine(Path.GetTempPath(), $"slimidentity-ef-{Guid.NewGuid():N}.db"), DefaultTimeout = 30, Pooling = false,
         }.ToString();
 
-    private static async Task<ServiceProvider> BuildAsync<TContext, TUser, TKey>(Action<DbContextOptionsBuilder> provider, bool wal = false)
+    private static async Task<ServiceProvider> BuildAsync<TContext, TUser, TKey>(Action<DbContextOptionsBuilder> provider, bool wal = false,
+        Action<IServiceCollection>? configure = null)
         where TContext : DbContext
         where TUser : class, ISlimUserEntity<TKey>, new()
         where TKey : IEquatable<TKey>, IParsable<TKey>
     {
         var services = new ServiceCollection();
+        configure?.Invoke(services);
         services.AddDbContext<TContext>(provider);
         services.AddSingleton(TimeProvider.System);
         services.AddSlimIdentity(o => o.Tokens.JwtSecret = new string('x', 32))
@@ -117,6 +132,42 @@ public sealed class EntityFrameworkStoreTests
         await using var sp = await BuildAsync<GuidContext, GuidUser, Guid>(o => o.UseSqlite(file), wal: true);
         var report = await SlimStoreConformance.VerifyAsync(sp);
         Assert.Equal(6, report.Results.Select(r => r.Store).Distinct().Count());   // user, 2FA, refresh, sessions, external logins, passkeys
+    }
+
+    [Fact]
+    public async Task A_registration_profile_is_saved_with_the_account_or_not_at_all()
+    {
+        var file = SqliteFile();
+        await using var sp = await BuildAsync<GuidContext, GuidUser, Guid>(o => o.UseSqlite(file),
+            configure: s => s.AddSingleton<ISlimUserFactory<GuidUser>, NamedUsers>());
+        await using var scope = sp.CreateAsyncScope();
+        var store = scope.ServiceProvider.GetRequiredService<ISlimUserStore>();
+
+        var created = await store.CreateAsync(new SlimNewUser { Email = "a@test.local", Profile = new SignUpProfile("Ada", "ACME") }, default);
+        var duplicate = await store.CreateAsync(new SlimNewUser { Email = "A@TEST.local", Profile = new SignUpProfile("Eve", "Evil") }, default);
+        var next = await store.CreateAsync(new SlimNewUser { Email = "b@test.local", Profile = new SignUpProfile("Bob", "Bobco") }, default);
+
+        Assert.NotNull(created);
+        Assert.Null(duplicate);
+        Assert.NotNull(next);
+        await using var check = sp.CreateAsyncScope();
+        var db = check.ServiceProvider.GetRequiredService<GuidContext>();
+        Assert.Equal(["ACME", "Bobco"], await db.Companies.Select(c => c.Name).OrderBy(n => n).ToListAsync());   // no "Evil", not even later
+        var ada = await db.Users.Include(u => u.Company).SingleAsync(u => u.Email == "a@test.local");
+        Assert.Equal(("Ada", "ACME"), (ada.DisplayName, ada.Company!.Name));
+    }
+
+    [Fact]
+    public async Task A_profile_without_a_user_factory_is_refused_instead_of_lost()
+    {
+        var file = SqliteFile();
+        await using var sp = await BuildAsync<GuidContext, GuidUser, Guid>(o => o.UseSqlite(file));
+        await using var scope = sp.CreateAsyncScope();
+        var store = scope.ServiceProvider.GetRequiredService<ISlimUserStore>();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            store.CreateAsync(new SlimNewUser { Email = "a@test.local", Profile = new SignUpProfile("Ada", "ACME") }, default));
+        Assert.Null(await store.FindByEmailAsync("a@test.local", default));
     }
 
     [Fact]

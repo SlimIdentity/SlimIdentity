@@ -3,11 +3,27 @@ using System.Linq.Expressions;
 
 namespace SlimIdentity.EntityFrameworkCore;
 
-/// <summary>Optional: creates new user entities (register, external login, invitation) – e.g. to set a tenant or defaults.</summary>
+/// <summary>
+/// Optional: creates new user entities (registration, external login) – sets a tenant, defaults and the registration
+/// profile. Required as soon as accounts are created with a <see cref="SlimNewUser.Profile"/>.
+/// </summary>
+/// <example><code>
+/// public sealed class AppUsers : ISlimUserFactory&lt;AppUser&gt;
+/// {
+///     public AppUser Create(SlimNewUser user) => user.Profile is SignUpProfile p
+///         ? new AppUser { DisplayName = p.Name, Company = new Company { Name = p.Company } }   // saved together
+///         : new AppUser();
+/// }
+/// </code></example>
 public interface ISlimUserFactory<out TUser>
 {
-    /// <summary>A new, not yet tracked user entity; SlimIdentity sets the address, hash and security fields afterwards.</summary>
-    TUser Create();
+    /// <summary>
+    /// A new, not yet tracked user entity for <paramref name="user"/>. Copy what you need from
+    /// <see cref="SlimNewUser.Profile"/> into it – related entities set as navigation properties are inserted in the same
+    /// <c>SaveChanges</c>, so account and profile are created together or not at all. SlimIdentity sets the address,
+    /// hash and security fields afterwards.
+    /// </summary>
+    TUser Create(SlimNewUser user);
 }
 
 /// <summary>Optional: the host claims (roles, tenant, …) of a user, added to every cookie and token.</summary>
@@ -75,28 +91,35 @@ public class SlimEfUserStore<TContext, TUser, TKey>(SlimEfContext<TContext> cont
             : null;
 
     /// <inheritdoc />
-    public async Task<SlimUser?> CreateAsync(string email, string passwordHash, CancellationToken ct)
+    public async Task<SlimUser?> CreateAsync(SlimNewUser newUser, CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(email);
-        var user = services.GetService<ISlimUserFactory<TUser>>()?.Create() ?? new TUser();
-        user.Email = email;
-        user.NormalizedEmail = Normalize(email);
-        user.PasswordHash = passwordHash ?? string.Empty;
+        ArgumentNullException.ThrowIfNull(newUser);
+        ArgumentNullException.ThrowIfNull(newUser.Email);
+        var factory = services.GetService<ISlimUserFactory<TUser>>();
+        if (factory is null && newUser.Profile is not null)
+            throw new InvalidOperationException(
+                $"SlimIdentity: a registration profile ({newUser.Profile.GetType().Name}) needs an ISlimUserFactory<{typeof(TUser).Name}> " +
+                "that writes it – otherwise it would be lost.");
+        var user = factory?.Create(newUser) ?? new TUser();
+        user.Email = newUser.Email;
+        user.NormalizedEmail = Normalize(newUser.Email);
+        user.PasswordHash = newUser.PasswordHash ?? string.Empty;
         user.SecurityStamp = SlimUser.NewSecurityStamp();
         user.IsActive = true;
-        Users.Add(user);
+        Users.Add(user);   // with whatever the factory attached (profile entities): one SaveChanges, one transaction
         try
         {
             await db.SaveChangesAsync(ct).ConfigureAwait(false);
         }
         catch (DbUpdateException)
         {
-            // unique index on NormalizedEmail: a concurrent registration took the address – anything else is rethrown
-            db.Entry(user).State = EntityState.Detached;
+            // unique index on NormalizedEmail: a concurrent registration took the address – anything else is rethrown.
+            // Nothing was written; forget the account and its profile entities (the store's own context).
+            db.ChangeTracker.Clear();
             if (await IsEmailTakenAsync(user.NormalizedEmail, default, ct).ConfigureAwait(false)) return null;
             throw;
         }
-        db.Entry(user).State = EntityState.Detached;
+        db.ChangeTracker.Clear();
         return Map(user);
     }
 

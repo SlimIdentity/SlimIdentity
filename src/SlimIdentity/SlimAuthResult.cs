@@ -61,3 +61,24 @@ public sealed record SlimPasswordReset(string Token, string Link, DateTimeOffset
 /// <param name="Link">The invitation link (<c>Links.BaseUrl</c> + <c>/accept-invitation</c> or <c>Links.InvitationUrl</c>) with the token inserted, or the raw token if neither is configured.</param>
 /// <param name="ExpiresAt">End of validity.</param>
 public sealed record SlimInvitation(string Token, string Link, DateTimeOffset ExpiresAt);
+
+/// <summary>
+/// Result of <see cref="ISlimAuthManager.RegisterAsync"/>. Return <see cref="Response"/> from a public endpoint: it does
+/// not reveal whether the address already had an account.
+/// </summary>
+public sealed class SlimRegistrationResult
+{
+    internal SlimRegistrationResult(SlimUser? user, IResult? failure, IResult response) => (User, Failure, Response) = (user, failure, response);
+
+    /// <summary>
+    /// The new account – <c>null</c> if <see cref="Failure"/> is set or the address already has an account (its owner
+    /// got the "account exists" mail instead). Never tell the caller which of the two happened.
+    /// </summary>
+    public SlimUser? User { get; }
+
+    /// <summary><c>400</c> (address, password rules) or <c>403</c> (a registration guard's veto); <c>null</c> otherwise.</summary>
+    public IResult? Failure { get; }
+
+    /// <summary>The answer of <c>POST /register</c>: <see cref="Failure"/>, or the uniform <c>registration_accepted</c>.</summary>
+    public IResult Response { get; }
+}

@@ -46,7 +46,7 @@ Every call is logged (event ids 4007–4011) without passwords or links. A compl
 **Creating an account:**
 
 ```csharp
-if (await store.CreateAsync(email, passwordHash: string.Empty, ct) is not { } user)
+if (await store.CreateAsync(new SlimNewUser { Email = email }, ct) is not { } user)   // Profile = your business data
     return Results.Conflict();                  // address taken
 user.EmailConfirmed = true;                     // the administrator vouches for the address
 await store.UpdateSecurityStateAsync(user, ct);
