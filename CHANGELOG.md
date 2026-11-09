@@ -84,6 +84,10 @@ First public release (1.0.0) in preparation.
 - Tenants with own domains: `ISlimOriginPolicy` (`AddOriginPolicy<T>()`) decides trusted origins per request for the
   CSRF check, `returnUrl` and CORS; `ISlimLinkBuilder` (`AddLinkBuilder<T>()`) builds mail, reset and invitation links
   per request. `AddCorsPolicy()` derives CORS from the same origins (`SlimIdentityDefaults.CorsPolicy`).
+- Sign-in methods: `GET /auth/sign-in-methods` (password, linked external logins) and
+  `POST /auth/sign-in-methods/external/remove` – password required, never the last way in. `ISlimExternalLoginStore`
+  gains `GetExternalLoginsAsync` and `RemoveExternalLoginAsync` (checked by the conformance kit). **Breaking** for
+  external-login stores.
 - OpenID Connect Back-Channel Logout: `AddBackChannelLogout(provider, …)` maps `POST /auth/backchannel-logout/{provider}`;
   a validated logout token from an enterprise identity provider ends every session of the user linked to its `sub`.
 - `ISlimAuthManager.RefreshClaimsAsync(user)`: after a change of roles or permissions, running sessions reload their

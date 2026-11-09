@@ -270,6 +270,23 @@ public sealed class EfCoreExternalLoginStore(IdentityDb identity, ISlimUserStore
         var id = Guid.Parse(userId);
         return db.ExternalLogins.Where(l => l.UserId == id).ExecuteDeleteAsync(ct);
     }
+
+    public async Task<IReadOnlyList<SlimExternalLogin>> GetExternalLoginsAsync(string userId, CancellationToken ct)
+    {
+        var id = Guid.Parse(userId);
+        return await db.ExternalLogins.AsNoTracking().Where(l => l.UserId == id)
+            .OrderBy(l => l.Provider).ThenBy(l => l.ProviderKey)
+            .Select(l => new SlimExternalLogin(l.Provider, l.ProviderKey)).ToListAsync(ct);
+    }
+
+    public async Task<bool> RemoveExternalLoginAsync(string userId, string provider, string providerKey, CancellationToken ct)
+    {
+        var id = Guid.Parse(userId);
+        // exact (case-sensitive) key: compare in memory, the database collation may ignore case
+        var keys = await db.ExternalLogins.AsNoTracking().Where(l => l.UserId == id && l.Provider == provider).Select(l => l.ProviderKey).ToListAsync(ct);
+        if (!keys.Contains(providerKey, StringComparer.Ordinal)) return false;
+        return await db.ExternalLogins.Where(l => l.UserId == id && l.Provider == provider && l.ProviderKey == providerKey).ExecuteDeleteAsync(ct) > 0;
+    }
 }
 
 /// <summary>Server-side sessions (per-device logout, "your devices" list). Clean up expired rows periodically.</summary>

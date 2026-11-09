@@ -396,4 +396,33 @@ public class SlimEfExternalLoginStore<TContext, TKey>(SlimEfContext<TContext> co
         SlimEf.TryParseKey<TKey>(userId, out var key)
             ? Logins.Where(SlimEf.Equal<SlimExternalLoginEntity<TKey>, TKey>(nameof(SlimExternalLoginEntity<TKey>.UserId), key)).ExecuteDeleteAsync(ct)
             : Task.CompletedTask;
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<SlimExternalLogin>> GetExternalLoginsAsync(string userId, CancellationToken ct)
+    {
+        if (!SlimEf.TryParseKey<TKey>(userId, out var key)) return [];
+        return await Logins.AsNoTracking()
+            .Where(SlimEf.Equal<SlimExternalLoginEntity<TKey>, TKey>(nameof(SlimExternalLoginEntity<TKey>.UserId), key))
+            .OrderBy(l => l.Provider).ThenBy(l => l.ProviderKey)
+            .Select(l => new SlimExternalLogin(l.Provider, l.ProviderKey))
+            .ToListAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> RemoveExternalLoginAsync(string userId, string provider, string providerKey, CancellationToken ct)
+    {
+        if (!SlimEf.TryParseKey<TKey>(userId, out var key)) return false;
+        // candidates by user and provider, the key compared exactly in memory (case-sensitive, like FindByExternalLoginAsync)
+        var candidates = await Logins.AsNoTracking()
+            .Where(SlimEf.Equal<SlimExternalLoginEntity<TKey>, TKey>(nameof(SlimExternalLoginEntity<TKey>.UserId), key))
+            .Where(l => l.Provider == provider)
+            .Select(l => l.ProviderKey)
+            .ToListAsync(ct).ConfigureAwait(false);
+        if (!candidates.Contains(providerKey, StringComparer.Ordinal)) return false;
+
+        return await Logins
+            .Where(SlimEf.Equal<SlimExternalLoginEntity<TKey>, TKey>(nameof(SlimExternalLoginEntity<TKey>.UserId), key))
+            .Where(l => l.Provider == provider && l.ProviderKey == providerKey)
+            .ExecuteDeleteAsync(ct).ConfigureAwait(false) > 0;
+    }
 }

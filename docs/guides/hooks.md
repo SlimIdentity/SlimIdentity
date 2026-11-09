@@ -89,7 +89,7 @@ public sealed class AuditTrail(AppDbContext db) : ISlimEventObserver
 | `email_confirmed`, `email_changed` | – |
 | `password_changed` | reason `changed`, `reset`, `invitation`, `forced_change`, `set_by_administrator` |
 | `two_factor_enabled` / `two_factor_disabled` | method `totp`/`email` / reason `user`, `administrator` |
-| `external_login_linked` | method = provider |
+| `external_login_linked`, `external_login_removed` | method = provider |
 | `sessions_revoked`, `refresh_token_reuse` | – |
 | `impersonation_started`, `impersonation_ended` | `ActorId` = administrator |
 

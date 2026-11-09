@@ -309,6 +309,23 @@ public sealed class DapperExternalLoginStore(NpgsqlDataSource db, ISlimUserStore
         await c.ExecuteAsync(new CommandDefinition(
             "DELETE FROM external_logins WHERE user_id = @userId::uuid", new { userId }, cancellationToken: ct));
     }
+
+    public async Task<IReadOnlyList<SlimExternalLogin>> GetExternalLoginsAsync(string userId, CancellationToken ct)
+    {
+        await using var c = await db.OpenConnectionAsync(ct);
+        var rows = await c.QueryAsync<(string Provider, string ProviderKey)>(new CommandDefinition(
+            "SELECT provider, provider_key FROM external_logins WHERE user_id = @userId::uuid ORDER BY provider, provider_key",
+            new { userId }, cancellationToken: ct));
+        return rows.Select(r => new SlimExternalLogin(r.Provider, r.ProviderKey)).ToList();
+    }
+
+    public async Task<bool> RemoveExternalLoginAsync(string userId, string provider, string providerKey, CancellationToken ct)
+    {
+        await using var c = await db.OpenConnectionAsync(ct);
+        return await c.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM external_logins WHERE user_id = @userId::uuid AND provider = @provider AND provider_key = @providerKey",
+            new { userId, provider, providerKey }, cancellationToken: ct)) > 0;
+    }
 }
 
 public sealed class DapperApiKeyStore(NpgsqlDataSource db) : ISlimApiKeyStore

@@ -67,6 +67,7 @@ public static class SlimIdentityEndpointExtensions
         if (Has<ISlimSessionStore>()) MapSessions(group);
         if (Has<ISlimTwoFactorStore>()) MapTwoFactor(group, o);
         if (Has<ISlimExternalLoginStore>()) MapExternal(group, o);
+        MapSignInMethods(group, Has<ISlimExternalLoginStore>());
         if (Has<ISlimExternalLoginStore>() && Has<SlimBackChannelProviders>()) MapBackChannelLogout(group);
 
         return group;
@@ -386,6 +387,27 @@ public static class SlimIdentityEndpointExtensions
     }
 
     // ------------------------------------------------------------------ external login
+
+    private static void MapSignInMethods(RouteGroupBuilder root, bool externalLogins)
+    {
+        var group = root.MapGroup("/sign-in-methods").RequireAuthorization(SlimAuthorize);
+
+        group.MapGet("", static ([FromServices] SlimSignInMethodHandlers h, CancellationToken ct) => h.ListAsync(ct))
+            .WithName("SlimIdentity_SignInMethods")
+            .WithSummary("The sign-in methods of the account: password, linked external logins.")
+            .Produces<SlimSignInMethodsResponse>();
+
+        if (!externalLogins) return;
+        group.MapPost("/external/remove", static ([FromBody] SlimRemoveExternalLoginRequest request,
+                [FromServices] SlimSignInMethodHandlers h, CancellationToken ct) => h.RemoveExternalAsync(request, ct))
+            .WithName("SlimIdentity_RemoveExternalLogin")
+            .WithSummary("Remove a linked external login (password required if the account has one) – never the last sign-in method.")
+            .Produces<SlimStatusResponse>()
+            .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
+            .Produces<SlimStatusResponse>(StatusCodes.Status404NotFound)
+            .Produces<SlimStatusResponse>(StatusCodes.Status409Conflict)
+            .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy);
+    }
 
     private static void MapBackChannelLogout(RouteGroupBuilder group)
     {

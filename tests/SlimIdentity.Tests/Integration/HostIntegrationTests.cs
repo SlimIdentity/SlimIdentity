@@ -310,6 +310,15 @@ public sealed class TestExternalLoginStore(ISlimUserStore users) : ISlimExternal
         foreach (var link in _links.Where(l => l.Value == userId).ToList()) _links.TryRemove(link.Key, out _);
         return Task.CompletedTask;
     }
+
+    public Task<IReadOnlyList<SlimExternalLogin>> GetExternalLoginsAsync(string userId, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<SlimExternalLogin>>(_links.Where(l => l.Value == userId)
+            .Select(l => new SlimExternalLogin(l.Key.Item1, l.Key.Item2))
+            .OrderBy(l => l.Provider, StringComparer.Ordinal).ThenBy(l => l.ProviderKey, StringComparer.Ordinal).ToList());
+
+    public Task<bool> RemoveExternalLoginAsync(string userId, string provider, string providerKey, CancellationToken ct) =>
+        Task.FromResult(((ICollection<KeyValuePair<(string, string), string>>)_links)
+            .Remove(new KeyValuePair<(string, string), string>((provider, providerKey), userId)));
 }
 
 internal static class ApiClientExtensions

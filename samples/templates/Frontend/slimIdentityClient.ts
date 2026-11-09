@@ -25,6 +25,11 @@ export interface LoginChallenge {
   passwordChangeToken?: string;
 }
 
+export interface SignInMethods {
+  hasPassword: boolean;
+  externalLogins: { provider: string; providerKey: string }[];
+}
+
 export interface SessionInfo {
   id: string;
   mode: "cookie" | "bearer";
@@ -214,6 +219,16 @@ export const cookieAuth = {
     return finishLink((path, init) => cookieFetch(path, init), password);
   },
 
+  /** Password and linked providers – for a "sign-in methods" settings page. */
+  async signInMethods(): Promise<SignInMethods> {
+    return (await cookieFetch("/auth/sign-in-methods")).json();
+  },
+
+  /** "external_login_removed", or an error code – last_sign_in_method: add another way in first. */
+  removeExternalLogin(provider: string, providerKey: string, password?: string): Promise<string> {
+    return removeExternal((path, init) => cookieFetch(path, init), provider, providerKey, password);
+  },
+
   api: cookieFetch,
 };
 
@@ -256,6 +271,12 @@ async function finishLink(send: (path: string, init: RequestInit) => Promise<Res
 
   const r = await send("/auth/link/external", { method: "POST", body: JSON.stringify({ code, codeVerifier, password }) });
   if (r.ok) sessionStorage.removeItem(LINK_PKCE_KEY);   // kept on a wrong password: the user may try again
+  return ((await r.json().catch(() => ({}))) as { status?: string }).status ?? `http_${r.status}`;
+}
+
+async function removeExternal(send: (path: string, init: RequestInit) => Promise<Response>,
+  provider: string, providerKey: string, password?: string): Promise<string> {
+  const r = await send("/auth/sign-in-methods/external/remove", { method: "POST", body: JSON.stringify({ provider, providerKey, password }) });
   return ((await r.json().catch(() => ({}))) as { status?: string }).status ?? `http_${r.status}`;
 }
 
@@ -386,6 +407,14 @@ export const bearerAuth = {
   /** On the return page of linkWith(): "external_login_linked", or an error code. */
   completeLink(password?: string): Promise<string> {
     return finishLink((path, init) => bearerFetch(path, init), password);
+  },
+
+  async signInMethods(): Promise<SignInMethods> {
+    return (await bearerFetch("/auth/sign-in-methods")).json();
+  },
+
+  removeExternalLogin(provider: string, providerKey: string, password?: string): Promise<string> {
+    return removeExternal((path, init) => bearerFetch(path, init), provider, providerKey, password);
   },
 
   api: bearerFetch,

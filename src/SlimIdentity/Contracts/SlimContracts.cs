@@ -77,6 +77,17 @@ public sealed record SlimPasswordConfirmationRequest(string Password);
 /// <param name="TwoFactorRememberToken">"Remember this device" token of a bearer client – skips the second factor like at <c>/auth/login</c>.</param>
 public sealed record SlimExternalExchangeRequest(string Code, string? CodeVerifier = null, string? TwoFactorRememberToken = null);
 
+/// <summary>Body of <c>GET /auth/sign-in-methods</c>.</summary>
+/// <param name="HasPassword">The account has a password (or the host validates passwords externally, e.g. LDAP).</param>
+/// <param name="ExternalLogins">Linked external identities.</param>
+public sealed record SlimSignInMethodsResponse(bool HasPassword, IReadOnlyList<SlimExternalLogin> ExternalLogins);
+
+/// <summary>Body of <c>POST /auth/sign-in-methods/external/remove</c>.</summary>
+/// <param name="Provider">Provider of the link, as listed.</param>
+/// <param name="ProviderKey">Subject at the provider, as listed.</param>
+/// <param name="Password">The current password – required for accounts that have one.</param>
+public sealed record SlimRemoveExternalLoginRequest(string Provider, string ProviderKey, string? Password = null);
+
 /// <summary>Body of <c>POST /auth/link/external</c>: links the external identity of a link flow to the signed-in account.</summary>
 /// <param name="Code">The one-time code from the redirect's fragment (<c>#slim_link_code=…</c>).</param>
 /// <param name="CodeVerifier">The PKCE verifier of the link flow – a planted code from someone else's flow fails here.</param>

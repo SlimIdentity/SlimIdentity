@@ -117,6 +117,9 @@ internal static partial class Log
     public static partial void ForcedPasswordChangeCompleted(ILogger logger, string userId);
 
     // ---------------------------------------------------------------- 5xxx external login
+    [LoggerMessage(5013, LogLevel.Information, "SlimIdentity: {Provider} login removed from user {UserId}.")]
+    public static partial void ExternalLoginRemoved(ILogger logger, string provider, string userId);
+
     [LoggerMessage(5010, LogLevel.Information, "SlimIdentity: back-channel logout from {Provider} ended all sessions of user {UserId}.")]
     public static partial void BackChannelLogout(ILogger logger, string provider, string userId);
 

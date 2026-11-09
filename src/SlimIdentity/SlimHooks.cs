@@ -120,6 +120,8 @@ public static class SlimEventTypes
     public const string ExternalLoginLinked = "external_login_linked";
     /// <summary>The host's claims of the account changed (<c>RefreshClaimsAsync</c>); sessions reload them.</summary>
     public const string ClaimsChanged = "claims_changed";
+    /// <summary>An external login was removed from the account. <c>Method</c> = provider.</summary>
+    public const string ExternalLoginRemoved = "external_login_removed";
     /// <summary>All sessions of the account were ended (sign out everywhere, ban).</summary>
     public const string SessionsRevoked = "sessions_revoked";
     /// <summary>A used refresh token came back – treated as theft, sessions revoked.</summary>

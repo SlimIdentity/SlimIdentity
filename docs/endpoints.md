@@ -39,6 +39,8 @@ with `ISlimTwoFactorStore`.
 | `GET /login/{provider}/callback` | Handled internally; redirects to `returnUrl`. |
 | `POST /login/external/exchange` ⏱ | Bearer clients: `{ "code", "codeVerifier", "twoFactorRememberToken"? }` – `code` from the redirect's fragment, `codeVerifier` from the PKCE challenge → token pair, or `401 requires_two_factor` with `preAuthToken`. `401 invalid_token`. |
 | `POST /link/external` ⏱ 🔒 | Links the identity of a link flow (`GET /login/{provider}?link=true&code_challenge=…`, code in `#slim_link_code=…`) to the signed-in account: `{ "code", "codeVerifier", "password" }` → `200 external_login_linked`. `400 invalid_password`, `401 invalid_token`, `403 email_not_confirmed`, `409 external_login_taken`, `423`. |
+| `GET /sign-in-methods` 🔒 | `200` `hasPassword`, `externalLogins` (`provider`, `providerKey`). |
+| `POST /sign-in-methods/external/remove` ⏱ 🔒 | `{ "provider", "providerKey", "password" }` (password if the account has one) → `200 external_login_removed`. `400 invalid_password`, `403` during impersonation, `404 external_login_not_found`, `409 last_sign_in_method`, `423`. |
 | `POST /backchannel-logout/{provider}` | OpenID Connect Back-Channel Logout (only with `AddBackChannelLogout`): form field `logout_token` from the identity provider → `200`, every session of the user linked to its `sub` ends. `400 invalid_request` (signature, issuer, audience, event, `nonce`, age, replay, no `sub`), `404 unknown_provider`, `503` if the discovery document cannot be loaded. No `X-CSRF` needed. |
 
 Redirect results on `returnUrl`: cookie mode – cookie set, no parameters; bearer mode – `#code=…` (fragment); 2FA

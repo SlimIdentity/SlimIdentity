@@ -88,6 +88,21 @@ The TypeScript client does it with `linkWith(provider)` and, on the return page,
 If your own code links identities (`ISlimExternalLoginStore.LinkExternalLoginAsync`), do it only for confirmed accounts
 and only after the same proofs.
 
+## Managing sign-in methods
+
+```http
+GET  /auth/sign-in-methods                    → { "hasPassword": true, "externalLogins": [ { "provider": "Google", "providerKey": "1093…" } ] }
+POST /auth/sign-in-methods/external/remove    { "provider": "Google", "providerKey": "1093…", "password": "…" }
+```
+
+- Removing needs the current password if the account has one – a stolen session alone must not cut the owner's ways in.
+- **The last way in is never removed:** an account without a password keeps at least one external login
+  (`409 last_sign_in_method` – link another provider or set a password via reset first). Parallel removals cannot get
+  around it.
+- Not during an impersonation (`403`). Event `external_login_removed`.
+
+TypeScript: `signInMethods()` and `removeExternalLogin(provider, providerKey, password)`.
+
 ## Signing out at the provider
 
 After the sign-in, the session lives in your application. Signing out at the provider – or revoking the app's access in
