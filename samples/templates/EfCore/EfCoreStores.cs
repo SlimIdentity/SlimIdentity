@@ -143,9 +143,17 @@ public sealed class EfCoreUserStore(IdentityDb identity) : ISlimUserStore
             .Select(u => new { u.TenantId, u.DisplayName, Roles = u.Roles.Select(r => r.Role).ToList() })
             .FirstAsync(ct);
 
+        // groups resolved to permissions – one claim per permission code (keep them short: they travel with every request)
+        var permissions = await db.GroupMembers.AsNoTracking()
+            .Where(m => m.UserId == id)
+            .Join(db.GroupPermissions, m => m.GroupId, p => p.GroupId, (_, p) => p.Permission)
+            .Distinct()
+            .ToListAsync(ct);
+
         var claims = new List<Claim> { new("tenant_id", data.TenantId.ToString()) };
         if (data.DisplayName is not null) claims.Add(new Claim("name", data.DisplayName));
         claims.AddRange(data.Roles.Select(r => new Claim(ClaimTypes.Role, r)));
+        claims.AddRange(permissions.Select(p => new Claim("permission", p)));
         return claims;
     }
 

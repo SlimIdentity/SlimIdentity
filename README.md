@@ -121,6 +121,7 @@ All packages are released together with the same version.
   [admin features](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/admin-features.md) ·
   [without e-mail](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/without-email.md) ·
   [hooks](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/hooks.md) ·
+  [roles and permissions](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/roles-and-permissions.md) ·
   [multi-tenancy](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/multi-tenancy.md) ·
   [LDAP](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/ldap-and-legacy-passwords.md) ·
   [client certificates](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/client-certificates.md) ·

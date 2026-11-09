@@ -264,7 +264,7 @@ internal sealed class SlimExternalLoginHandlers(
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
 
         var user = await store.FindByIdAsync(payload.Uid, ct);
-        if (user is null || !user.IsActive || !SlimHashing.FixedTimeEquals(user.SecurityStamp, payload.Stamp))
+        if (user is null || !user.IsActive || !SlimUser.IsSameSecurityState(user.SecurityStamp, payload.Stamp))
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
 
         if (!SlimModes.TryResolve(O, false, out _, out var modeError)) return modeError!;

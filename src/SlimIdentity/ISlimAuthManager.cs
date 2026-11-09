@@ -76,6 +76,15 @@ public interface ISlimAuthManager
     /// </summary>
     Task ResetTwoFactorAsync(SlimUser user, CancellationToken ct = default);
 
+    /// <summary>
+    /// The host changed what <c>GetClaimsAsync</c> returns for <paramref name="user"/> (roles, permissions, tenant):
+    /// running sessions pick up the new claims at their next validation – bearer tokens on the next request, cookies
+    /// within <c>Cookies.SecurityStampValidationInterval</c> – without signing anyone out. Changes only the claims part of
+    /// the security stamp: links, refresh tokens and remembered devices stay valid. As long as it is not called, no
+    /// session reloads its claims (they are a snapshot of the sign-in or the last refresh).
+    /// </summary>
+    Task RefreshClaimsAsync(SlimUser user, CancellationToken ct = default);
+
     /// <summary>Administrator: ends a lockout of <paramref name="user"/> and resets the failed-attempt counter.</summary>
     Task UnlockAsync(SlimUser user, CancellationToken ct = default);
 

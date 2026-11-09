@@ -67,6 +67,9 @@ internal static partial class Log
     [LoggerMessage(7006, LogLevel.Warning, "SlimIdentity: mail throttle full ({Capacity} recipients within 15 minutes) – mails to new recipients are not sent. A flood of fresh addresses is likely.")]
     public static partial void MailThrottleFull(ILogger logger, int capacity);
 
+    [LoggerMessage(3010, LogLevel.Information, "SlimIdentity: claims of user {UserId} changed – sessions reload them.")]
+    public static partial void ClaimsRefreshed(ILogger logger, string userId);
+
     [LoggerMessage(3007, LogLevel.Information, "SlimIdentity: sign-in guard refused user {UserId} ({Error}, stage {Stage}).")]
     public static partial void SignInVetoed(ILogger logger, string userId, string error, string stage);
 

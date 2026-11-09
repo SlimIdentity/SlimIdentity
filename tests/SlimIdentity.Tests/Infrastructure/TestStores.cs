@@ -116,7 +116,21 @@ public sealed class TestUserStore : ISlimUserStore
         }
     }
 
-    public Task<IReadOnlyCollection<Claim>> GetClaimsAsync(SlimUser user, CancellationToken ct) =>
+    /// <summary>Calls of <see cref="GetClaimsAsync"/> – claims must only be reloaded when they changed.</summary>
+    public int ClaimsLoads => Volatile.Read(ref _claimsLoads);
+    private int _claimsLoads;
+
+    public void SetRoles(string userId, params string[] roles) => _roles[userId] = roles;
+
+    public Task<IReadOnlyCollection<Claim>> GetClaimsAsync(SlimUser user, CancellationToken ct) => CountedClaims(user);
+
+    private Task<IReadOnlyCollection<Claim>> CountedClaims(SlimUser user)
+    {
+        Interlocked.Increment(ref _claimsLoads);
+        return LoadClaims(user);
+    }
+
+    private Task<IReadOnlyCollection<Claim>> LoadClaims(SlimUser user) =>
         Task.FromResult<IReadOnlyCollection<Claim>>(
             (_roles.TryGetValue(user.Id, out var roles) ? roles : []).Select(r => new Claim(ClaimTypes.Role, r)).ToList());
 

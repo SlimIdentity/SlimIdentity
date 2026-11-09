@@ -64,7 +64,7 @@ internal sealed class SlimTwoFactorHandlers(
         // the setup token belongs to this user and dies with the security stamp (logout-all, password change, …)
         if (!workflow.TryUnprotect<SlimTwoFactorSetupPayload>(SlimWorkflowTokens.TwoFactorSetupPurpose, request?.SetupToken, out var payload)
             || !string.Equals(payload.Uid, user.Id, StringComparison.Ordinal)
-            || !SlimHashing.FixedTimeEquals(payload.Stamp, user.SecurityStamp))
+            || !SlimUser.IsSameSecurityState(payload.Stamp, user.SecurityStamp))
             return SlimResults.InvalidToken();
 
         // the first code is consumed as well – it cannot be replayed for a sign-in afterwards

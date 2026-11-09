@@ -85,7 +85,7 @@ internal sealed class SlimAuthManager(
             await sessions.RevokeAsync(sid, ct);
 
         var impersonator = await store.FindByIdAsync(actor.UserId, ct);
-        if (impersonator is not { IsActive: true } || !SlimHashing.FixedTimeEquals(impersonator.SecurityStamp, actor.SecurityStamp))
+        if (impersonator is not { IsActive: true } || !SlimUser.IsSameSecurityState(impersonator.SecurityStamp, actor.SecurityStamp))
         {
             // The impersonator was banned or signed out everywhere in the meantime: no way back, end the session.
             Log.ImpersonationReturnDenied(logger, actor.UserId);
@@ -144,6 +144,18 @@ internal sealed class SlimAuthManager(
         await RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
         Log.AdminTwoFactorReset(logger, user.Id);
         await Hooks.RaiseAsync(SlimEventTypes.TwoFactorDisabled, user.Id, reason: "administrator", ct: ct);
+    }
+
+    public async Task RefreshClaimsAsync(SlimUser user, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+        // the narrowest possible window against a concurrent security change: read, change the claims part, write
+        var current = await store.FindByIdAsync(user.Id, ct) ?? user;
+        current.SecurityStamp = SlimUser.WithNewClaimsPart(current.SecurityStamp);
+        await store.UpdateSecurityStateAsync(current, ct);
+        user.SecurityStamp = current.SecurityStamp;
+        Log.ClaimsRefreshed(logger, user.Id);
+        await Hooks.RaiseAsync(SlimEventTypes.ClaimsChanged, user.Id, ct: ct);
     }
 
     public async Task UnlockAsync(SlimUser user, CancellationToken ct = default)
@@ -207,7 +219,7 @@ internal sealed class SlimAuthManager(
             if (payload.Sid is { } sid
                 && string.Equals(owner, payload.Uid, StringComparison.Ordinal)
                 && await store.FindByIdAsync(payload.Uid, ct) is { } owningUser
-                && SlimHashing.FixedTimeEquals(owningUser.SecurityStamp, payload.Stamp))
+                && SlimUser.IsSameSecurityState(owningUser.SecurityStamp, payload.Stamp))
                 sessionIds.Add(sid);
         }
 
@@ -452,6 +464,25 @@ internal sealed class SlimAuthManager(
             claims.Add(new Claim(SlimClaimTypes.Actor, actorJson, JsonClaimValueTypes.Json));
 
         return claims;
+    }
+
+    /// <summary>
+    /// A running session's principal with the host's current claims (after <c>RefreshClaimsAsync</c>): SlimIdentity's own
+    /// claims (sub, amr, sid, auth_time, act, token claims) and a step-up window stay, every host claim is replaced, the
+    /// stamp claim takes the current stamp. Other claims added by <c>ElevateSessionAsync</c> end here.
+    /// </summary>
+    internal static async Task<ClaimsPrincipal> RebuildPrincipalAsync(ClaimsPrincipal principal, SlimUser user, ISlimUserStore store, CancellationToken ct)
+    {
+        var claims = principal.Claims
+            .Where(c => c.Type != SlimClaimTypes.SecurityStamp && (ReservedClaims.Contains(c.Type) || c.Type == SlimClaimTypes.SudoUntil))
+            .Select(c => new Claim(c.Type, c.Value, c.ValueType))
+            .ToList();
+        claims.Add(new Claim(SlimClaimTypes.SecurityStamp, user.SecurityStamp));
+        foreach (var claim in await store.GetClaimsAsync(user, ct))
+            AddNormalized(claims, claim);
+
+        var authenticationType = principal.Identity?.AuthenticationType ?? SlimIdentityDefaults.CookieScheme;
+        return new ClaimsPrincipal(new ClaimsIdentity(claims, authenticationType, SlimClaimTypes.Email, SlimClaimTypes.Role));
     }
 
     private static void AddNormalized(List<Claim> target, Claim claim)

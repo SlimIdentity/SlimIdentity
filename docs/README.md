@@ -21,6 +21,7 @@
 - [Admin features](guides/admin-features.md) – impersonation, sudo mode, bans, API keys
 - [Running without e-mail](guides/without-email.md) – internal services: accounts, start passwords and resets by an administrator
 - [Hooks: guards and events](guides/hooks.md) – tenant and IP vetoes, registration rules, audit trail
+- [Roles and permissions](guides/roles-and-permissions.md) – groups to claims to policies, keeping claims current
 - [Multi-tenancy](guides/multi-tenancy.md) – scoped stores, trusted origins and links per tenant domain
 - [LDAP and legacy passwords](guides/ldap-and-legacy-passwords.md)
 - [Client certificates (mTLS)](guides/client-certificates.md)

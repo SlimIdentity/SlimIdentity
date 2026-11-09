@@ -27,11 +27,19 @@ internal static class SlimSecurityStampValidator
             return;
         }
 
-        if (!await IsPrincipalValidAsync(context.Principal, http))
+        var user = await ValidPrincipalUserAsync(context.Principal, http);
+        if (user is null)
         {
             context.RejectPrincipal();
             await http.SignOutAsync(SlimIdentityDefaults.CookieScheme);
             return;
+        }
+
+        // RefreshClaimsAsync changed the claims part of the stamp: re-issue the cookie with fresh claims – no sign-out
+        if (await RefreshedPrincipalAsync(context.Principal!, user, http) is { } refreshed)
+        {
+            context.ReplacePrincipal(refreshed);
+            context.ShouldRenew = true;
         }
 
         if (interval > TimeSpan.Zero)
@@ -54,19 +62,41 @@ internal static class SlimSecurityStampValidator
         var options = context.HttpContext.RequestServices.GetRequiredService<IOptions<SlimIdentityOptions>>().Value;
         if (!options.Tokens.ValidateSecurityStampOnEachRequest) return;
 
-        if (!await IsPrincipalValidAsync(context.Principal, context.HttpContext))
+        var user = await ValidPrincipalUserAsync(context.Principal, context.HttpContext);
+        if (user is null)
+        {
             context.Fail("SlimIdentity: security stamp is no longer valid.");
+            return;
+        }
+
+        // new claims for this request; the token itself is replaced at the next refresh
+        if (await RefreshedPrincipalAsync(context.Principal!, user, context.HttpContext) is { } refreshed)
+            context.Principal = refreshed;
     }
 
-    private static async Task<bool> IsPrincipalValidAsync(ClaimsPrincipal? principal, HttpContext http)
+    /// <summary>
+    /// The principal again, with the host's current claims – only if its stamp has an outdated claims part
+    /// (same security state). Otherwise <c>null</c>: as long as nothing changed, no claims are loaded.
+    /// </summary>
+    private static async Task<ClaimsPrincipal?> RefreshedPrincipalAsync(ClaimsPrincipal principal, SlimUser user, HttpContext http)
+    {
+        var stamp = principal.FindFirst(SlimClaimTypes.SecurityStamp)?.Value;
+        if (string.Equals(stamp, user.SecurityStamp, StringComparison.Ordinal)) return null;
+        return await Services.SlimAuthManager.RebuildPrincipalAsync(principal, user,
+            http.RequestServices.GetRequiredService<ISlimUserStore>(), http.RequestAborted);
+    }
+
+    /// <summary>The account behind <paramref name="principal"/> if the session is still valid, else <c>null</c>.</summary>
+    private static async Task<SlimUser?> ValidPrincipalUserAsync(ClaimsPrincipal? principal, HttpContext http)
     {
         var userId = principal?.FindFirst(SlimClaimTypes.UserId)?.Value;
         var stamp = principal?.FindFirst(SlimClaimTypes.SecurityStamp)?.Value;
-        if (string.IsNullOrEmpty(userId) || string.IsNullOrEmpty(stamp)) return false;
+        if (string.IsNullOrEmpty(userId) || string.IsNullOrEmpty(stamp)) return null;
 
         var store = http.RequestServices.GetRequiredService<ISlimUserStore>();
         var user = await store.FindByIdAsync(userId, http.RequestAborted);
-        if (user is not { IsActive: true } || !SlimHashing.FixedTimeEquals(user.SecurityStamp, stamp)) return false;
+        // only the security part counts here – a changed claims part means "reload claims", not "signed out"
+        if (user is not { IsActive: true } || !SlimUser.IsSameSecurityState(user.SecurityStamp, stamp)) return null;
 
         // Server-side session: must exist (not revoked) and not be expired.
         if (principal!.FindFirst(SlimClaimTypes.SessionId)?.Value is { } sid
@@ -75,7 +105,7 @@ internal static class SlimSecurityStampValidator
             var session = await sessions.FindAsync(sid, http.RequestAborted);
             var now = http.RequestServices.GetRequiredService<TimeProvider>().GetUtcNow();
             if (session is null || session.ExpiresUtc <= now || !string.Equals(session.UserId, userId, StringComparison.Ordinal))
-                return false;
+                return null;
         }
 
         // the host's sign-in guards decide about running sessions, too (suspended tenant, IP allow-list, …)
@@ -83,15 +113,15 @@ internal static class SlimSecurityStampValidator
         var actorId = SlimClaims.ParseActorClaim(principal.FindFirst(SlimClaimTypes.Actor)?.Value)?.UserId;
         if (await http.RequestServices.GetRequiredService<Services.SlimHookRunner>()
                 .CheckSignInAsync(user, amr, SlimSignInStage.Revalidation, actorId, http.RequestAborted) is not null)
-            return false;
+            return null;
 
         // Impersonation: the impersonator must still be active with an unchanged stamp.
         var actorClaim = principal.FindFirst(SlimClaimTypes.Actor)?.Value;
-        if (actorClaim is null) return true;
+        if (actorClaim is null) return user;
 
         var actor = SlimClaims.ParseActorClaim(actorClaim);
-        if (actor?.SecurityStamp is null) return false;
+        if (actor?.SecurityStamp is null) return null;
         var impersonator = await store.FindByIdAsync(actor.UserId, http.RequestAborted);
-        return impersonator is { IsActive: true } && SlimHashing.FixedTimeEquals(impersonator.SecurityStamp, actor.SecurityStamp);
+        return impersonator is { IsActive: true } && SlimUser.IsSameSecurityState(impersonator.SecurityStamp, actor.SecurityStamp) ? user : null;
     }
 }

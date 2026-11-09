@@ -89,7 +89,7 @@ internal sealed class SlimAccountHandlers(
         var user = await store.FindByIdAsync(payload.Uid, ct);
         if (user is null
             || !string.Equals(user.Email, payload.Email, StringComparison.OrdinalIgnoreCase)
-            || !SlimHashing.FixedTimeEquals(user.SecurityStamp, payload.Stamp))
+            || !SlimUser.IsSameSecurityState(user.SecurityStamp, payload.Stamp))
             return SlimResults.InvalidToken();
 
         if (!user.EmailConfirmed)
@@ -149,7 +149,7 @@ internal sealed class SlimAccountHandlers(
             return SlimResults.InvalidToken();
 
         var user = await store.FindByIdAsync(payload.Uid, ct);
-        if (user is null || !user.IsActive || !SlimHashing.FixedTimeEquals(user.SecurityStamp, payload.Stamp))
+        if (user is null || !user.IsActive || !SlimUser.IsSameSecurityState(user.SecurityStamp, payload.Stamp))
             return SlimResults.InvalidToken();
 
         if (await passwordPolicy.ValidateAsync(request!.NewPassword, user.Email, ct, "newPassword") is { } errors)
@@ -224,7 +224,7 @@ internal sealed class SlimAccountHandlers(
         if (user is null
             || !user.IsActive
             || !string.Equals(user.Email, payload.OldEmail, StringComparison.OrdinalIgnoreCase)
-            || !SlimHashing.FixedTimeEquals(user.SecurityStamp, payload.Stamp))
+            || !SlimUser.IsSameSecurityState(user.SecurityStamp, payload.Stamp))
             return SlimResults.InvalidToken();
 
         // the confirming person controls the new mailbox, so revealing that it is taken is fine here
@@ -296,7 +296,7 @@ internal sealed class SlimAccountHandlers(
             || !user.IsActive
             || !string.IsNullOrEmpty(user.PasswordHash) // already completed
             || !string.Equals(user.Email, payload.Email, StringComparison.OrdinalIgnoreCase)
-            || !SlimHashing.FixedTimeEquals(user.SecurityStamp, payload.Stamp))
+            || !SlimUser.IsSameSecurityState(user.SecurityStamp, payload.Stamp))
             return (null, default);
 
         return (user, expiresAt);

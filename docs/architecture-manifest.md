@@ -39,7 +39,7 @@ mobile apps, while leaving databases, ORMs (EF Core, Dapper) and domain models e
 | `Id` | `string` | Unique user id (`Guid`, `int` or `string` in the host database). |
 | `Email` | `string` | Login identifier (or user name / UPN for LDAP). |
 | `PasswordHash` | `string` | `PasswordHasher<SlimUser>` hash. Empty for external-login, LDAP and not yet accepted invited users. |
-| `SecurityStamp` | `string` | Random value; rotation invalidates all sessions, tokens and outstanding links. |
+| `SecurityStamp` | `string` | Random value (≤ 64 characters, opaque); rotating it invalidates all sessions, tokens and outstanding links. A claims part after a dot (`RefreshClaimsAsync`) only makes sessions reload their claims. |
 | `IsActive` | `bool` | Login blocker (ban, soft delete, pending approval). |
 | `EmailConfirmed` | `bool` | E-mail verified. |
 | `FailedLoginAttempts` | `int` | Consecutive failures since the last successful sign-in (progressive lockout). |

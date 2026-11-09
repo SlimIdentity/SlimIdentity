@@ -32,7 +32,7 @@ internal sealed class SlimTwoFactorService(
         var token = !string.IsNullOrEmpty(bearerToken) ? bearerToken : http.Request.Cookies[RememberCookieName];
         return workflow.TryUnprotect<SlimRememberDevicePayload>(SlimWorkflowTokens.RememberDevicePurpose, token, out var payload)
             && string.Equals(payload.Uid, user.Id, StringComparison.Ordinal)
-            && SlimHashing.FixedTimeEquals(payload.Stamp, user.SecurityStamp)
+            && SlimUser.IsSameSecurityState(payload.Stamp, user.SecurityStamp)
             && DateTimeOffset.FromUnixTimeSeconds(payload.ExpiresAt) > time.GetUtcNow();
     }
 

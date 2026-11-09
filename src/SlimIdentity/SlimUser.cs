@@ -15,7 +15,12 @@ public sealed class SlimUser
     /// <summary>Hash produced by <c>PasswordHasher&lt;SlimUser&gt;</c>. Empty for pure OAuth / LDAP users.</summary>
     public string PasswordHash { get; set; } = string.Empty;
 
-    /// <summary>Random value, rotated on password change / security events. Invalidates all cookies and tokens.</summary>
+    /// <summary>
+    /// Random value, rotated on password change and other security events – that invalidates all sessions, tokens and
+    /// links. May carry a claims part after a dot (<c>"&lt;security&gt;.&lt;claims&gt;"</c>), changed by
+    /// <c>ISlimAuthManager.RefreshClaimsAsync</c>: sessions then reload their claims, nothing else is invalidated.
+    /// Store it as an opaque string (at most 64 characters); compare stamps only with <see cref="IsSameSecurityState"/>.
+    /// </summary>
     public string SecurityStamp { get; set; } = NewSecurityStamp();
 
     /// <summary>Immediate login blocker (admin ban, soft delete, pending approval).</summary>
@@ -42,6 +47,20 @@ public sealed class SlimUser
     /// <summary>True while <see cref="LockoutEndUtc"/> lies in the future.</summary>
     public bool IsLockedOut(DateTimeOffset utcNow) => LockoutEndUtc is { } end && end > utcNow;
 
-    /// <summary>Creates a new cryptographically random security stamp.</summary>
+    /// <summary>Creates a new cryptographically random security stamp (no claims part).</summary>
     public static string NewSecurityStamp() => Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
+
+    /// <summary>
+    /// True if two security stamps stand for the same security state – they may differ in their claims part only.
+    /// Constant time. Use this instead of comparing stamps directly.
+    /// </summary>
+    public static bool IsSameSecurityState(string? stamp, string? other) =>
+        stamp is not null && other is not null
+        && Security.SlimHashing.FixedTimeEquals(SecurityPartOf(stamp), SecurityPartOf(other));
+
+    /// <summary>The stamp with a new claims part – same security state, new claims version.</summary>
+    internal static string WithNewClaimsPart(string stamp) =>
+        $"{SecurityPartOf(stamp)}.{Convert.ToHexString(RandomNumberGenerator.GetBytes(4))}";
+
+    private static string SecurityPartOf(string stamp) => stamp.IndexOf('.', StringComparison.Ordinal) is var dot and >= 0 ? stamp[..dot] : stamp;
 }

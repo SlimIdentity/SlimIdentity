@@ -86,6 +86,12 @@ First public release (1.0.0) in preparation.
   per request. `AddCorsPolicy()` derives CORS from the same origins (`SlimIdentityDefaults.CorsPolicy`).
 - OpenID Connect Back-Channel Logout: `AddBackChannelLogout(provider, …)` maps `POST /auth/backchannel-logout/{provider}`;
   a validated logout token from an enterprise identity provider ends every session of the user linked to its `sub`.
+- `ISlimAuthManager.RefreshClaimsAsync(user)`: after a change of roles or permissions, running sessions reload their
+  claims at their next validation – bearer on the next request, cookies within the validation interval – without a
+  sign-out. The security stamp gets a claims part (`<security>.<claims>`, no schema change); every stamp comparison
+  ignores it (`SlimUser.IsSameSecurityState`), so links, refresh tokens and remembered devices stay valid. Claims are
+  reloaded only for a changed user. Guide "Roles and permissions" and a groups-to-permissions example in the EF Core
+  template (`Enterprise/GroupEndpoints.cs`).
 - Forced password change: `SlimUser.PasswordChangeRequired` (new column for stores, checked by the conformance kit),
   `401 password_change_required` at `/login` and `POST /auth/login/password-change`; TypeScript client support.
 

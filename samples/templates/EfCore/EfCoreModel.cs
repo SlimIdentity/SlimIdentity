@@ -37,6 +37,27 @@ public class AppUserRole
     public string Role { get; set; } = "";
 }
 
+// --- groups and permissions (your model – SlimIdentity only sees the resulting claims; see Enterprise/GroupEndpoints.cs)
+public class Group
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TenantId { get; set; }
+    public string Name { get; set; } = "";
+    public List<GroupPermission> Permissions { get; set; } = new();
+}
+
+public class GroupMember
+{
+    public Guid GroupId { get; set; }
+    public Guid UserId { get; set; }
+}
+
+public class GroupPermission
+{
+    public Guid GroupId { get; set; }
+    public string Permission { get; set; } = "";   // short codes: "reports.read", "invoices.approve"
+}
+
 public class RefreshToken
 {
     public string TokenHash { get; set; } = "";   // SHA-256 hex, primary key
@@ -99,6 +120,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 {
     public DbSet<AppUser> Users => Set<AppUser>();
     public DbSet<AppUserRole> UserRoles => Set<AppUserRole>();
+    public DbSet<Group> Groups => Set<Group>();
+    public DbSet<GroupMember> GroupMembers => Set<GroupMember>();
+    public DbSet<GroupPermission> GroupPermissions => Set<GroupPermission>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<RecoveryCode> RecoveryCodes => Set<RecoveryCode>();
     public DbSet<ExternalLogin> ExternalLogins => Set<ExternalLogin>();
@@ -118,6 +142,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.HasMany(x => x.Roles).WithOne().HasForeignKey(r => r.UserId);
         });
         b.Entity<AppUserRole>().HasKey(x => new { x.UserId, x.Role });
+        b.Entity<Group>(e => { e.HasKey(x => x.Id); e.HasMany(x => x.Permissions).WithOne().HasForeignKey(p => p.GroupId); });
+        b.Entity<GroupMember>(e => { e.HasKey(x => new { x.GroupId, x.UserId }); e.HasIndex(x => x.UserId); });
+        b.Entity<GroupPermission>().HasKey(x => new { x.GroupId, x.Permission });
         b.Entity<RefreshToken>(e => { e.HasKey(x => x.TokenHash); e.HasIndex(x => x.UserId); });
         b.Entity<RecoveryCode>().HasKey(x => new { x.UserId, x.CodeHash });
         b.Entity<ExternalLogin>(e => { e.HasKey(x => new { x.Provider, x.ProviderKey }); e.HasIndex(x => x.UserId); });

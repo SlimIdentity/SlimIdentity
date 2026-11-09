@@ -121,7 +121,6 @@ Test names refer to `tests/SlimIdentity.Tests` (`Integration/…`, `Unit/Propert
 
 | ID | Attack → expected | Status |
 | :--- | :--- | :--- |
-| H9 | A host hook weakens the flow (skips a check, issues a session, breaks sign-ins when it fails) | covered – by design hooks can only refuse or observe; `Hook.A_veto_ends_running_sessions_and_refreshes`, `…An_external_sign_in_is_vetoed_as_well`, `…A_failing_event_handler_changes_nothing`, `…Only_allowed_addresses_can_register` |
 | H1 | Non-atomic store (refresh, recovery, 2FA step) | covered – `SlimIdentity.Testing` conformance, incl. parallel checks |
 | H1b | EF stores and the host share one `DbContext` (host changes saved early or detached) | covered – `SharedContextTests` (EF Core package), template on its own context (`IdentityDb`). **Fixed** (review round 1) |
 | H2 | Non-unique / case-sensitive addresses in the templates | covered – conformance of the EF Core stores on SQLite, PostgreSQL and SQL Server and of the Dapper stores on PostgreSQL (service containers in CI; locally via `SLIMIDENTITY_TEST_POSTGRES` / `SLIMIDENTITY_TEST_SQLSERVER`) |
@@ -131,6 +130,8 @@ Test names refer to `tests/SlimIdentity.Tests` (`Integration/…`, `Unit/Propert
 | H6 | PII, tokens, codes or passwords in logs or metrics | covered – `LogSecrecy.No_secret_or_address_is_ever_logged`, `HostEndpoint.Sign_in_attempts_are_counted_without_personal_data` |
 | H7 | Error answers, stack traces or headers revealing internals | covered – `OpenScenario.H7_error_answers_reveal_no_internals` for every error answer SlimIdentity produces; unhandled exceptions (e.g. a failing store) go through the host's exception handler – 500 without details in `Production` |
 | H8 | Vulnerable dependencies, supply chain | covered – vulnerability check in CI, actions pinned to commit SHAs, Dependabot, CodeQL, NuGet Trusted Publishing |
+| H9 | A host hook weakens the flow (skips a check, issues a session, breaks sign-ins when it fails) | covered – by design hooks can only refuse or observe; `Hook.A_veto_ends_running_sessions_and_refreshes`, `…An_external_sign_in_is_vetoed_as_well`, `…A_failing_event_handler_changes_nothing`, `…Only_allowed_addresses_can_register` |
+| H10 | Revoked role still usable in a running session | covered – `ClaimsRefresh.A_cookie_session_loses_a_revoked_role_without_being_signed_out`, `…A_bearer_session_loses_a_revoked_role_at_once_and_its_refresh_issues_the_new_claims` (after `RefreshClaimsAsync`); without it the documented snapshot applies (`…Without_RefreshClaimsAsync_a_session_keeps_its_snapshot`) |
 
 ## Prompt template for one scenario
 

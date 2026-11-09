@@ -59,6 +59,12 @@ without mail: `CreatePasswordResetAsync` (a link the user sets the password with
 password, by default with a forced change at the next sign-in), `ResetTwoFactorAsync` and `UnlockAsync`. See
 [running without e-mail](without-email.md); endpoints for all of them are in the admin template.
 
+## Changing roles and permissions
+
+After changing a user's roles, groups or permissions in your data, call `await auth.RefreshClaimsAsync(user, ct)`:
+running sessions pick up the new claims at their next validation, without a sign-out –
+[roles and permissions](roles-and-permissions.md).
+
 ## Banning a user
 
 ```csharp

@@ -249,7 +249,7 @@ internal sealed class SlimLoginHandlers(
 
         // the stamp rotates with the new password: the token works once, and a newer administrator password kills it
         var user = await store.FindByIdAsync(payload.Uid, ct);
-        if (user is null || !user.IsActive || !user.PasswordChangeRequired || !SlimHashing.FixedTimeEquals(user.SecurityStamp, payload.Stamp))
+        if (user is null || !user.IsActive || !user.PasswordChangeRequired || !SlimUser.IsSameSecurityState(user.SecurityStamp, payload.Stamp))
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
 
         // a lockout that started after the token was issued holds – as on /login/2fa; the new password must not lift it
@@ -306,7 +306,7 @@ internal sealed class SlimLoginHandlers(
             return SlimResults.Status("invalid_two_factor_code", "The code is invalid.", StatusCodes.Status401Unauthorized);
         }
         user = await store.FindByIdAsync(payload.Uid, ct);
-        if (user is null || !user.IsActive || !SlimHashing.FixedTimeEquals(user.SecurityStamp, payload.Stamp))
+        if (user is null || !user.IsActive || !SlimUser.IsSameSecurityState(user.SecurityStamp, payload.Stamp))
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
 
         var now = time.GetUtcNow();
@@ -381,7 +381,7 @@ internal sealed class SlimLoginHandlers(
         // consume first: a token can be used at most once
         var owner = await refreshStore.ValidateAndConsumeRefreshTokenAsync(SlimHashing.Sha256Hex(request.RefreshToken), ct);
         var user = await store.FindByIdAsync(payload.Uid, ct);
-        var stampValid = user is not null && SlimHashing.FixedTimeEquals(user.SecurityStamp, payload.Stamp);
+        var stampValid = user is not null && SlimUser.IsSameSecurityState(user.SecurityStamp, payload.Stamp);
 
         if (owner is null)
         {
