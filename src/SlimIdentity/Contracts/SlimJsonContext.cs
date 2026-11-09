@@ -36,6 +36,8 @@ namespace SlimIdentity.Contracts;
 [JsonSerializable(typeof(SlimPasswordPolicyResponse))]
 [JsonSerializable(typeof(SlimInvitation))]
 [JsonSerializable(typeof(SlimPasswordReset))]
+[JsonSerializable(typeof(SlimExternalLinkRequest))]
+[JsonSerializable(typeof(SlimExternalLinkPayload))]
 [JsonSerializable(typeof(SlimPasswordChangeLoginRequest))]
 [JsonSerializable(typeof(SlimPasswordChangePayload))]
 [JsonSerializable(typeof(List<SlimSessionDto>))]

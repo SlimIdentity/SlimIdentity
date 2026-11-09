@@ -20,6 +20,7 @@ internal sealed class SlimWorkflowTokens(IDataProtectionProvider provider, TimeP
     public const string PreAuthPurpose = "SlimIdentity.PreAuth.v1";
     public const string TwoFactorSetupPurpose = "SlimIdentity.TwoFactorSetup.v1";
     public const string ExternalExchangePurpose = "SlimIdentity.ExternalExchange.v1";
+    public const string ExternalLinkPurpose = "SlimIdentity.ExternalLink.v1";
     public const string RefreshTokenPurpose = "SlimIdentity.RefreshToken.v1";
     public const string InvitationPurpose = "SlimIdentity.Invitation.v1";
     public const string EmailChangePurpose = "SlimIdentity.EmailChange.v1";
@@ -89,6 +90,8 @@ internal sealed record SlimRememberDevicePayload(string Uid, string Stamp, long 
 internal sealed record SlimEmailChangePayload(string Uid, string OldEmail, string NewEmail, string Stamp);
 internal sealed record SlimTwoFactorSetupPayload(string Uid, string Secret, string Stamp);
 /// <summary><c>CodeChallenge</c>: PKCE S256 challenge – the code is redeemable only with the matching verifier.</summary>
+/// <summary>An external identity to be linked to the signed-in account; PKCE-bound like the exchange code.</summary>
+internal sealed record SlimExternalLinkPayload(string Provider, string ProviderKey, string Nonce, string CodeChallenge);
 internal sealed record SlimExchangePayload(string Uid, string Stamp, string Provider, string Nonce, string CodeChallenge);
 /// <summary><c>AuthTime</c> = unix seconds of the original sign-in (absolute lifetime), <c>Sid</c> = server-side session (optional).</summary>
 internal sealed record SlimRefreshPayload(string Uid, string Stamp, string Amr, string Nonce, long AuthTime, string? Sid);

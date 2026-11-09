@@ -82,10 +82,12 @@ public sealed class ExternalLoginTests
     }
 
     [Fact]
-    public async Task Verified_email_is_linked_and_cookie_mode_sets_the_session_cookie()
+    public async Task Verified_email_is_linked_to_an_account_without_password_and_cookie_mode_sets_the_session_cookie()
     {
+        // only accounts without an own password are joined automatically (see ExternalLinkTests for the others)
         await using var app = await TestApp.StartAsync(WithProvider(
-            new Claim(ClaimTypes.NameIdentifier, "ext-user"), new Claim(ClaimTypes.Email, TestApp.UserEmail), new Claim("email_verified", "true")));
+            new Claim(ClaimTypes.NameIdentifier, "ext-user"), new Claim(ClaimTypes.Email, "no-password@test.local"), new Claim("email_verified", "true")));
+        app.Users.Seed("no-password@test.local", password: null);
         var browser = app.CreateClient();
 
         var target = await NavigateAsync(browser, "useCookies=true&returnUrl=/done");

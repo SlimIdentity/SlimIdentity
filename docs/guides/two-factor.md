@@ -26,6 +26,8 @@ EF Core and Dapper implementations are in [`samples/templates`](../../samples/te
 **Authenticator app (TOTP):**
 
 1. `POST /auth/2fa/setup` → `sharedKey` (for manual entry), `authenticatorUri` (`otpauth://…`) and `setupToken`.
+   The address must be confirmed first (`403 email_not_confirmed`, not with `WithoutEmail()`): on an unconfirmed
+   account a second factor may have been set up by whoever registered someone else's address.
    Nothing is stored yet.
 2. Render `authenticatorUri` as a QR code **in the front end**, e.g. with the [`qrcode`](https://www.npmjs.com/package/qrcode) package:
    ```ts

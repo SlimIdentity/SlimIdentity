@@ -1,4 +1,5 @@
 using System.Net;
+using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.DependencyInjection;
 using SlimIdentity.Services;
 using SlimIdentity.Tests.Infrastructure;
@@ -60,6 +61,108 @@ public sealed class ReviewRound2Tests
         foreach (var w in waiting) (await w)!.Dispose();
         using var later = await gate.TryEnterAsync("user-1", default);
         Assert.NotNull(later);
+    }
+
+    // ------------------------------------------------------------------ F-01 / F-02: unconfirmed accounts
+
+    private static string Totp(TestApp app, string sharedKey) =>
+        SlimIdentity.Security.SlimTotp.Compute(SlimIdentity.Security.SlimBase32.Decode(sharedKey), app.Time.GetUtcNow().ToUnixTimeSeconds() / 30);
+
+    [Fact]
+    public async Task F01_the_second_factor_needs_a_confirmed_address_and_then_survives_a_reset()
+    {
+        await using var app = await TestApp.StartAsync();   // RequireConfirmedEmail = false (default)
+        const string email = "legit-unconfirmed@test.local";
+        const string pass = "Legit-Pass-123!";
+        await app.CreateClient().PostJsonAsync("/auth/register", new { email, password = pass });
+        var verifyToken = (await app.Mail.WaitForAsync("verification", email)).Payload;
+        var me = app.CreateClient();
+        me.BearerToken = (await app.LoginBearerAsync(email, pass)).AccessToken;
+
+        // unconfirmed: no second factor – nobody has proven the mailbox yet, a later proof would have to remove it
+        Assert.Equal("email_not_confirmed", (await me.PostJsonAsync("/auth/2fa/setup", null, HttpStatusCode.Forbidden)).Str("status"));
+        await me.PostJsonAsync("/auth/2fa/enable-email", new { password = pass }, HttpStatusCode.Forbidden);
+
+        await app.CreateClient().PostJsonAsync("/auth/verify-email", new { token = verifyToken });
+        var setup = await me.PostJsonAsync("/auth/2fa/setup");
+        await me.PostJsonAsync("/auth/2fa/enable", new { setupToken = setup.Str("setupToken"), code = Totp(app, setup.Str("sharedKey")), password = pass });
+
+        // the mailbox is compromised – not the phone: the reset keeps the second factor
+        await app.CreateClient().PostAsync("/auth/forgot-password", new { email });
+        var resetToken = (await app.Mail.WaitForAsync("password-reset", email)).Payload;
+        await app.CreateClient().PostJsonAsync("/auth/reset-password", new { token = resetToken, newPassword = "Attacker-New-Pass-123!" });
+
+        var login = await app.CreateClient().PostJsonAsync("/auth/login", new { email, password = "Attacker-New-Pass-123!" }, HttpStatusCode.Unauthorized);
+        Assert.Equal("requires_two_factor", login.Str("status"));
+    }
+
+    private static TestAppOptions SocialProvider(string providerKey, string email) => new()
+    {
+        Builder = b =>
+        {
+            b.AddExternalLoginStore<TestExternalLoginStore>(ServiceLifetime.Singleton);
+            b.Authentication.AddScheme<FakeOAuthOptions, FakeOAuthHandler>("Fake", o => o.Claims =
+            [
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, providerKey),
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Email, email),
+                new System.Security.Claims.Claim("email_verified", "true"),
+            ]);
+        },
+    };
+
+    private static async Task<Uri> SignInWithProviderAsync(ApiClient browser, string query = "useCookies=true&returnUrl=/done")
+    {
+        var challenge = await browser.GetAsync($"/auth/login/Fake?{query}");
+        var callback = await browser.GetAsync(challenge.Headers.Location!.OriginalString);
+        return new Uri(new Uri("https://localhost"), callback.Headers.Location!);
+    }
+
+    [Fact]
+    public async Task F02_the_registrant_cannot_link_an_external_login_to_an_unconfirmed_account()
+    {
+        const string victim = "victim-ext@test.local";
+        await using var app = await TestApp.StartAsync(SocialProvider("attacker-sub", "attacker@test.local"));
+        await app.CreateClient().PostJsonAsync("/auth/register", new { email = victim, password = "Attacker-Pass-123" });
+        var attacker = app.CreateClient();
+        attacker.BearerToken = (await app.LoginBearerAsync(victim, "Attacker-Pass-123")).AccessToken;
+
+        // the attacker links an own provider account through the built-in link flow
+        var (verifier, challenge) = ReviewRound1Tests.Pkce();
+        var target = await SignInWithProviderAsync(app.CreateClient(), $"link=true&returnUrl=/settings&code_challenge={challenge}&code_challenge_method=S256");
+        var code = QueryHelpers.ParseQuery(target.Fragment.TrimStart('#'))["slim_link_code"].ToString();
+        var refused = await attacker.PostJsonAsync("/auth/link/external",
+            new { code, codeVerifier = verifier, password = "Attacker-Pass-123" }, HttpStatusCode.Forbidden);
+
+        Assert.Equal("email_not_confirmed", refused.Str("status"));
+        var links = app.App.Services.GetRequiredService<ISlimExternalLoginStore>();
+        Assert.Null(await links.FindByExternalLoginAsync("Fake", "attacker-sub", default));
+    }
+
+    [Fact]
+    public async Task F02_a_verification_click_does_not_hand_the_owners_social_sign_in_to_the_registrant()
+    {
+        const string victim = "victim-social@test.local";
+        await using var app = await TestApp.StartAsync(SocialProvider("victim-google", victim));
+        // the attacker registers the victim's address with an own password
+        await app.CreateClient().PostJsonAsync("/auth/register", new { email = victim, password = "Attacker-Pass-123" });
+        var verifyToken = (await app.Mail.WaitForAsync("verification", victim)).Payload;
+
+        // the victim confirms "their" address, then signs in with their verified Google account
+        await app.CreateClient().PostJsonAsync("/auth/verify-email", new { token = verifyToken });
+        var browser = app.CreateClient();
+        var target = await SignInWithProviderAsync(browser);
+
+        // an account with a password is never joined automatically: the victim gets no session in it …
+        Assert.Equal("account_conflict", QueryHelpers.ParseQuery(target.Query)["slim_error"].ToString());
+        Assert.Equal(HttpStatusCode.Unauthorized, (await browser.GetAsync("/api/hello")).StatusCode);
+        var links = app.App.Services.GetRequiredService<ISlimExternalLoginStore>();
+        Assert.Null(await links.FindByExternalLoginAsync("Fake", "victim-google", default));
+
+        // … resets the password ("I have no password here"), which ends the attacker's access, and links Google itself
+        await app.CreateClient().PostAsync("/auth/forgot-password", new { email = victim });
+        var resetToken = (await app.Mail.WaitForAsync("password-reset", victim)).Payload;
+        await app.CreateClient().PostJsonAsync("/auth/reset-password", new { token = resetToken, newPassword = "Victim-Own-Pass-456" });
+        await app.CreateClient().PostJsonAsync("/auth/login", new { email = victim, password = "Attacker-Pass-123" }, HttpStatusCode.Unauthorized);
     }
 
     // ------------------------------------------------------------------ F-03: forced password change during a lockout

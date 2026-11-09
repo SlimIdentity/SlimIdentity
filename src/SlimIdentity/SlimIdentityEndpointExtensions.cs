@@ -403,7 +403,8 @@ public static class SlimIdentityEndpointExtensions
 
         group.MapGet("/login/{provider}", static (string provider, [FromQuery] string? returnUrl, [FromQuery] bool? useCookies,
                 [FromQuery(Name = "code_challenge")] string? codeChallenge, [FromQuery(Name = "code_challenge_method")] string? codeChallengeMethod,
-                [FromServices] SlimExternalLoginHandlers h) => h.ChallengeAsync(provider, returnUrl, useCookies, codeChallenge, codeChallengeMethod))
+                [FromQuery] bool? link, [FromServices] SlimExternalLoginHandlers h) =>
+                h.ChallengeAsync(provider, returnUrl, useCookies, codeChallenge, codeChallengeMethod, link == true))
             .WithName("SlimIdentity_ExternalChallenge")
             .WithSummary("Start an OAuth / OIDC login (Google, Apple, Entra ID, Keycloak, …). Browser navigation, not fetch.")
             .Produces(StatusCodes.Status302Found)
@@ -411,6 +412,18 @@ public static class SlimIdentityEndpointExtensions
             .Produces<SlimStatusResponse>(StatusCodes.Status404NotFound)
             .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
             .AllowAnonymous();
+
+        group.MapPost("/link/external", static ([FromBody] SlimExternalLinkRequest request,
+                [FromServices] SlimExternalLoginHandlers h, CancellationToken ct) => h.LinkAsync(request, ct))
+            .WithName("SlimIdentity_ExternalLink")
+            .WithSummary("Link the external identity of a link flow (#slim_link_code=…, PKCE verifier, password) to the signed-in account.")
+            .Produces<SlimStatusResponse>()
+            .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
+            .Produces<SlimStatusResponse>(StatusCodes.Status401Unauthorized)
+            .Produces<SlimStatusResponse>(StatusCodes.Status403Forbidden)
+            .Produces<SlimStatusResponse>(StatusCodes.Status409Conflict)
+            .RequireAuthorization(SlimAuthorize)
+            .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy);
 
         group.MapGet("/login/{provider}/callback", static (string provider,
                 [FromServices] SlimExternalLoginHandlers h, CancellationToken ct) => h.CallbackAsync(provider, ct))

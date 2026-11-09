@@ -77,6 +77,12 @@ public sealed record SlimPasswordConfirmationRequest(string Password);
 /// <param name="TwoFactorRememberToken">"Remember this device" token of a bearer client – skips the second factor like at <c>/auth/login</c>.</param>
 public sealed record SlimExternalExchangeRequest(string Code, string? CodeVerifier = null, string? TwoFactorRememberToken = null);
 
+/// <summary>Body of <c>POST /auth/link/external</c>: links the external identity of a link flow to the signed-in account.</summary>
+/// <param name="Code">The one-time code from the redirect's fragment (<c>#slim_link_code=…</c>).</param>
+/// <param name="CodeVerifier">The PKCE verifier of the link flow – a planted code from someone else's flow fails here.</param>
+/// <param name="Password">The current password (not needed for accounts without one).</param>
+public sealed record SlimExternalLinkRequest(string Code, string? CodeVerifier = null, string? Password = null);
+
 /// <summary>Body of <c>POST /auth/invitation/info</c>.</summary>
 /// <param name="Token">Token from the invitation link.</param>
 public sealed record SlimInvitationInfoRequest(string Token);

@@ -76,7 +76,7 @@ All defaults are the secure choice. The options are listed in three tiers – mo
 | `Cookies.CookieName` | `SlimAuth` | Cookie name. |
 | `Cookies.SlidingExpiration` | `true` | Renews the cookie while it is used. |
 | `Cookies.SecurityStampValidationInterval` | `00:01:00` | How often cookies are re-validated against the store (`0` = every request). |
-| `ExternalLogin.AutoLinkVerifiedEmails` | `true` | Links an external login to an existing account with the same **verified** e-mail. |
+| `ExternalLogin.AutoLinkVerifiedEmails` | `true` | Links an external login to an existing account with the same **verified** e-mail – only if that account has no password of its own. Accounts with a password link with the [link flow](guides/external-login.md#linking-while-signed-in). |
 | `ExternalLogin.AllowAutoRegistration` | `true` | Creates password-less users for unknown external identities. |
 | `ExternalLogin.DefaultReturnUrl` | `/` | Redirect target without `returnUrl`. |
 | `Email.SendInBackground` | `true` | Verification, reset, "account exists" and lockout mails are queued (uniform response times). Turn off only with an outbox sender. |

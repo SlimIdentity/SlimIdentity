@@ -50,15 +50,43 @@ verifier – an intercepted code (deep link, history, another app) is worthless.
 
 1. Known external identity (`provider` + subject) → that user.
 2. Otherwise, an existing account with the same e-mail:
-   - linked automatically if the e-mail is **verified** (`email_verified=true`, or the provider is listed in
-     `TrustedEmailProviders`) and `AutoLinkVerifiedEmails` is on;
-   - otherwise `slim_error=account_conflict` – the user signs in with the password and links the account in your app.
-   - If that account was never confirmed (someone registered the address without owning it), the verified owner
-     takes it over: the registrant's password, 2FA, sessions and external logins are removed.
+   - never confirmed (someone registered the address without proving the mailbox): the verified owner takes it over –
+     the registrant's password, 2FA, sessions and external logins are removed;
+   - confirmed and **without** a password of its own (created by another provider, LDAP): linked automatically if the
+     e-mail is **verified** (`email_verified=true`, or the provider is listed in `TrustedEmailProviders`) and
+     `AutoLinkVerifiedEmails` is on;
+   - otherwise – in particular for every account **with** a password – `slim_error=account_conflict`: the user signs in
+     with the password and links the provider ([below](#linking-while-signed-in)). A click on a verification link proves
+     the mailbox, not who set the password; joining such an account automatically would let whoever registered the
+     address keep a password to the account the owner now uses (pre-account hijacking).
 3. Otherwise a new password-less user is created (`AllowAutoRegistration`) – only for a **verified** e-mail, else
    `slim_error=email_not_verified` –, or `slim_error=registration_disabled`.
 
 Inactive, locked and (with `RequireConfirmedEmail`) unconfirmed accounts are rejected with matching error codes.
+
+## Linking while signed in
+
+Signed-in users link a provider themselves – the PKCE-bound link code ends up only with the client that started the
+flow, and the password confirms it:
+
+```http
+GET /auth/login/Google?link=true&returnUrl=https://app.example.com/settings&code_challenge=…&code_challenge_method=S256
+→ provider round trip → https://app.example.com/settings#slim_link_code=…
+
+POST /auth/link/external          (signed in: cookie + X-CSRF, or bearer)
+{ "code": "…", "codeVerifier": "…", "password": "…" }
+→ 200 external_login_linked
+```
+
+- `password` is required for accounts that have one (a stolen session alone must not add a permanent way in).
+- The account's address must be confirmed (`403 email_not_confirmed`), like for setting up 2FA.
+- An external account already linked to another user answers `409 external_login_taken`.
+- A link code planted in someone else's URL (link CSRF) fails at the verifier. Codes live 1 minute and work once.
+
+The TypeScript client does it with `linkWith(provider)` and, on the return page, `completeLink(password)`.
+
+If your own code links identities (`ISlimExternalLoginStore.LinkExternalLoginAsync`), do it only for confirmed accounts
+and only after the same proofs.
 
 ## Signing out at the provider
 

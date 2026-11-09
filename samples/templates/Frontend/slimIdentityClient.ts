@@ -201,6 +201,19 @@ export const cookieAuth = {
     return { kind: "ok", auth: { status: "success", mode: "cookie" } as AuthResponse };
   },
 
+  /**
+   * Links a provider (e.g. Google) to the signed-in account – accounts with a password are never joined
+   * automatically. Full-page navigation; afterwards call completeLink() on the return page.
+   */
+  linkWith(provider: string, returnPath = "/settings") {
+    return startLink(provider, returnPath);
+  },
+
+  /** On the return page of linkWith(): "external_login_linked", or an error code (e.g. invalid_password). */
+  completeLink(password?: string): Promise<string> {
+    return finishLink((path, init) => cookieFetch(path, init), password);
+  },
+
   api: cookieFetch,
 };
 
@@ -220,6 +233,30 @@ function base64Url(bytes: Uint8Array): string {
   let binary = "";
   for (const b of bytes) binary += String.fromCharCode(b);
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+// Linking a provider to the signed-in account (both flows): PKCE binds the link code to this tab, so a code from
+// someone else's flow planted in the URL is worthless; the session and the password complete it.
+const LINK_PKCE_KEY = "slim.link-verifier";
+
+async function startLink(provider: string, returnPath: string) {
+  const verifier = base64Url(crypto.getRandomValues(new Uint8Array(32)));
+  const challenge = base64Url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
+  sessionStorage.setItem(LINK_PKCE_KEY, verifier);
+  const returnUrl = encodeURIComponent(window.location.origin + returnPath);
+  window.location.href = `${AUTH}/login/${provider}?link=true&returnUrl=${returnUrl}&code_challenge=${challenge}&code_challenge_method=S256`;
+}
+
+async function finishLink(send: (path: string, init: RequestInit) => Promise<Response>, password?: string): Promise<string> {
+  const code = new URLSearchParams(window.location.hash.slice(1)).get("slim_link_code");
+  const error = new URLSearchParams(window.location.search).get("slim_error");
+  const codeVerifier = sessionStorage.getItem(LINK_PKCE_KEY);
+  history.replaceState(null, "", window.location.pathname);   // remove the code from the address bar / history
+  if (error || !code || !codeVerifier) return error ?? "missing_code";
+
+  const r = await send("/auth/link/external", { method: "POST", body: JSON.stringify({ code, codeVerifier, password }) });
+  if (r.ok) sessionStorage.removeItem(LINK_PKCE_KEY);   // kept on a wrong password: the user may try again
+  return ((await r.json().catch(() => ({}))) as { status?: string }).status ?? `http_${r.status}`;
 }
 
 function storeTokens(auth: AuthResponse) {
@@ -339,6 +376,16 @@ export const bearerAuth = {
   clear() {
     accessToken = null;
     localStorage.removeItem(REFRESH_KEY);
+  },
+
+  /** Links a provider to the signed-in account (see cookieAuth.linkWith). */
+  linkWith(provider: string, returnPath = "/settings") {
+    return startLink(provider, returnPath);
+  },
+
+  /** On the return page of linkWith(): "external_login_linked", or an error code. */
+  completeLink(password?: string): Promise<string> {
+    return finishLink((path, init) => bearerFetch(path, init), password);
   },
 
   api: bearerFetch,

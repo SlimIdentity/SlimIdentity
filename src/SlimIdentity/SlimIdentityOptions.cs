@@ -255,7 +255,13 @@ public sealed class SlimTwoFactorOptions
 /// <summary>OAuth / OIDC logins. Allowed <c>returnUrl</c> origins are the <see cref="SlimIdentityOptions.TrustedOrigins"/>.</summary>
 public sealed class SlimExternalLoginOptions
 {
-    /// <summary>Automatically links an external login to an existing account with the same, verified e-mail. Default <c>true</c>.</summary>
+    /// <summary>
+    /// Automatically links an external login to an existing account with the same, verified e-mail – if that account has
+    /// no password of its own (external-only, LDAP). An account with a password is never joined automatically: whoever
+    /// set it may not be the owner of the mailbox (pre-account hijacking), so the user signs in and links the provider
+    /// with the link flow (<c>/login/{provider}?link=true</c>, <c>POST /link/external</c>). Unconfirmed accounts are
+    /// taken over by the verified owner instead. Default <c>true</c>.
+    /// </summary>
     public bool AutoLinkVerifiedEmails { get; set; } = true;
     /// <summary>Creates a new (password-less) user for unknown external identities. Default <c>true</c>.</summary>
     public bool AllowAutoRegistration { get; set; } = true;

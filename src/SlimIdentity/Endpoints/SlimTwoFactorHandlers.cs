@@ -42,6 +42,7 @@ internal sealed class SlimTwoFactorHandlers(
     {
         var (user, error) = await account.LoadCurrentUserAsync(forbidImpersonation: true, ct);
         if (user is null) return error!;
+        if (UnconfirmedAddress(user) is { } unconfirmed) return unconfirmed;
 
         var secret = SlimTotp.GenerateSecret();
         var setupToken = workflow.Protect(SlimWorkflowTokens.TwoFactorSetupPurpose,
@@ -57,7 +58,7 @@ internal sealed class SlimTwoFactorHandlers(
     // replace the second factor (that would lock the owner out for good)
     public async Task<IResult> EnableAuthenticatorAsync(SlimTwoFactorEnableRequest? request, CancellationToken ct)
     {
-        var (user, error) = await ConfirmPasswordAsync(new SlimPasswordConfirmationRequest(request?.Password ?? string.Empty), ct);
+        var (user, error) = await ConfirmPasswordAsync(new SlimPasswordConfirmationRequest(request?.Password ?? string.Empty), ct, requireConfirmedAddress: true);
         if (user is null) return error!;
 
         // the setup token belongs to this user and dies with the security stamp (logout-all, password change, …)
@@ -77,7 +78,7 @@ internal sealed class SlimTwoFactorHandlers(
     // POST /2fa/enable-email
     public async Task<IResult> EnableEmailAsync(SlimPasswordConfirmationRequest? request, CancellationToken ct)
     {
-        var (user, error) = await ConfirmPasswordAsync(request, ct);
+        var (user, error) = await ConfirmPasswordAsync(request, ct, requireConfirmedAddress: true);
         if (user is null) return error!;
 
         await twoFactor.RemoveSecretAsync(user, ct);
@@ -140,6 +141,17 @@ internal sealed class SlimTwoFactorHandlers(
 
     // ------------------------------------------------------------------ helpers
 
+    /// <summary>
+    /// A second factor only on an account whose mailbox was proven: on an unconfirmed account it may have been set up by
+    /// whoever registered someone else's address – the owner's first proof of the mailbox would then have to remove it,
+    /// which in turn lets a compromised mailbox strip a legitimate user's second factor. Without mail there is no such
+    /// proof, and no such rule.
+    /// </summary>
+    private IResult? UnconfirmedAddress(SlimUser user) =>
+        O.Email.Enabled && !user.EmailConfirmed
+            ? SlimResults.Status("email_not_confirmed", "Confirm your e-mail address before setting up two-factor authentication.", StatusCodes.Status403Forbidden)
+            : null;
+
     private async Task<IResult> ActivateAsync(SlimUser user, string method, CancellationToken ct)
     {
         var codes = await twoFactor.RegenerateRecoveryCodesAsync(user, ct);
@@ -155,10 +167,12 @@ internal sealed class SlimTwoFactorHandlers(
         return Results.Ok(new SlimRecoveryCodesResponse(codes, session.ToResponse(time.GetUtcNow())));
     }
 
-    private async Task<(SlimUser? User, IResult? Error)> ConfirmPasswordAsync(SlimPasswordConfirmationRequest? request, CancellationToken ct)
+    private async Task<(SlimUser? User, IResult? Error)> ConfirmPasswordAsync(
+        SlimPasswordConfirmationRequest? request, CancellationToken ct, bool requireConfirmedAddress = false)
     {
         var (user, error) = await account.LoadCurrentUserAsync(forbidImpersonation: true, ct);
         if (user is null) return (null, error);
+        if (requireConfirmedAddress && UnconfirmedAddress(user) is { } unconfirmed) return (null, unconfirmed);   // before the password counts
         var failure = await credentials.ConfirmPasswordAsync(user, request?.Password, Http, ct);
         return failure is null ? (user, null) : (null, failure);
     }

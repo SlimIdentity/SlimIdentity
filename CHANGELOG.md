@@ -113,6 +113,13 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
   get queues of their own. At most 8 attempts wait per account; further ones are refused without being evaluated
   (metric result `attempts_queued`), and refused attempts burn their dummy hash outside the queue.
 - Every answer under `/auth` carries `Cache-Control: no-store`.
+- Pre-account hijacking through the verification link: the owner's click confirmed the address but not who set the
+  password, and a later verified external login joined the account – the registrant kept a password to it. Accounts
+  with a password are no longer joined automatically (`account_conflict`); signed-in users link providers with the new
+  PKCE-bound link flow (`/login/{provider}?link=true`, `POST /link/external`, TypeScript `linkWith` /
+  `completeLink`). **Breaking** for users who relied on automatic linking of password accounts.
+- A second factor requires a confirmed address (`403 email_not_confirmed`, not with `WithoutEmail()`): neither can a
+  registrant plant one, nor can a password reset through a compromised mailbox strip one from a legitimate user.
 
 ### Fixed
 

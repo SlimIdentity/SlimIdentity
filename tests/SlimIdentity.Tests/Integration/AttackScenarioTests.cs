@@ -39,9 +39,15 @@ public sealed class AttackScenarioTests
         await app.CreateClient().PostJsonAsync("/auth/register", new { email = victim, password = "Attacker-Pass-123" });
         var attacker = app.CreateClient();
         attacker.BearerToken = (await app.LoginBearerAsync(victim, "Attacker-Pass-123")).AccessToken;
-        var setup = await attacker.PostJsonAsync("/auth/2fa/setup");
-        var code = SlimTotp.Compute(SlimBase32.Decode(setup.Str("sharedKey")), app.Time.GetUtcNow().ToUnixTimeSeconds() / 30);
-        await attacker.PostJsonAsync("/auth/2fa/enable", new { setupToken = setup.Str("setupToken"), code, password = "Attacker-Pass-123" });
+
+        // since review round 2 an unconfirmed account cannot set up a second factor at all …
+        await attacker.PostJsonAsync("/auth/2fa/setup", null, HttpStatusCode.Forbidden);
+        await attacker.PostJsonAsync("/auth/2fa/enable-email", new { password = "Attacker-Pass-123" }, HttpStatusCode.Forbidden);
+
+        // … and one that got there anyway (imported data, a host that set it) is still removed by the owner's mailbox proof
+        var registered = app.Users.Get(victim);
+        registered.TwoFactorEnabled = true;
+        await app.Users.UpdateSecurityStateAsync(registered, default);
 
         await app.CreateClient().PostAsync("/auth/forgot-password", new { email = victim });
         var link = (await app.Mail.WaitForAsync("password-reset", victim)).Payload;
