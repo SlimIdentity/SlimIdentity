@@ -91,10 +91,29 @@ and only after the same proofs.
 ## Signing out at the provider
 
 After the sign-in, the session lives in your application. Signing out at the provider – or revoking the app's access in
-the Google or Microsoft account – does not end it; that is how social logins work everywhere. Enterprise identity
-providers (Keycloak, Okta, Auth0, …) can notify applications through OIDC back-channel logout; SlimIdentity does not
-handle that yet (see the roadmap). Until then, end a user's sessions from your own code with
-`ISlimAuthManager.SignOutEverywhereAsync` when your provider reports a sign-out or a block.
+the Google or Microsoft account – does not end it; that is how social logins work everywhere.
+
+Enterprise identity providers (Keycloak, Okta, Auth0, Duende, …) can tell the application through **OpenID Connect
+Back-Channel Logout** when they sign a user out or block them:
+
+```csharp
+.AddBackChannelLogout("Keycloak", o =>          // the scheme name of your OIDC handler
+{
+    o.MetadataAddress = "https://keycloak.example.com/realms/corp/.well-known/openid-configuration";
+    o.ClientId = "my-app";                      // the audience of the logout token
+})
+```
+
+Register `https://api.example.com/auth/backchannel-logout/Keycloak` as the client's back-channel logout URL at the
+provider. It posts a signed `logout_token`; every session of the user linked to its `sub` ends (all devices – the
+provider ended the user's single sign-on). The token is checked like any credential: signature with the provider's
+keys (from the discovery document, cached), issuer, audience, the back-channel event, no `nonce`, issued within the last
+5 minutes, single use. Tokens that carry only a `sid` are rejected – configure the provider to send `sub` (Keycloak and
+the others do by default). The endpoint is authenticated by the token, not by a cookie, so it needs no `X-CSRF` header.
+
+For providers without back-channel logout, end a user's sessions from your own code with
+`ISlimAuthManager.SignOutEverywhereAsync` when the provider reports a sign-out or a block – or use a sign-in guard
+([hooks](hooks.md)) that asks your directory whether the account is still enabled.
 
 ## Enterprise SSO and certificates
 

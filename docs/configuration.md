@@ -142,6 +142,7 @@ If the old secret leaked, do not list it in `PreviousJwtSecrets` – every token
 | `AddEmailSender<T>()` / `AddNullEmailSender()` | **Required** unless `WithoutEmail()`. The null sender logs links and codes; it stops the start in the `Production` environment unless `AddNullEmailSender(allowInProduction: true)`. |
 | `WithoutEmail(allowSelfRegistration = false)` | Host without mail server: no sender, no mail-based endpoints – [guide](guides/without-email.md). |
 | `AddEmailContextEnricher<T>()` | Adds host data (tenant, brand) to the `SlimEmailContext` of every mail. |
+| `AddBackChannelLogout(provider, o => …)` | OpenID Connect Back-Channel Logout from an enterprise identity provider – [external login](guides/external-login.md#signing-out-at-the-provider). |
 | `AddCorsPolicy()` | CORS policy `SlimIdentityDefaults.CorsPolicy` built from the trusted origins (credentials, `X-CSRF`) – `app.UseCors(SlimIdentityDefaults.CorsPolicy)`. |
 | `AddOriginPolicy<T>()` | Trusted origins decided per request (tenants with their own domains) – replaces `TrustedOrigins`; [guide](guides/multi-tenancy.md). |
 | `AddLinkBuilder<T>()` | Mail, reset and invitation links per request (tenant domains). |

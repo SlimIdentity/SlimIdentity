@@ -114,6 +114,15 @@ internal static partial class Log
     public static partial void ForcedPasswordChangeCompleted(ILogger logger, string userId);
 
     // ---------------------------------------------------------------- 5xxx external login
+    [LoggerMessage(5010, LogLevel.Information, "SlimIdentity: back-channel logout from {Provider} ended all sessions of user {UserId}.")]
+    public static partial void BackChannelLogout(ILogger logger, string provider, string userId);
+
+    [LoggerMessage(5011, LogLevel.Warning, "SlimIdentity: back-channel logout token from {Provider} rejected ({Reason}).")]
+    public static partial void BackChannelTokenRejected(ILogger logger, string provider, string reason);
+
+    [LoggerMessage(5012, LogLevel.Error, "SlimIdentity: discovery document of {Provider} could not be loaded – back-channel logout answered 503.")]
+    public static partial void BackChannelMetadataFailed(ILogger logger, Exception exception, string provider);
+
     [LoggerMessage(5001, LogLevel.Warning, "SlimIdentity: {Provider} login for existing account {UserId} not linked (unverified e-mail or auto-link disabled).")]
     public static partial void ExternalLoginConflict(ILogger logger, string provider, string userId);
 

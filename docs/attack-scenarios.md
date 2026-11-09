@@ -101,6 +101,7 @@ Test names refer to `tests/SlimIdentity.Tests` (`Integration/…`, `Unit/Propert
 | F8 | Answers with tokens or secrets stored by a browser, proxy or CDN cache | covered – `ReviewRound2.Responses_with_secrets_are_never_cached` (`Cache-Control: no-store` on `/auth`; **fixed** in review round 2) |
 | F7 | Credentials or codes in logs, referrers, URL history | covered – `ExternalLogin.New_external_user_…`, `ReviewRound1.R6_no_pre_auth_token_in_the_query_after_external_login_with_2fa` (secrets only in the fragment – **fixed** in review round 1), `LogSecrecy.No_secret_or_address_is_ever_logged` |
 | F9 | Link CSRF: an attacker's link code planted in the victim's URL links the attacker's provider account | covered – `ExternalLink.An_attackers_link_code_cannot_be_planted_in_the_victims_session` (PKCE verifier of the victim's tab), `…The_link_code_needs_the_verifier_the_session_and_the_password` |
+| F10 | Forged, foreign, replayed or stale back-channel logout tokens sign users out | covered – `BackChannelLogout.Forged_or_unfit_tokens_are_rejected` (foreign key, audience, issuer, no event, nonce, no sub, old, expired), `…A_replayed_token_is_rejected`, `…An_unknown_subject_is_acknowledged_without_effect` |
 
 ## G. Admin, impersonation, API keys
 

@@ -88,6 +88,44 @@ public sealed class SlimIdentityBuilder
         return this;
     }
 
+    // ---------------------------------------------------------------- back-channel logout
+
+    /// <summary>
+    /// OpenID Connect Back-Channel Logout for <paramref name="provider"/> (the scheme name of its handler): the provider
+    /// posts a signed logout token to <c>{RoutePrefix}/backchannel-logout/{provider}</c> when it signs a user out or
+    /// blocks them, and every session of the user linked to its <c>sub</c> ends. Register that URL at the provider
+    /// (Keycloak, Okta, Auth0, …). Requires an <see cref="ISlimExternalLoginStore"/>.
+    /// </summary>
+    /// <example><code>
+    /// .AddBackChannelLogout("Keycloak", o =>
+    /// {
+    ///     o.MetadataAddress = "https://keycloak.example.com/realms/corp/.well-known/openid-configuration";
+    ///     o.ClientId = "my-app";
+    /// })
+    /// </code></example>
+    public SlimIdentityBuilder AddBackChannelLogout(string provider, Action<SlimBackChannelLogoutOptions> configure)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(provider);
+        ArgumentNullException.ThrowIfNull(configure);
+        Services.AddOptions<SlimBackChannelLogoutOptions>(provider)
+            .Configure(configure)
+            .Validate(o => !string.IsNullOrWhiteSpace(o.ClientId), $"SlimIdentity: back-channel logout for '{provider}' needs ClientId (the expected audience).")
+            .Validate(o => o.Configuration is not null || Uri.TryCreate(o.MetadataAddress, UriKind.Absolute, out _),
+                $"SlimIdentity: back-channel logout for '{provider}' needs MetadataAddress (or a fixed Configuration).")
+            .ValidateOnStart();
+
+        if (Services.FirstOrDefault(d => d.ServiceType == typeof(SlimBackChannelProviders))?.ImplementationInstance is not SlimBackChannelProviders names)
+        {
+            names = new SlimBackChannelProviders();
+            Services.AddSingleton(names);
+            Services.TryAddSingleton<SlimBackChannelConfigurations>();
+            Services.TryAddSingleton<SlimLocalNonceRegistry>();
+            Services.TryAddScoped<SlimBackChannelLogoutHandler>();
+        }
+        names.Names.Add(provider);
+        return this;
+    }
+
     // ---------------------------------------------------------------- tenants
 
     /// <summary>

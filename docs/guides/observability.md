@@ -55,7 +55,7 @@ answer does not (enumeration protection). Keep metrics internal.
 | 2xxx | Two-factor | 2002 recovery code used, 2005 replayed code rejected, 2006 TOTP secret cannot be decrypted, 2007 all remembered devices forgotten, 2008 reused sign-in challenge rejected |
 | 3xxx | Tokens and sessions | 3002/3003 refresh-token reuse, 3004 all sessions revoked, 3007/3008 guard vetoes, 3009 failing event observer |
 | 4xxx | Account | 4002 password reset, 4004/4005 e-mail change, 4003 invitation accepted, 4006 registration race lost |
-| 5xxx | External login | 5001 account conflict, 5002 linked, 5003 user created |
+| 5xxx | External login | 5001 account conflict, 5002 linked, 5003 user created, 5010 back-channel logout, 5011 logout token rejected, 5012 discovery document unavailable |
 | 6xxx | Impersonation | 6001 started, 6002 ended, 6003 return denied |
 | 7xxx | Mail | 7001 queue full, 7002 send failed, 7004 unsent mails at shutdown, 7005 per-recipient limit reached, 7006 throttle table full (flood of fresh addresses – new recipients get no mail) |
 | 8xxx | Deployment | 8001 forwarded headers not applied, 8002 local key ring, 8003 no Data Protection application name, 8004 exchange codes per instance – see [several instances](multiple-instances.md) |

@@ -138,7 +138,6 @@ After 1.0, roughly in this order – nothing here needs a breaking change:
 
 - **Passkeys (1.1)** – WebAuthn as a new capability (`ISlimPasskeyStore`); password-less accounts and a free-form
   `amr` already exist.
-- OIDC back-channel logout: an enterprise identity provider ends the local sessions of a user it signs out or blocks.
 - Device-bound tokens (DPoP) for bearer clients.
 - Adapter for the ASP.NET Core Identity table schema (`AspNetUsers`), turning a migration into a configuration step.
 - API-key entity in the EF Core package; npm package of the TypeScript client if there is demand.

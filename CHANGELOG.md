@@ -84,6 +84,8 @@ First public release (1.0.0) in preparation.
 - Tenants with own domains: `ISlimOriginPolicy` (`AddOriginPolicy<T>()`) decides trusted origins per request for the
   CSRF check, `returnUrl` and CORS; `ISlimLinkBuilder` (`AddLinkBuilder<T>()`) builds mail, reset and invitation links
   per request. `AddCorsPolicy()` derives CORS from the same origins (`SlimIdentityDefaults.CorsPolicy`).
+- OpenID Connect Back-Channel Logout: `AddBackChannelLogout(provider, …)` maps `POST /auth/backchannel-logout/{provider}`;
+  a validated logout token from an enterprise identity provider ends every session of the user linked to its `sub`.
 - Forced password change: `SlimUser.PasswordChangeRequired` (new column for stores, checked by the conformance kit),
   `401 password_change_required` at `/login` and `POST /auth/login/password-change`; TypeScript client support.
 

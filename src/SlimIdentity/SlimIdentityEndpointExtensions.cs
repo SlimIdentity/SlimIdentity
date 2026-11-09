@@ -67,6 +67,7 @@ public static class SlimIdentityEndpointExtensions
         if (Has<ISlimSessionStore>()) MapSessions(group);
         if (Has<ISlimTwoFactorStore>()) MapTwoFactor(group, o);
         if (Has<ISlimExternalLoginStore>()) MapExternal(group, o);
+        if (Has<ISlimExternalLoginStore>() && Has<SlimBackChannelProviders>()) MapBackChannelLogout(group);
 
         return group;
     }
@@ -385,6 +386,20 @@ public static class SlimIdentityEndpointExtensions
     }
 
     // ------------------------------------------------------------------ external login
+
+    private static void MapBackChannelLogout(RouteGroupBuilder group)
+    {
+        group.MapPost("/backchannel-logout/{provider}", static (string provider,
+                [FromServices] SlimBackChannelLogoutHandler h, CancellationToken ct) => h.LogoutAsync(provider, ct))
+            .WithName("SlimIdentity_BackChannelLogout")
+            .WithSummary("OpenID Connect Back-Channel Logout: the identity provider posts a signed logout_token (form); the user's sessions end.")
+            .Accepts<IFormCollection>("application/x-www-form-urlencoded")
+            .Produces(StatusCodes.Status200OK)
+            .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
+            .Produces<SlimStatusResponse>(StatusCodes.Status404NotFound)
+            .WithMetadata(new SlimNoCookieAuthentication())
+            .AllowAnonymous();
+    }
 
     private static void MapExternal(RouteGroupBuilder group, SlimIdentityOptions o)
     {
