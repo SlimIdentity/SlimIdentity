@@ -243,10 +243,18 @@ internal sealed class SlimLoginHandlers(
         // ends in a cookie sign-in without carrying a cookie – only the signed token knows (as on /login/2fa)
         if (payload.UseCookies && SlimCsrfEndpointFilter.Validate(Http.Request, O, logger) is { } csrfError) return csrfError;
 
+        // one attempt per account at a time, like every credential step; a full queue answers like an invalid token
+        using var attempt = await credentials.TryEnterAttemptAsync(payload.Uid, ct);
+        if (attempt is null) return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
+
         // the stamp rotates with the new password: the token works once, and a newer administrator password kills it
         var user = await store.FindByIdAsync(payload.Uid, ct);
         if (user is null || !user.IsActive || !user.PasswordChangeRequired || !SlimHashing.FixedTimeEquals(user.SecurityStamp, payload.Stamp))
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
+
+        // a lockout that started after the token was issued holds – as on /login/2fa; the new password must not lift it
+        var now = time.GetUtcNow();
+        if (user.IsLockedOut(now)) return SlimResults.Locked(Http, user.LockoutEndUtc!.Value, now);
 
         if (await passwordPolicy.ValidateAsync(request.NewPassword, user.Email, ct, "newPassword") is { } errors)
             return SlimResults.Validation(errors);

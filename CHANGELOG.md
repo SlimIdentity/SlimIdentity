@@ -116,6 +116,8 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
 
 ### Fixed
 
+- `POST /auth/login/password-change` runs in the per-account attempt gate and answers `423` during a lockout, like
+  `/login/2fa`; before, the forced change ignored a lockout that started after the token was issued and lifted it.
 - A correct password confirmation (`/change-email`, `/2fa/*`, `ConfirmPasswordAsync`) now resets the failed-attempt
   counter and upgrades an outdated hash, like a sign-in. Before, a few typos stayed on the counter for good, and later
   ones locked the account early; endpoints that write the security state afterwards no longer write the old counter

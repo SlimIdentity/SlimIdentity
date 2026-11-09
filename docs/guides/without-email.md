@@ -75,7 +75,8 @@ POST /auth/login/password-change
 
 The answer is the session – or, with 2FA, the usual `requires_two_factor` challenge. The new password must follow the
 password rules and differ from the start password; the token works once, for 5 minutes, and dies when the
-administrator sets another password. The TypeScript client handles it as `{ kind: "password_change" }` and
+administrator sets another password. A lockout that starts in between holds (`423`) – the new password does not lift
+it. The TypeScript client handles it as `{ kind: "password_change" }` and
 `completePasswordChange(token, newPassword)`.
 
 ## Second factor without mail

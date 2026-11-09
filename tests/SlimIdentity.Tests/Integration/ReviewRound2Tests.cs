@@ -62,6 +62,48 @@ public sealed class ReviewRound2Tests
         Assert.NotNull(later);
     }
 
+    // ------------------------------------------------------------------ F-03: forced password change during a lockout
+
+    private static async Task<string> PasswordChangeTokenAsync(TestApp app)
+    {
+        var user = app.Users.Get(TestApp.UserEmail);
+        user.PasswordChangeRequired = true;
+        await app.Users.UpdateSecurityStateAsync(user, default);
+        return (await app.CreateClient().PostJsonAsync("/auth/login?useCookies=false",
+            new { email = TestApp.UserEmail, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized)).Str("passwordChangeToken");
+    }
+
+    [Fact]
+    public async Task F03_a_locked_account_cannot_complete_the_forced_password_change()
+    {
+        await using var app = await TestApp.StartAsync();
+        var token = await PasswordChangeTokenAsync(app);
+
+        for (var i = 0; i < 5; i++)   // locked before the token is redeemed
+            await app.CreateClient().PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = "wrong" }, HttpStatusCode.Unauthorized);
+        Assert.True(app.Users.Get(TestApp.UserEmail).IsLockedOut(app.Time.GetUtcNow()));
+
+        var answer = await app.CreateClient().PostAsync("/auth/login/password-change", new { token, newPassword = "New-Valid-Pass-123!" });
+
+        Assert.Equal((HttpStatusCode)423, answer.StatusCode);
+        Assert.True(app.Users.Get(TestApp.UserEmail).IsLockedOut(app.Time.GetUtcNow()));   // the lockout was not cleared
+        Assert.True(app.Users.Get(TestApp.UserEmail).PasswordChangeRequired);
+    }
+
+    [Fact]
+    public async Task F03_after_the_lockout_the_change_token_works_again()
+    {
+        await using var app = await TestApp.StartAsync();
+        var token = await PasswordChangeTokenAsync(app);
+        for (var i = 0; i < 5; i++)
+            await app.CreateClient().PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = "wrong" }, HttpStatusCode.Unauthorized);
+
+        app.Time.Advance(TimeSpan.FromMinutes(1) + TimeSpan.FromSeconds(1));   // first lockout: 1 minute, token: 5 minutes
+
+        var session = await app.CreateClient().PostJsonAsync("/auth/login/password-change", new { token, newPassword = "New-Valid-Pass-123!" });
+        Assert.False(string.IsNullOrEmpty(session.Str("accessToken")));
+    }
+
     // ------------------------------------------------------------------ F-04: a confirmed password resets the counter
 
     [Fact]

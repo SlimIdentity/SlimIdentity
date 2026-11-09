@@ -21,7 +21,7 @@ metadata (tag `SlimIdentity`), so typed clients can be generated from `/openapi/
 | :--- | :--- | :--- | :--- |
 | `POST /login` ⏱ | `email`, `password`, `rememberMe`, `twoFactorRememberToken` (bearer, optional) | `200` session | `400 invalid_request`; `401 invalid_credentials`; `401 requires_two_factor` (+ `preAuthToken`, `twoFactorMethod` `totp`/`email`/`recovery`); `401 password_change_required` (+ `passwordChangeToken`); `403 email_not_confirmed`; `403 <veto>` of a sign-in guard; with `RevealAccountState`: `403 account_disabled`, `423 locked_out` |
 | `POST /login/2fa` ⏱ | `preAuthToken` + `code` or `recoveryCode`, `rememberDevice` | `200` session (+ `twoFactorRememberToken` in bearer mode / cookie `SlimAuth.2fa` in cookie mode when remembered) | `401 invalid_token`, `401 invalid_two_factor_code`, `423 locked_out` |
-| `POST /login/password-change` ⏱ | `token` (`passwordChangeToken`), `newPassword` | `200` session, or `401 requires_two_factor` | `400 password_unchanged`, `400` validation, `401 invalid_token` |
+| `POST /login/password-change` ⏱ | `token` (`passwordChangeToken`), `newPassword` | `200` session, or `401 requires_two_factor` | `400 password_unchanged`, `400` validation, `401 invalid_token`, `423 locked_out` |
 | `POST /refresh` | `refreshToken` | `200` new token pair | `400 invalid_request`, `401 invalid_token`, `401 session_expired` |
 | `POST /logout` | `refreshToken` (optional) | `200 logged_out` – ends the caller's session; a refresh token ends its session only while it is valid (unused, current security stamp) | – |
 | `POST /logout-all` 🔒 | – | `200 logged_out_everywhere` | `401`, `403 not_allowed_while_impersonating` |
