@@ -48,6 +48,7 @@ namespace SlimIdentity.Contracts;
 [JsonSerializable(typeof(string))]
 [JsonSerializable(typeof(Microsoft.AspNetCore.Mvc.ProblemDetails))]
 [JsonSerializable(typeof(HttpValidationProblemDetails))]
+[JsonSerializable(typeof(string))]   // the "code" extension of validation problems (object-typed)
 // stateless token payloads and the actor claim
 [JsonSerializable(typeof(SlimEmailTokenPayload))]
 [JsonSerializable(typeof(SlimResetTokenPayload))]

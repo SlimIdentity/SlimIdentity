@@ -70,7 +70,7 @@ in the session means "reload the claims" – `GetClaimsAsync` runs only then, fo
 changed, no claims are reloaded.
 
 Bearer tokens need `Tokens.ValidateSecurityStampOnEachRequest` (the default) for the immediate effect; without it they
-get the new claims at their next refresh. A step-up window (`SudoFor`) survives a claims refresh; other claims added by
+get the new claims at their next refresh. A step-up window (`ElevateToSudoAsync`) survives a claims refresh; other claims added by
 `ElevateSessionAsync` do not.
 
 **Changing a group** affects all its members – call `RefreshClaimsAsync` for each (for large groups in a background

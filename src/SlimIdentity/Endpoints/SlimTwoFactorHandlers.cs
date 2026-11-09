@@ -15,7 +15,6 @@ internal sealed class SlimTwoFactorHandlers(
     SlimWorkflowTokens workflow,
     SlimHookRunner hooks,
     IOptions<SlimIdentityOptions> options,
-    TimeProvider time,
     IHttpContextAccessor httpContextAccessor,
     ILogger<SlimTwoFactorHandlers> logger)
 {
@@ -101,7 +100,7 @@ internal sealed class SlimTwoFactorHandlers(
         await hooks.RaiseAsync(SlimEventTypes.TwoFactorDisabled, user.Id, reason: "user", ct: ct);
 
         var session = await authManager.RefreshCurrentSessionAsync(user, ct);
-        return Results.Ok(session.ToResponse(time.GetUtcNow()));
+        return Results.Ok(session.ToResponse());
     }
 
     // POST /2fa/recovery-codes
@@ -136,7 +135,7 @@ internal sealed class SlimTwoFactorHandlers(
         Log.RememberedDevicesForgotten(logger, user.Id);
 
         var session = await authManager.RefreshCurrentSessionAsync(user, ct);
-        return Results.Ok(session.ToResponse(time.GetUtcNow()));
+        return Results.Ok(session.ToResponse());
     }
 
     // ------------------------------------------------------------------ helpers
@@ -164,7 +163,7 @@ internal sealed class SlimTwoFactorHandlers(
         await hooks.RaiseAsync(SlimEventTypes.TwoFactorEnabled, user.Id, method, ct: ct);
 
         var session = await authManager.RefreshCurrentSessionAsync(user, ct);
-        return Results.Ok(new SlimRecoveryCodesResponse(codes, session.ToResponse(time.GetUtcNow())));
+        return Results.Ok(new SlimRecoveryCodesResponse(codes, session.ToResponse()));
     }
 
     private async Task<(SlimUser? User, IResult? Error)> ConfirmPasswordAsync(

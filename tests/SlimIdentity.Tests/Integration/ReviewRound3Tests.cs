@@ -22,7 +22,7 @@ public sealed class ReviewRound3Tests
         {
             if (await store.FindByEmailAsync(email, ct) is not { } user) return Results.NotFound();
             var result = await auth.SignInAsync(user, useCookies: false, authenticationMethod: "cert", secondFactorVerified: secondFactor == true, ct: ct);
-            if (result.Succeeded) return Results.Ok(result.ToResponse(DateTimeOffset.UtcNow));
+            if (result.Succeeded) return Results.Ok(result.ToResponse());
             return result.TwoFactorChallenge is { } challenge
                 ? Results.Json(challenge, statusCode: StatusCodes.Status401Unauthorized)
                 : Results.Json(new { status = result.Error }, statusCode: StatusCodes.Status403Forbidden);

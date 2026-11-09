@@ -48,7 +48,7 @@ public static class AdminEndpoints
                 lf.CreateLogger("Audit").LogWarning("AUDIT impersonation {Admin} -> {Target}", me.GetSlimUserId(), target.Id);
                 var result = await auth.ImpersonateAsync(target, me.GetSlimUserId()!, useCookies ?? me.IsSlimCookieSession(), ct);
                 return result.Succeeded
-                    ? Results.Ok(result.ToResponse(DateTimeOffset.UtcNow))
+                    ? Results.Ok(result.ToResponse())
                     : Results.BadRequest(new { status = result.Error });
             });
 
@@ -58,7 +58,7 @@ public static class AdminEndpoints
             {
                 var result = await auth.EndImpersonationAsync(ct);
                 return result.Succeeded
-                    ? Results.Ok(result.ToResponse(DateTimeOffset.UtcNow))
+                    ? Results.Ok(result.ToResponse())
                     : Results.Json(new { status = result.Error }, statusCode: result.Error == "not_impersonating" ? 400 : 401);
             })
             .RequireAuthorization()
@@ -72,8 +72,8 @@ public static class AdminEndpoints
                 // lockout, notification mail and ISlimCustomPasswordValidator – exactly like the built-in endpoints
                 if (await auth.ConfirmPasswordAsync(user, req.Password, ct) is { } failure) return failure;
 
-                var result = await auth.ElevateSessionAsync(user, [SlimClaims.SudoFor(TimeSpan.FromMinutes(10))], me.IsSlimCookieSession(), ct);
-                return Results.Ok(result.ToResponse(DateTimeOffset.UtcNow));
+                var result = await auth.ElevateToSudoAsync(user, TimeSpan.FromMinutes(10), me.IsSlimCookieSession(), ct);
+                return Results.Ok(result.ToResponse());
             })
             .RequireAuthorization()
             .RequireSlimCsrf()

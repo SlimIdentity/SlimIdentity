@@ -91,7 +91,7 @@ public static class CertificateAuthentication
                 var session = await auth.SignInAsync(user, useCookies ?? false, authenticationMethod: "cert", ct: ct);
                 if (session.TwoFactorChallenge is { } challenge) return Results.Json(challenge, statusCode: StatusCodes.Status401Unauthorized);
                 return session.Succeeded
-                    ? Results.Ok(session.ToResponse(time.GetUtcNow()))
+                    ? Results.Ok(session.ToResponse())
                     : Results.Json(new { status = session.Error }, statusCode: StatusCodes.Status403Forbidden);
             })
             .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)

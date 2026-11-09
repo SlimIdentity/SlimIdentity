@@ -154,7 +154,7 @@ public static class SlimIdentityServiceExtensions
             });
 
         services.AddOptions<JwtBearerOptions>(SlimIdentityDefaults.BearerScheme)
-            .Configure<IOptions<SlimIdentityOptions>>((bearer, slim) =>
+            .Configure<IOptions<SlimIdentityOptions>, TimeProvider>((bearer, slim, time) =>
             {
                 var t = slim.Value.Tokens;
                 bearer.MapInboundClaims = false; // keep short claim names (sub, email, role)
@@ -173,6 +173,12 @@ public static class SlimIdentityServiceExtensions
                         : [SlimJwtTokenFactory.CreateSigningKey(t.JwtSecret), .. t.PreviousJwtSecrets.Select(SlimJwtTokenFactory.CreateSigningKey)],
                     ValidAlgorithms = [SecurityAlgorithms.HmacSha256],
                     ClockSkew = t.ClockSkew,
+                    // the clock the tokens were issued with (the registered TimeProvider) – not the system clock
+                    LifetimeValidator = (notBefore, expires, _, p) =>
+                    {
+                        var now = time.GetUtcNow().UtcDateTime;
+                        return expires is { } exp && exp > now - p.ClockSkew && (notBefore is not { } nbf || nbf <= now + p.ClockSkew);
+                    },
                     NameClaimType = SlimClaimTypes.Email,
                     RoleClaimType = SlimClaimTypes.Role,
                     AuthenticationType = SlimIdentityDefaults.BearerScheme,

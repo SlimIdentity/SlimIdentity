@@ -6,7 +6,8 @@ metadata (tag `SlimIdentity`), so typed clients can be generated from `/openapi/
 **Conventions**
 
 - JSON bodies, camelCase. Errors use `{ "status": "<snake_case_code>", "message": "…" }`; validation errors are
-  RFC 7807 `ValidationProblem` responses.
+  RFC 9457 validation problems – there `status` is the HTTP status (400), the code is in `code` (`validation_failed`)
+  and the field errors in `errors`: `{ "status": 400, "code": "validation_failed", "errors": { "password": ["…"] } }`.
 - **Mode:** endpoints that sign in accept `?useCookies=true|false` (default `Endpoints.DefaultUseCookies`).
   Cookie mode answers `{ "status": "success", "mode": "cookie" }` and sets the cookie; bearer mode returns
   `accessToken`, `expiresIn`, `refreshToken` and expiry timestamps.

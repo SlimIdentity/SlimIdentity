@@ -67,6 +67,9 @@ internal static partial class Log
     [LoggerMessage(7006, LogLevel.Warning, "SlimIdentity: mail throttle full ({Capacity} recipients within 15 minutes) – mails to new recipients are not sent. A flood of fresh addresses is likely.")]
     public static partial void MailThrottleFull(ILogger logger, int capacity);
 
+    [LoggerMessage(3011, LogLevel.Warning, "SlimIdentity: user {UserId} had no security stamp (created outside SlimIdentity?) – one was created at sign-in. Initialize SecurityStamp with SlimUser.NewSecurityStamp() when you create users.")]
+    public static partial void SecurityStampMissing(ILogger logger, string userId);
+
     [LoggerMessage(3010, LogLevel.Information, "SlimIdentity: claims of user {UserId} changed – sessions reload them.")]
     public static partial void ClaimsRefreshed(ILogger logger, string userId);
 

@@ -33,11 +33,17 @@ public sealed record SlimAuthResult
     /// </summary>
     public SlimLoginChallengeResponse? TwoFactorChallenge { get; init; }
 
+    /// <summary>When the tokens were issued (the registered <see cref="TimeProvider"/>) – the base of <c>expiresIn</c>.</summary>
+    internal DateTimeOffset IssuedAt { get; init; }
+
     internal static SlimAuthResult Failed(string error) => new() { Succeeded = false, Error = error };
     internal static SlimAuthResult Veto(SlimVeto veto) => new() { Succeeded = false, Error = veto.Error, ErrorMessage = veto.Message, Vetoed = true };
 
-    /// <summary>Maps the result to the JSON DTO returned by the built-in endpoints.</summary>
-    public SlimAuthResponse ToResponse(DateTimeOffset utcNow) => UsedCookies
+    /// <summary>
+    /// Maps the result to the JSON DTO returned by the built-in endpoints. <c>expiresIn</c> is measured from the moment
+    /// the tokens were issued, on the clock SlimIdentity uses (the registered <see cref="TimeProvider"/>).
+    /// </summary>
+    public SlimAuthResponse ToResponse() => UsedCookies
         ? new SlimAuthResponse { Status = "success", Mode = "cookie" }
         : new SlimAuthResponse
         {
@@ -46,7 +52,7 @@ public sealed record SlimAuthResult
             TokenType = "Bearer",
             AccessToken = AccessToken,
             AccessTokenExpiresAt = AccessTokenExpiresAt,
-            ExpiresIn = AccessTokenExpiresAt is { } exp ? (int)Math.Max(0, (exp - utcNow).TotalSeconds) : null,
+            ExpiresIn = AccessTokenExpiresAt is { } exp ? (int)Math.Max(0, (exp - IssuedAt).TotalSeconds) : null,
             RefreshToken = RefreshToken,
             RefreshTokenExpiresAt = RefreshTokenExpiresAt,
         };

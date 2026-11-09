@@ -170,6 +170,16 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
   on every request.
 - EF Core package and template: counting a failed sign-in of a user deleted in the meantime returns 0 instead of
   throwing.
+- One clock for every expiry: JWTs are validated against the registered `TimeProvider` they were issued with (before:
+  the system clock); `SlimAuthResult.ToResponse()` computes `expiresIn` from the issue time and no longer takes a
+  `DateTimeOffset` (callers passed `DateTimeOffset.UtcNow`); sudo windows come from
+  `ISlimAuthManager.ElevateToSudoAsync(user, duration, useCookies)`, and `SlimClaims.SudoFor` requires the
+  `TimeProvider`. **Breaking.**
+- Validation errors carry `"code": "validation_failed"` next to the field errors (their `status` is the HTTP status
+  number per RFC 9457); the TypeScript client reports that code.
+- A user without a security stamp (seeded or imported by the host) gets one at the first sign-in (log event 3011)
+  instead of being signed out at the first validation.
+- The conformance kit checks that `FindByIdAsync` returns `null` for malformed ids.
 
 ### Fixed
 

@@ -72,7 +72,10 @@ public interface ISlimUserStore
 /// <summary>What <see cref="ISlimUserStore.CreateAsync"/> creates.</summary>
 public sealed class SlimNewUser
 {
-    /// <summary>The address (as entered, trimmed); unique case-insensitively.</summary>
+    /// <summary>
+    /// The address – trimmed and Unicode-normalized (NFC) by SlimIdentity, case as entered. Unique case-insensitively:
+    /// store a normalized column (e.g. upper case) with a unique index.
+    /// </summary>
     public required string Email { get; init; }
 
     /// <summary>

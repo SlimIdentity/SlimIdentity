@@ -107,7 +107,7 @@ public sealed class TestApp : IAsyncDisposable
                 var target = await store.FindByIdAsync(userId, ct);
                 if (target is null) return Results.NotFound();
                 var result = await auth.ImpersonateAsync(target, admin.GetSlimUserId()!, admin.IsSlimCookieSession(), ct);
-                return result.Succeeded ? Results.Ok(result.ToResponse(DateTimeOffset.UtcNow)) : Results.BadRequest(new { status = result.Error });
+                return result.Succeeded ? Results.Ok(result.ToResponse()) : Results.BadRequest(new { status = result.Error });
             })
             .RequireAuthorization(p => p.RequireRole("Admin"))
             .RequireSlimCsrf();
@@ -115,7 +115,7 @@ public sealed class TestApp : IAsyncDisposable
         app.MapPost("/api/impersonate/stop", async (ISlimAuthManager auth, CancellationToken ct) =>
             {
                 var result = await auth.EndImpersonationAsync(ct);
-                return result.Succeeded ? Results.Ok(result.ToResponse(DateTimeOffset.UtcNow)) : Results.Json(new { status = result.Error }, statusCode: 401);
+                return result.Succeeded ? Results.Ok(result.ToResponse()) : Results.Json(new { status = result.Error }, statusCode: 401);
             })
             .RequireAuthorization()
             .RequireSlimCsrf();

@@ -470,14 +470,14 @@ internal sealed class SlimLoginHandlers(
 
     // ------------------------------------------------------------------ helpers
 
-    internal IResult ToResult(SlimAuthResult result, string? twoFactorRememberToken = null)
+    internal static IResult ToResult(SlimAuthResult result, string? twoFactorRememberToken = null)
     {
         // a guard's veto follows a correct sign-in – its reason can be told; anything else stays uniform
         if (!result.Succeeded)
             return result.Vetoed
                 ? SlimResults.Status(result.Error!, result.ErrorMessage ?? "The sign-in was refused.", StatusCodes.Status403Forbidden)
                 : SlimResults.InvalidCredentials();
-        var response = result.ToResponse(time.GetUtcNow());
+        var response = result.ToResponse();
         return Results.Ok(twoFactorRememberToken is null ? response : response.WithTwoFactorRememberToken(twoFactorRememberToken));
     }
 

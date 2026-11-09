@@ -79,10 +79,19 @@ export type FormResult =
   | { ok: true; status: string }
   | { ok: false; status: string; errors?: Record<string, string[]> };
 
+/**
+ * The machine-readable code of an answer: `status` ("invalid_token", "locked_out", …) – for validation errors
+ * (RFC 9457, where `status` is the HTTP status number) the `code` "validation_failed".
+ */
+function codeOf(body: { status?: unknown; code?: unknown }, r: Response): string {
+  if (typeof body.status === "string") return body.status;
+  return typeof body.code === "string" ? body.code : `http_${r.status}`;
+}
+
 async function toFormResult(r: Response): Promise<FormResult> {
   const body = await r.json().catch(() => ({}));
   if (r.ok) return { ok: true, status: body.status ?? "ok" };
-  return { ok: false, status: body.status ?? `http_${r.status}`, errors: body.errors };
+  return { ok: false, status: codeOf(body, r), errors: body.errors };
 }
 
 function anonymousPost(path: string, body: object): Promise<FormResult> {
@@ -384,7 +393,7 @@ async function finishLink(send: (path: string, init: RequestInit) => Promise<Res
 
   const r = await send("/auth/link/external", { method: "POST", body: JSON.stringify({ code, codeVerifier, password }) });
   if (r.ok) sessionStorage.removeItem(LINK_PKCE_KEY);   // kept on a wrong password: the user may try again
-  return ((await r.json().catch(() => ({}))) as { status?: string }).status ?? `http_${r.status}`;
+  return codeOf(await r.json().catch(() => ({})), r);
 }
 
 // Passkeys (WebAuthn): the server sends options with base64url fields; the browser API wants ArrayBuffers.
@@ -397,7 +406,7 @@ const toBase64Url = (buffer: ArrayBuffer) => base64Url(new Uint8Array(buffer));
 
 async function statusOf(response: Promise<Response>): Promise<string> {
   const r = await response;
-  return ((await r.json().catch(() => ({}))) as { status?: string }).status ?? `http_${r.status}`;
+  return codeOf(await r.json().catch(() => ({})), r);
 }
 
 async function addPasskeyWith(send: (path: string, init: RequestInit) => Promise<Response>, name?: string, password?: string): Promise<string> {
@@ -490,7 +499,7 @@ async function passkeyAutofill(send: (path: string, init: RequestInit) => Promis
 async function removeExternal(send: (path: string, init: RequestInit) => Promise<Response>,
   provider: string, providerKey: string, password?: string): Promise<string> {
   const r = await send("/auth/sign-in-methods/external/remove", { method: "POST", body: JSON.stringify({ provider, providerKey, password }) });
-  return ((await r.json().catch(() => ({}))) as { status?: string }).status ?? `http_${r.status}`;
+  return codeOf(await r.json().catch(() => ({})), r);
 }
 
 function storeTokens(auth: AuthResponse) {
@@ -706,5 +715,5 @@ async function toLoginResult(r: Response): Promise<LoginResult> {
     return { kind: "password_change", passwordChangeToken: body.passwordChangeToken };
   // only with SignIn.RevealAccountState = true – by default locked accounts answer like a wrong password
   if (r.status === 423) return { kind: "locked", until: body.lockoutEndUtc };
-  return { kind: "error", status: body.status ?? `http_${r.status}` };
+  return { kind: "error", status: codeOf(body, r) };
 }

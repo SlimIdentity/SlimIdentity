@@ -173,5 +173,10 @@ internal static class SlimResults
     public static IResult BadRequest(string status, string? message = null) =>
         Status(status, message, StatusCodes.Status400BadRequest);
 
-    public static IResult Validation(IDictionary<string, string[]> errors) => Results.ValidationProblem(errors);
+    /// <summary>
+    /// RFC 9457 validation problem (field errors in <c>errors</c>); <c>status</c> is the HTTP status there, so the
+    /// machine-readable code every other SlimIdentity error carries in <c>status</c> is in <c>code</c>.
+    /// </summary>
+    public static IResult Validation(IDictionary<string, string[]> errors) =>
+        Results.ValidationProblem(errors, extensions: new Dictionary<string, object?> { ["code"] = "validation_failed" });
 }

@@ -146,7 +146,7 @@ internal sealed class SlimAuthManager(
     {
         ArgumentNullException.ThrowIfNull(user);
         if (await services.GetRequiredService<SlimPasswordPolicy>().ValidateAsync(password, user.Email, ct) is { } errors)
-            return Results.ValidationProblem(errors);
+            return SlimIdentity.Http.SlimResults.Validation(errors);
 
         services.GetRequiredService<SlimCredentialService>().ApplyNewPassword(user, password);   // new stamp, lockout cleared
         user.PasswordChangeRequired = mustChange;
@@ -214,6 +214,13 @@ internal sealed class SlimAuthManager(
     {
         ArgumentNullException.ThrowIfNull(user);
         return services.GetRequiredService<SlimCredentialService>().ConfirmPasswordAsync(user, password, Http, ct);
+    }
+
+    public Task<SlimAuthResult> ElevateToSudoAsync(SlimUser user, TimeSpan duration, bool useCookies, CancellationToken ct = default)
+    {
+        if (duration <= TimeSpan.Zero || duration > TimeSpan.FromHours(1))
+            throw new ArgumentOutOfRangeException(nameof(duration), "SlimIdentity: a sudo window lasts between 0 and 1 hour.");
+        return ElevateSessionAsync(user, [SlimClaims.SudoFor(duration, time)], useCookies, ct);
     }
 
     public async Task<SlimAuthResult> ElevateSessionAsync(SlimUser user, IEnumerable<Claim> additionalClaims, bool useCookies, CancellationToken ct = default)
@@ -354,6 +361,15 @@ internal sealed class SlimAuthManager(
     {
         if (!user.IsActive) return SlimAuthResult.Failed("account_inactive");
 
+        // a user created outside SlimIdentity (seeding, import) may have no stamp – every session would fail its first
+        // validation: give it one before anything is bound to it
+        if (string.IsNullOrEmpty(user.SecurityStamp))
+        {
+            user.SecurityStamp = SlimUser.NewSecurityStamp();
+            await store.UpdateSecurityStateAsync(user, ct);
+            Log.SecurityStampMissing(logger, user.Id);
+        }
+
         var o = options.Value;
         var now = time.GetUtcNow();
         var authStart = authTime ?? now;
@@ -414,6 +430,7 @@ internal sealed class SlimAuthManager(
             UsedCookies = false,
             AccessToken = accessToken,
             AccessTokenExpiresAt = accessExpires,
+            IssuedAt = now,
             RefreshToken = refreshToken,
             RefreshTokenExpiresAt = refreshExpires,
             SessionId = sessionId,

@@ -285,7 +285,7 @@ internal sealed class SlimExternalLoginHandlers(
 
         var result = await authManager.SignInCoreAsync(user, false, false,
             remembered ? SlimAuthManager.MethodRememberedDevice : SlimAuthManager.MethodExternal, null, null, true, ct);
-        return login.ToResult(result);
+        return SlimLoginHandlers.ToResult(result);
     }
 
     // ------------------------------------------------------------------ POST /link/external

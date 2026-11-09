@@ -20,7 +20,6 @@ internal sealed class SlimPasskeyHandlers(
     SlimAccountHandlers account,
     SlimSignInMethodHandlers signInMethods,
     SlimCredentialService credentials,
-    SlimLoginHandlers login,
     SlimAuthManager authManager,
     SlimWorkflowTokens workflow,
     SlimHookRunner hooks,
@@ -188,7 +187,7 @@ internal sealed class SlimPasskeyHandlers(
         // possession + user verification: multi-factor on its own – no second factor follows
         var result = await authManager.SignInCoreAsync(user, cookies, request.RememberMe, SlimAuthManager.MethodPasskey, null, null, true, ct);
         metrics.Login(result.Succeeded ? "success" : "rejected", cookies);
-        return login.ToResult(result);
+        return SlimLoginHandlers.ToResult(result);
 
         IResult Failed(string reason)
         {

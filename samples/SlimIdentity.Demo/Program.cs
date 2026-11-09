@@ -130,7 +130,7 @@ app.MapPost("/api/admin/impersonate/{userId}", async (
 
         var result = await auth.ImpersonateAsync(target, admin.GetSlimUserId()!, useCookies ?? admin.IsSlimCookieSession(), ct);
         return result.Succeeded
-            ? Results.Ok(result.ToResponse(DateTimeOffset.UtcNow))
+            ? Results.Ok(result.ToResponse())
             : Results.BadRequest(new SlimStatusResponse(result.Error!));
     })
     .RequireAuthorization(p => p.RequireRole("Admin"))
@@ -141,7 +141,7 @@ app.MapPost("/api/admin/impersonate/stop", async (ISlimAuthManager auth, Cancell
     {
         var result = await auth.EndImpersonationAsync(ct);
         return result.Succeeded
-            ? Results.Ok(result.ToResponse(DateTimeOffset.UtcNow))
+            ? Results.Ok(result.ToResponse())
             : Results.Json(new SlimStatusResponse(result.Error!), DemoJsonContext.Default.SlimStatusResponse,
                 statusCode: result.Error == "not_impersonating" ? 400 : 401);
     })
@@ -157,8 +157,8 @@ app.MapPost("/api/sudo", async (
         // lockout + notification like the built-in endpoints (400 invalid_password / 423)
         if (await auth.ConfirmPasswordAsync(user, request.Password, ct) is { } failure) return failure;
 
-        var result = await auth.ElevateSessionAsync(user, [SlimClaims.SudoFor(TimeSpan.FromMinutes(5))], principal.IsSlimCookieSession(), ct);
-        return Results.Ok(result.ToResponse(DateTimeOffset.UtcNow));
+        var result = await auth.ElevateToSudoAsync(user, TimeSpan.FromMinutes(5), principal.IsSlimCookieSession(), ct);
+        return Results.Ok(result.ToResponse());
     })
     .RequireAuthorization()
     .RequireSlimCsrf()

@@ -26,7 +26,7 @@ public interface ISlimAuthManager
     /// <example><code>
     /// var result = await auth.SignInAsync(user, useCookies: true, authenticationMethod: "cert", ct: ct);
     /// if (result.TwoFactorChallenge is { } challenge) return Results.Json(challenge, statusCode: 401);
-    /// return result.Succeeded ? Results.Ok(result.ToResponse(time.GetUtcNow())) : Results.Json(new { status = result.Error }, statusCode: 403);
+    /// return result.Succeeded ? Results.Ok(result.ToResponse()) : Results.Json(new { status = result.Error }, statusCode: 403);
     /// </code></example>
     Task<SlimAuthResult> SignInAsync(SlimUser user, bool useCookies, bool isPersistent = false, string authenticationMethod = "pwd",
         bool secondFactorVerified = false, CancellationToken ct = default);
@@ -48,8 +48,19 @@ public interface ISlimAuthManager
     Task<SlimAuthResult> EndImpersonationAsync(CancellationToken ct = default);
 
     /// <summary>
-    /// Step-up authentication (sudo mode): re-issues the current session with additional temporary claims,
-    /// e.g. <see cref="SlimClaims.SudoFor(TimeSpan, TimeProvider?)"/>. An active impersonation is preserved.
+    /// Sudo mode: re-issues the current session with a step-up window of <paramref name="duration"/> (at most 1 hour) on
+    /// the registered clock – endpoints with <c>SlimIdentityDefaults.SudoPolicy</c> accept it until then. Same rules as
+    /// <see cref="ElevateSessionAsync"/>; confirm the password first with <see cref="ConfirmPasswordAsync"/>.
+    /// </summary>
+    /// <example><code>
+    /// if (await auth.ConfirmPasswordAsync(user, request.Password, ct) is { } failure) return failure;
+    /// return Results.Ok((await auth.ElevateToSudoAsync(user, TimeSpan.FromMinutes(5), me.IsSlimCookieSession(), ct)).ToResponse());
+    /// </code></example>
+    Task<SlimAuthResult> ElevateToSudoAsync(SlimUser user, TimeSpan duration, bool useCookies, CancellationToken ct = default);
+
+    /// <summary>
+    /// Step-up authentication: re-issues the current session with additional temporary claims (for the sudo window use
+    /// <see cref="ElevateToSudoAsync"/>). An active impersonation is preserved.
     /// <paramref name="user"/> must be the signed-in user of the current request – anything else throws
     /// <see cref="InvalidOperationException"/> (the session would otherwise switch to another account).
     /// Confirm the password first with <see cref="ConfirmPasswordAsync"/>.

@@ -10,7 +10,7 @@ internal static class UserStoreChecks
         var stores = run.Stores;
 
         await run.CheckAsync(Store, "creates users and finds them by id and e-mail",
-            "CreateAsync returns the persisted user with its generated Id and a security stamp; FindByIdAsync / FindByEmailAsync return null for unknown users.",
+            "CreateAsync returns the persisted user with its generated Id and a security stamp; FindByIdAsync / FindByEmailAsync return null for unknown users and malformed ids.",
             async () =>
             {
                 var email = run.NewEmail();
@@ -28,6 +28,12 @@ internal static class UserStoreChecks
 
                 var unknownId = await stores.UseAsync<ISlimUserStore, SlimUser?>(s => s.FindByIdAsync(Guid.NewGuid().ToString(), ct));
                 Expect.True(unknownId is null, "FindByIdAsync returned a user for an unknown id.");
+                // ids from tokens are input: another key format (an old token after a migration, a forged one) is "not found"
+                foreach (var malformed in new[] { "not-a-valid-id", "", "0x' OR 1=1 --", new string('9', 40) })
+                {
+                    var found = await stores.UseAsync<ISlimUserStore, SlimUser?>(s => s.FindByIdAsync(malformed, ct));
+                    Expect.True(found is null, $"FindByIdAsync returned a user for the malformed id '{malformed}'.");
+                }
                 var unknownEmail = await stores.UseAsync<ISlimUserStore, SlimUser?>(s => s.FindByEmailAsync(run.NewEmail(), ct));
                 Expect.True(unknownEmail is null, "FindByEmailAsync returned a user for an unknown address.");
             });

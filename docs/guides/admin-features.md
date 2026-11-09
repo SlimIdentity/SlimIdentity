@@ -12,11 +12,11 @@ admin.MapPost("/impersonate/{userId}", async (string userId, ClaimsPrincipal me,
         var target = await store.FindByIdAsync(userId, ct);
         if (target is null) return Results.NotFound();
         var result = await auth.ImpersonateAsync(target, me.GetSlimUserId()!, me.IsSlimCookieSession(), ct);
-        return result.Succeeded ? Results.Ok(result.ToResponse(DateTimeOffset.UtcNow)) : Results.BadRequest(result.Error);
+        return result.Succeeded ? Results.Ok(result.ToResponse()) : Results.BadRequest(result.Error);
     });
 
 app.MapPost("/api/impersonation/stop", async (ISlimAuthManager auth, CancellationToken ct) =>
-    (await auth.EndImpersonationAsync(ct)) is { Succeeded: true } r ? Results.Ok(r.ToResponse(DateTimeOffset.UtcNow)) : Results.Unauthorized())
+    (await auth.EndImpersonationAsync(ct)) is { Succeeded: true } r ? Results.Ok(r.ToResponse()) : Results.Unauthorized())
     .RequireAuthorization().RequireSlimCsrf();
 ```
 
@@ -38,8 +38,8 @@ app.MapPost("/api/sudo", async (SudoRequest req, ClaimsPrincipal me, ISlimUserSt
         var user = await store.FindByIdAsync(me.GetSlimUserId()!, ct);
         if (user is null) return Results.Unauthorized();
         if (await auth.ConfirmPasswordAsync(user, req.Password, ct) is { } failure) return failure;   // 400 / 423
-        var result = await auth.ElevateSessionAsync(user, [SlimClaims.SudoFor(TimeSpan.FromMinutes(10))], me.IsSlimCookieSession(), ct);
-        return Results.Ok(result.ToResponse(DateTimeOffset.UtcNow));
+        var result = await auth.ElevateToSudoAsync(user, TimeSpan.FromMinutes(10), me.IsSlimCookieSession(), ct);
+        return Results.Ok(result.ToResponse());
     })
     .RequireAuthorization().RequireSlimCsrf().RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy);
 

@@ -240,7 +240,7 @@ internal sealed class SlimAccountHandlers(
 
         var result = await authManager.SignInCoreAsync(user, cookies, false, SlimAuthManager.MethodPassword, null, null, true, ct);
         if (result.Vetoed) return SlimResults.Status(result.Error!, result.ErrorMessage ?? "The sign-in was refused.", StatusCodes.Status403Forbidden);
-        return result.Succeeded ? Results.Ok(result.ToResponse(time.GetUtcNow())) : SlimResults.InvalidToken();
+        return result.Succeeded ? Results.Ok(result.ToResponse()) : SlimResults.InvalidToken();
     }
 
     private async Task<(SlimUser? User, DateTimeOffset ExpiresAt)> LoadInvitationAsync(string? token, CancellationToken ct)
@@ -318,7 +318,7 @@ internal sealed class SlimAccountHandlers(
 
         // keep the calling device signed in
         var session = await authManager.RefreshCurrentSessionAsync(user, ct);
-        return Results.Ok(session.ToResponse(time.GetUtcNow()));
+        return Results.Ok(session.ToResponse());
     }
 
     // ------------------------------------------------------------------ GET /me (authenticated)

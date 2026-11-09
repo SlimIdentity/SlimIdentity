@@ -4,10 +4,14 @@ namespace SlimIdentity;
 /// <summary>Claim helpers for host code.</summary>
 public static class SlimClaims
 {
-    /// <summary>Creates a <c>sudo_until</c> claim for <see cref="ISlimAuthManager.ElevateSessionAsync"/>.</summary>
-    public static Claim SudoFor(TimeSpan duration, TimeProvider? timeProvider = null)
+    /// <summary>
+    /// Creates a <c>sudo_until</c> claim on <paramref name="timeProvider"/> – the clock SlimIdentity checks it with
+    /// (inject <see cref="TimeProvider"/>). Usually <see cref="ISlimAuthManager.ElevateToSudoAsync"/> does this for you.
+    /// </summary>
+    public static Claim SudoFor(TimeSpan duration, TimeProvider timeProvider)
     {
-        var until = (timeProvider ?? TimeProvider.System).GetUtcNow().Add(duration).ToUnixTimeSeconds();
+        ArgumentNullException.ThrowIfNull(timeProvider);
+        var until = timeProvider.GetUtcNow().Add(duration).ToUnixTimeSeconds();
         return new Claim(SlimClaimTypes.SudoUntil, until.ToString(CultureInfo.InvariantCulture), ClaimValueTypes.Integer64);
     }
 
