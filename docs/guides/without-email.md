@@ -40,7 +40,8 @@ All on `ISlimAuthManager` – **you** decide who may call them (role, [sudo mode
 | `UnlockAsync(user)` | Ends a lockout. |
 | `SignOutEverywhereAsync(user)` | Ends every session (ban, suspected compromise). |
 
-Every call is logged (event ids 4007–4011) without passwords or links. A complete set of admin endpoints is in
+The administrator calls are logged without passwords or links: 4007 password set, 4008 reset link created, 4009 2FA
+reset, 4010 unlocked; 3004 when all sessions are revoked, 4011 when the user replaces an administrator's password. A complete set of admin endpoints is in
 [`samples/templates/Enterprise/AdminEndpoints.cs`](../../samples/templates/Enterprise/AdminEndpoints.cs).
 
 **Creating an account:**

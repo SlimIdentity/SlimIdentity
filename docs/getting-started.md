@@ -128,6 +128,6 @@ private network; they travel in clear text there, so do not use HTTP across untr
   links, refresh tokens and TOTP secrets are encrypted with it.
 - Choose the capabilities you need: [sessions](guides/sessions-and-logout.md), [2FA](guides/two-factor.md),
   [external login](guides/external-login.md), [invitations](guides/invitations.md),
-  [breached-password check](configuration.md#password).
+  [breached-password check](configuration.md#passwords).
 - Add [metrics](guides/observability.md) to your monitoring.
 - Read the [security model](security.md).

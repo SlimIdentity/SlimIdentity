@@ -15,7 +15,8 @@ dotnet add package SlimIdentity.Testing --prerelease   # in your test project
 public async Task Stores_honour_the_SlimIdentity_contracts()
 {
     await using var services = new ServiceCollection()
-        .AddDbContext<AppDbContext>(o => o.UseNpgsql(TestDatabase.ConnectionString))
+        .AddDbContextFactory<AppDbContext>(o => o.UseNpgsql(TestDatabase.ConnectionString))
+        .AddScoped<IdentityDb>()                                     // the template's own context per scope
         .AddScoped<ISlimUserStore, EfCoreUserStore>()
         .AddScoped<ISlimTwoFactorStore, EfCoreTwoFactorStore>()     // every registered store is checked
         .AddScoped<ISlimRefreshTokenStore, EfCoreRefreshTokenStore>()
@@ -36,7 +37,8 @@ Works with xUnit, NUnit, MSTest or a console app – the package has no test-fra
 | `ISlimTwoFactorStore` | TOTP secret stored unchanged (length!); recovery codes single use, per user, **also in parallel**; code and challenge markers monotonic, per user, **also in parallel**, on separate columns |
 | `ISlimRefreshTokenStore` | single use, **also in parallel**; expired tokens rejected |
 | `ISlimSessionStore` | round trip; touch; revoke one / all / all but current |
-| `ISlimExternalLoginStore` | lookup by provider and key |
+| `ISlimExternalLoginStore` | lookup by provider and key; list per user; remove only the user's own link |
+| `ISlimPasskeyStore` | credential ids unique, **also in parallel**; `TryRecordUseAsync` single use per challenge and compare-and-set on the counter, **also in parallel**; list, rename and remove per user |
 
 A failed run reads like this:
 

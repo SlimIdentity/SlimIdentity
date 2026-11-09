@@ -96,7 +96,7 @@ POST /auth/sign-in-methods/external/remove    { "provider": "Google", "providerK
 ```
 
 - Removing needs the current password if the account has one – a stolen session alone must not cut the owner's ways in.
-- **The last way in is never removed:** an account without a password keeps at least one external login
+- **The last way in is never removed:** an account without a password keeps at least one external login or passkey
   (`409 last_sign_in_method` – link another provider or set a password via reset first). Parallel removals cannot get
   around it.
 - Not during an impersonation (`403`). Event `external_login_removed`.

@@ -30,9 +30,9 @@ internal sealed class SlimMetrics
         var meter = meterFactory.Create(SlimIdentityDefaults.MeterName);
 #pragma warning restore CA2000
         _logins = meter.CreateCounter<long>("slimidentity.logins", "{attempt}",
-            "Password sign-in attempts by result (success, invalid_credentials, requires_two_factor, email_not_confirmed) and mode.");
+            "Sign-in attempts (password, passkey) by result and mode.");
         _twoFactor = meter.CreateCounter<long>("slimidentity.two_factor.verifications", "{attempt}",
-            "Second-factor verifications by method (totp, email, recovery) and result (success, failure, replay).");
+            "Second-factor verifications and remembered-device skips by method and result.");
         _lockouts = meter.CreateCounter<long>("slimidentity.lockouts", "{lockout}", "Account lockouts.");
         _refreshes = meter.CreateCounter<long>("slimidentity.token_refreshes", "{refresh}",
             "Refresh-token rotations by result (success, invalid, reuse_detected, session_expired).");
@@ -43,9 +43,9 @@ internal sealed class SlimMetrics
         _emailChanges = meter.CreateCounter<long>("slimidentity.email_changes", "{change}", "E-mail changes by stage (requested, completed).");
         _invitations = meter.CreateCounter<long>("slimidentity.invitations", "{invitation}", "Invitations by stage (created, accepted).");
         _externalLogins = meter.CreateCounter<long>("slimidentity.external_logins", "{login}",
-            "External logins by provider and result (success, linked, created, conflict, rejected).");
+            "External logins and removed links by provider and result.");
         _impersonations = meter.CreateCounter<long>("slimidentity.impersonations", "{impersonation}", "Impersonations by stage (started, ended).");
-        _mails = meter.CreateCounter<long>("slimidentity.mails", "{mail}", "Mails by kind and result (sent, failed, dropped).");
+        _mails = meter.CreateCounter<long>("slimidentity.mails", "{mail}", "Mails by kind and result (sent, failed, dropped, throttled).");
         _rateLimited = meter.CreateCounter<long>("slimidentity.rate_limit.rejections", "{request}", "Requests rejected by a SlimIdentity rate-limit policy.");
         meter.CreateObservableGauge("slimidentity.mail_queue.length", () => queue.Count, "{mail}", "Mails waiting in the background queue.");
     }

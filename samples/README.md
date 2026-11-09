@@ -15,13 +15,13 @@ servers (see CONTRIBUTING).
 
 | Template | Content | Packages in your host |
 | :--- | :--- | :--- |
-| `EfCore/` | `AppDbContext` + all stores (user, refresh, 2FA, external login, API key, sessions) – only if you need full control over the mapping; otherwise use the **`SlimIdentity.EntityFrameworkCore` package** | `Microsoft.EntityFrameworkCore` + provider |
+| `EfCore/` | `AppDbContext` + all stores (user, refresh, 2FA, external login, passkeys, API key, sessions) – only if you need full control over the mapping; otherwise use the **`SlimIdentity.EntityFrameworkCore` package** | `Microsoft.EntityFrameworkCore` + provider |
 | `Dapper/` | `schema.sql` (PostgreSQL) + all stores | `Dapper`, `Npgsql` |
 | `Email/` | `MailKitEmailSender`, `SendGridEmailSender`, `LoggingEmailSender`, `OutboxEmailSender` + `OutboxMailWorker` (guaranteed delivery) | `MailKit` or `SendGrid`, EF Core |
 | `Enterprise/` | `LdapPasswordValidator`, legacy hash migration, client certificates (mTLS), admin endpoints (impersonation, sudo, API keys, invitations, ban) | `System.DirectoryServices.Protocols`, `Microsoft.AspNetCore.Authentication.Certificate` |
 | `Security/` | `PwnedPasswordRule` – rejects breached passwords via Have I Been Pwned (k-anonymity) | – |
 | `DataProtection/` | Persisting the key ring: EF Core, Redis, file system + certificate | `Microsoft.AspNetCore.DataProtection.*` |
-| `Frontend/` | `slimIdentityClient.ts` – cookie flow (`X-CSRF`, device list, invitations, TOTP setup with QR code, e-mail change) and bearer flow with refresh rotation | – |
+| `Frontend/` | `slimIdentityClient.ts` – registration (with profile), verification and password reset; cookie flow (`X-CSRF`, device list, invitations, TOTP setup with QR code, 2FA and password management, e-mail change, passkeys, sign-in methods) and bearer flow with refresh rotation | – |
 
 ## Rules for your own stores
 

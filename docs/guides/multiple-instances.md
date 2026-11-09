@@ -59,7 +59,7 @@ A single instance with locally persisted keys is a valid setup – then 8002/800
 - **Rate limiting** (`RateLimit.*`): every instance has its own buckets, so the effective limit is
   instances × `PermitLimit`. The protection that matters most is not affected: the **account lockout** counts failures
   in the database and applies across all instances (also proven by `MultiInstanceTests`).
-- **Mail limit per recipient** (3 per kind and 15 minutes): likewise per instance.
+- **Mail limit per recipient** (3 per kind and 15 minutes, 5 for 2FA codes): likewise per instance.
 
 If you need a hard global limit per client, put it in front of the instances – the gateway sees every request:
 

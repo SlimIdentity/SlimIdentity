@@ -12,7 +12,7 @@ limiting, account lockout, CSRF protection and enumeration resistance already ac
 
 | | Effort |
 | :--- | :--- |
-| Thirteen properties on your user entity | copy-paste |
+| Thirteen properties besides `Id` on your user entity | copy-paste |
 | One line in `OnModelCreating`, one migration | `ApplySlimIdentity<AppUser, Guid>()` |
 | `ISlimEmailSender` – sends the mails | `AddNullEmailSender()` while developing; `WithoutEmail()` for hosts without mail ([guide](guides/without-email.md)) |
 
@@ -98,8 +98,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 }
 ```
 
-`ApplySlimIdentity` adds the unique index on the normalized address and four small tables (refresh tokens, sessions,
-recovery codes, external logins). Create the migration: `dotnet ef migrations add SlimIdentity`. Roles or other claims
+`ApplySlimIdentity` adds the unique index on the normalized address and five small tables (refresh tokens, sessions,
+recovery codes, external logins, passkeys – the last one stays empty unless you opt in). Create the migration: `dotnet ef migrations add SlimIdentity`. Roles or other claims
 for cookies and tokens come from an `ISlimUserClaimsProvider<AppUser>` you register – see the
 [package README](../src/SlimIdentity.EntityFrameworkCore/README.md).
 

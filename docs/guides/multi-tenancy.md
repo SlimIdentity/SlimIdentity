@@ -85,7 +85,7 @@ domain's owner. Mails carry the tenant in their [context](../configuration.md#bu
 
 ## What stays global
 
-- **The mail limit per recipient** (3 mails per kind and 15 minutes) counts per address across tenants – it protects
+- **The mail limit per recipient** (3 mails per kind and 15 minutes, 5 for 2FA codes) counts per address across tenants – it protects
   the mailbox, which is the same.
 - **Rate limiting** is per client IP. For a limit per tenant, use `.UseRateLimitPartitionKey(…)` with the tenant.
 - **Signing keys** (`JwtSecret`, Data Protection) are shared; tokens are kept apart by the scoped stores, not by keys.

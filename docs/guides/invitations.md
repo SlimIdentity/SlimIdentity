@@ -19,9 +19,9 @@ app.MapPost("/api/admin/invitations", async (InviteRequest req, ISlimUserStore s
         IMyMailer mailer, CancellationToken ct) =>
     {
         // no password yet; null = the address is already taken
-        if (await store.CreateAsync(req.Email, passwordHash: string.Empty, ct) is not { } user)
+        // business data (tenant, roles, display name) goes in as Profile – written with the account
+        if (await store.CreateAsync(new SlimNewUser { Email = req.Email, Profile = req }, ct) is not { } user)
             return Results.Conflict();
-        // … create your business data for user.Id (tenant, roles, display name)
         var invitation = await auth.CreateInvitationAsync(user, ct: ct);
         await mailer.SendInvitationAsync(req.Email, invitation.Link, invitation.ExpiresAt, ct);
         return Results.Ok();
@@ -37,7 +37,8 @@ The invitation mail is yours (sender, wording, inviter's name, branding) – it 
 1. The page behind the link (`/accept-invitation`) calls `POST /auth/invitation/info { token }` → `{ email, expiresAt }` to show the
    address (or `400 invalid_token` → "link expired or already used").
 2. The user chooses a password; `POST /auth/invitation/accept?useCookies=true { token, password }` sets it (password
-   policy applies), confirms the e-mail and signs the user in.
+   policy applies), confirms the e-mail and signs the user in. Accounts with 2FA (enabled by the host beforehand) get
+   `200 invitation_accepted` without a session and sign in normally, so the second factor is not skipped.
 
 ## Properties
 

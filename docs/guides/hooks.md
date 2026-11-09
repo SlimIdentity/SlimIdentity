@@ -13,7 +13,8 @@ No hook can skip a check, change the order of the flow or issue tokens itself.
 | `ISlimPasswordRule` | `AddPasswordRule<T>()` | refuse a new password |
 | `GetClaimsAsync` of your user store | – | add claims |
 
-All of them can be registered several times; the default lifetime is scoped, so they may use your `DbContext`.
+All of them can be registered several times – except `ISlimRegistrationProfile`, one per application. The default
+lifetime is scoped, so they may use your `DbContext`.
 
 ## Sign-in guard
 

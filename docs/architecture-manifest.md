@@ -67,8 +67,10 @@ No profile or business data – that stays in the host's own user model.
 | `ISlimRegistrationGuard` (any number) | – | veto against new accounts (company domains, captcha) |
 | `ISlimEventObserver` (any number) | – | security events for audit trails and alerts (observe only) |
 
-`ISlimAuthManager` is the service for host endpoints: `SignInAsync`, `ImpersonateAsync` / `EndImpersonationAsync`,
-`ElevateSessionAsync` (sudo), `SignOutAsync`, `SignOutEverywhereAsync`, `CreateInvitationAsync`.
+`ISlimAuthManager` is the service for host endpoints: `SignInAsync`, `RegisterAsync`, `ImpersonateAsync` /
+`EndImpersonationAsync`, `ElevateSessionAsync` (sudo) with `ConfirmPasswordAsync`, `SignOutAsync`,
+`SignOutEverywhereAsync`, `CreateInvitationAsync`, `RefreshClaimsAsync`, and for administrators `SetPasswordAsync`,
+`CreatePasswordResetAsync`, `ResetTwoFactorAsync` and `UnlockAsync`.
 
 ## 5. Security mechanisms
 Summarized here; details and the threat model are in [security.md](security.md).
@@ -156,7 +158,7 @@ Deliberately not part of the package (extra dependency, highly deployment specif
 | Single-use challenges via a second "last used" value | Code times and challenge times cannot share one counter (a code from the current step may predate a new challenge); a second compare-and-set needs no token table. Of two open challenges only the newer one can still complete. |
 | Narrow store methods for sign-in bookkeeping | Sign-ins are slow (hashing) and parallel; writing back the whole user could undo a concurrent password change, and read-modify-write would lose failed attempts. One small statement each is easy to implement atomically in any database. |
 | Few options, secure behaviour fixed | Every switch is something to understand and a way to weaken the protection. JWT is enabled by its secret, all links derive from one `BaseUrl`, one `TrustedOrigins` list serves CSRF and redirects; CSRF, reuse detection and protocol lifetimes are not configurable. |
-| EF Core stores as a package: an interface on the host's entity, not a base class or a fixed table | The host keeps its user entity, table and key type (`Guid`, `int`, `long`, `string`); SlimIdentity only needs thirteen properties. Generics are fine here – they stay inside the optional package, the core API remains generic-free. |
+| EF Core stores as a package: an interface on the host's entity, not a base class or a fixed table | The host keeps its user entity, table and key type (`Guid`, `int`, `long`, `string`); SlimIdentity only needs thirteen properties besides the key. Generics are fine here – they stay inside the optional package, the core API remains generic-free. |
 | Store contracts are checked by a test kit, not just documented | The guarantees that matter (atomicity, uniqueness, single use) are invisible in normal operation; `SlimIdentity.Testing` makes them verifiable against the real database. Separate package, so test code never ships to production. |
 | No password composition rules | NIST SP 800-63B: length and a breached-password check beat character classes; classic rules remain possible as an `ISlimPasswordRule`. |
 | `CreateAsync` returns `null` for a taken address | The unique index decides, not a prior lookup – concurrent registrations get the uniform answer instead of an error. |

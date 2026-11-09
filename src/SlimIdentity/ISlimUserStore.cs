@@ -22,7 +22,8 @@ public interface ISlimUserStore
 
     /// <summary>
     /// Persists all security fields of <paramref name="user"/>:
-    /// PasswordHash, SecurityStamp, EmailConfirmed, FailedLoginAttempts, LockoutEndUtc, TwoFactorEnabled.
+    /// PasswordHash, SecurityStamp, EmailConfirmed, FailedLoginAttempts, LockoutEndUtc, TwoFactorEnabled,
+    /// PasswordChangeRequired.
     /// </summary>
     /// <remarks>
     /// Used for deliberate state changes (password change, 2FA, e-mail confirmation, …). The high-frequency sign-in

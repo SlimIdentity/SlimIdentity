@@ -20,7 +20,7 @@ Without OpenTelemetry you can watch the counters live: `dotnet-counters monitor 
 
 | Instrument | Tags | Meaning |
 | :--- | :--- | :--- |
-| `slimidentity.logins` | `result` (`success`, `invalid_password`, `unknown_user`, `inactive`, `locked_out`, `requires_two_factor`, `email_not_confirmed`, `rejected`, `attempts_queued`), `mode` (`cookie`, `bearer`) | Password sign-in attempts |
+| `slimidentity.logins` | `result` (`success`, `invalid_password`, `unknown_user`, `inactive`, `locked_out`, `requires_two_factor`, `email_not_confirmed`, `password_change_required`, `rejected`, `passkey_rejected`, `attempts_queued`), `mode` (`cookie`, `bearer`) | Sign-in attempts (password and passkey) |
 | `slimidentity.two_factor.verifications` | `method` (`totp`, `email`, `recovery`, `remembered_device`), `result` (`success`, `failure`, `challenge_reused`, `attempts_queued`) | Second-factor attempts and skips on remembered devices |
 | `slimidentity.lockouts` | – | Account lockouts |
 | `slimidentity.token_refreshes` | `result` (`success`, `invalid`, `reuse_detected`, `session_expired`) | Refresh-token rotations |
@@ -29,9 +29,9 @@ Without OpenTelemetry you can watch the counters live: `dotnet-counters monitor 
 | `slimidentity.password_resets` | `stage` (`requested`, `completed`) | Password resets |
 | `slimidentity.email_changes` | `stage` (`requested`, `completed`) | E-mail changes |
 | `slimidentity.invitations` | `stage` (`created`, `accepted`) | Invitations |
-| `slimidentity.external_logins` | `provider`, `result` (`success`, `linked`, `created`, `conflict`, `rejected`) | OAuth / OIDC logins |
+| `slimidentity.external_logins` | `provider`, `result` (`success`, `linked`, `created`, `conflict`, `rejected`, `removed`) | OAuth / OIDC logins, removed links |
 | `slimidentity.impersonations` | `stage` (`started`, `ended`) | Admin impersonation |
-| `slimidentity.mails` | `kind`, `result` (`sent`, `failed`, `dropped`) | Mails handed to `ISlimEmailSender` |
+| `slimidentity.mails` | `kind`, `result` (`sent`, `failed`, `dropped`, `throttled`) | Mails handed to `ISlimEmailSender` |
 | `slimidentity.rate_limit.rejections` | `policy` | Requests rejected with 429 |
 | `slimidentity.mail_queue.length` (gauge) | – | Mails waiting in the background queue |
 

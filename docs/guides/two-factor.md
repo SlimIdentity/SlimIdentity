@@ -49,8 +49,9 @@ replaces the codes – the old ones stop working at once, sessions stay as they 
 
 ## Signing in
 
-1. `POST /auth/login` → `401 { "status": "requires_two_factor", "preAuthToken": "…", "twoFactorMethod": "totp" | "email" }`.
-   For e-mail 2FA the code has just been sent.
+1. `POST /auth/login` → `401 { "status": "requires_two_factor", "preAuthToken": "…", "twoFactorMethod": "totp" | "email" | "recovery" }`.
+   For e-mail 2FA the code has just been sent; `recovery` means neither an authenticator nor e-mail codes are available
+   (`TwoFactor.AllowEmailCodes = false`), so only a recovery code helps.
 2. `POST /auth/login/2fa` with `preAuthToken` and `code` – or `recoveryCode` – → session.
    A wrong code can be corrected with the same `preAuthToken` (failures count towards the lockout); after a successful
    sign-in the `preAuthToken` is used up. If a user has two challenges open at once (two devices), completing the

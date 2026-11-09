@@ -11,9 +11,9 @@ public sealed record SlimVeto(string Error, string? Message = null);
 /// <summary>When <see cref="ISlimSignInGuard"/> is asked.</summary>
 public enum SlimSignInStage
 {
-    /// <summary>A new session is about to be issued (password, second factor, external login, invitation, impersonation, …).</summary>
+    /// <summary>A new session is about to be issued (password, second factor, external login, passkey, invitation, start or end of an impersonation, …).</summary>
     SignIn,
-    /// <summary>An existing session is renewed (refresh token, step-up / sudo, end of an impersonation).</summary>
+    /// <summary>An existing session is renewed (refresh token, step-up / sudo).</summary>
     Renewal,
     /// <summary>A running session is re-validated (every bearer request, cookies every <c>SecurityStampValidationInterval</c>).</summary>
     Revalidation,
@@ -201,10 +201,11 @@ public static class SlimEventTypes
 }
 
 /// <summary>
-/// Optional observer of security events – audit trail, alerts, creating a profile for a new account. Called after the
+/// Optional observer of security events – audit trail, alerts, follow-up jobs. Called after the
 /// event happened, in the request; it cannot change the outcome. Exceptions are logged and swallowed, so a failing
 /// audit sink never breaks a sign-in (write to a durable queue if you need guaranteed delivery). Register with
-/// <c>AddEventHandler&lt;T&gt;()</c>; several are allowed.
+/// <c>AddEventObserver&lt;T&gt;()</c>; several are allowed. Business data of a new account belongs in
+/// <see cref="ISlimRegistrationProfile"/>: it is written with the account, an observer only runs afterwards.
 /// </summary>
 public interface ISlimEventObserver
 {

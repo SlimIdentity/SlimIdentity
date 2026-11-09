@@ -73,6 +73,58 @@ export type LoginResult =
   | { kind: "locked"; until: string }
   | { kind: "error"; status: string };
 
+/** Answer of the form endpoints: `status` (e.g. "registration_accepted") or the field errors of a 400. */
+export type FormResult =
+  | { ok: true; status: string }
+  | { ok: false; status: string; errors?: Record<string, string[]> };
+
+async function toFormResult(r: Response): Promise<FormResult> {
+  const body = await r.json().catch(() => ({}));
+  if (r.ok) return { ok: true, status: body.status ?? "ok" };
+  return { ok: false, status: body.status ?? `http_${r.status}`, errors: body.errors };
+}
+
+function anonymousPost(path: string, body: object): Promise<FormResult> {
+  return fetch(`${AUTH}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }).then(toFormResult);
+}
+
+// =====================================================================================
+// 0. Account flows without a session (same for cookie and bearer)
+//    The answers never reveal whether an address has an account – show the same message in every case.
+// =====================================================================================
+
+export const account = {
+  /**
+   * Registration. `profile` is your business data (company, name, …) – the server validates it with its
+   * ISlimRegistrationProfile; field errors come back as `errors["profile.<field>"]`.
+   */
+  register(email: string, password: string, profile?: object): Promise<FormResult> {
+    return anonymousPost("/register", profile === undefined ? { email, password } : { email, password, profile });
+  },
+
+  /** Page behind the verification link: /verify-email?token=… */
+  verifyEmail(token: string): Promise<FormResult> {
+    return anonymousPost("/verify-email", { token });
+  },
+
+  resendVerification(email: string): Promise<FormResult> {
+    return anonymousPost("/resend-verification", { email });
+  },
+
+  forgotPassword(email: string): Promise<FormResult> {
+    return anonymousPost("/forgot-password", { email });
+  },
+
+  /** Page behind the reset link: /reset-password?token=… – all sessions of the account end. */
+  resetPassword(token: string, newPassword: string): Promise<FormResult> {
+    return anonymousPost("/reset-password", { token, newPassword });
+  },
+};
+
 // =====================================================================================
 // 1. Cookie flow  (same-site SPA, or app.domain.de -> api.domain.de with SameSite=Lax)
 // =====================================================================================
@@ -111,6 +163,25 @@ export const cookieAuth = {
   async enableAuthenticator(setupToken: string, code: string, password: string): Promise<string[]> {
     const r = await cookieFetch("/auth/2fa/enable", { method: "POST", body: JSON.stringify({ setupToken, code, password }) });
     return r.ok ? (await r.json()).recoveryCodes : [];
+  },
+
+  /** Turns 2FA off; the session is renewed (cookie). */
+  async disableTwoFactor(password: string): Promise<FormResult> {
+    return toFormResult(await cookieFetch("/auth/2fa/disable", { method: "POST", body: JSON.stringify({ password }) }));
+  },
+
+  /** Replaces all recovery codes – show the new ones exactly once. */
+  async regenerateRecoveryCodes(password: string): Promise<string[]> {
+    const r = await cookieFetch("/auth/2fa/recovery-codes", { method: "POST", body: JSON.stringify({ password }) });
+    return r.ok ? (await r.json()).recoveryCodes : [];
+  },
+
+  /** Other devices are signed out, this one gets a new cookie. */
+  async changePassword(currentPassword: string, newPassword: string): Promise<FormResult> {
+    return toFormResult(await cookieFetch("/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify({ currentPassword, newPassword }),
+    }));
   },
 
   /** This browser asks for the second factor again. */
@@ -203,7 +274,7 @@ export const cookieAuth = {
     history.replaceState(null, "", window.location.pathname);   // remove secrets from the address bar / history
     if (error) return { kind: "error", status: error };
     if (fragment.get("slim_status") === "requires_two_factor")
-      return { kind: "two_factor", preAuthToken: fragment.get("preAuthToken") ?? "", method: fragment.get("method") === "totp" ? "totp" : "email" };
+      return { kind: "two_factor", preAuthToken: fragment.get("preAuthToken") ?? "", method: toTwoFactorMethod(fragment.get("method")) };
     return { kind: "ok", auth: { status: "success", mode: "cookie" } as AuthResponse };
   },
 
@@ -544,10 +615,33 @@ export const bearerAuth = {
     return removeExternal((path, init) => bearerFetch(path, init), provider, providerKey, password);
   },
 
+  /** Other devices are signed out; this client gets new tokens. */
+  async changePassword(currentPassword: string, newPassword: string): Promise<FormResult> {
+    const r = await bearerFetch("/auth/change-password", { method: "POST", body: JSON.stringify({ currentPassword, newPassword }) });
+    if (r.ok) storeTokens(await r.clone().json());
+    return toFormResult(r);
+  },
+
+  /** Turns 2FA off; this client gets new tokens. */
+  async disableTwoFactor(password: string): Promise<FormResult> {
+    const r = await bearerFetch("/auth/2fa/disable", { method: "POST", body: JSON.stringify({ password }) });
+    if (r.ok) storeTokens(await r.clone().json());
+    return toFormResult(r);
+  },
+
+  async regenerateRecoveryCodes(password: string): Promise<string[]> {
+    const r = await bearerFetch("/auth/2fa/recovery-codes", { method: "POST", body: JSON.stringify({ password }) });
+    return r.ok ? (await r.json()).recoveryCodes : [];
+  },
+
   api: bearerFetch,
 };
 
 // =====================================================================================
+
+function toTwoFactorMethod(method: string | null): "totp" | "email" | "recovery" {
+  return method === "totp" || method === "recovery" ? method : "email";
+}
 
 async function toLoginResult(r: Response): Promise<LoginResult> {
   const body = await r.json().catch(() => ({}));
