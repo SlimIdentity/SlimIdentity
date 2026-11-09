@@ -17,6 +17,8 @@ internal static class SlimWebAuthn
 
     private const byte FlagUserPresent = 0x01;
     private const byte FlagUserVerified = 0x04;
+    private const byte FlagBackupEligible = 0x08;
+    private const byte FlagBackedUp = 0x10;
     private const byte FlagAttestedCredentialData = 0x40;
 
     public sealed record ClientData(string Type, string Challenge, string Origin, bool CrossOrigin);
@@ -25,6 +27,10 @@ internal static class SlimWebAuthn
     {
         public bool UserPresent => (Flags & FlagUserPresent) != 0;
         public bool UserVerified => (Flags & FlagUserVerified) != 0;
+        public bool BackupEligible => (Flags & FlagBackupEligible) != 0;
+        public bool BackedUp => (Flags & FlagBackedUp) != 0;
+        /// <summary>§6.1: a credential that may not be backed up cannot be backed up.</summary>
+        public bool BackupFlagsValid => BackupEligible || !BackedUp;
     }
 
     /// <summary>Parses <c>clientDataJSON</c>; <c>null</c> if it is not a JSON object with type, challenge and origin.</summary>

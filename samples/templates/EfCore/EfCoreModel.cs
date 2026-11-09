@@ -78,6 +78,8 @@ public class UserPasskey
     public Guid UserId { get; set; }
     public byte[] PublicKey { get; set; } = [];          // COSE key; the private key never leaves the device
     public long SignCount { get; set; }
+    public bool BackupEligible { get; set; }             // may be synced (iCloud Keychain, password manager) – fixed
+    public bool BackedUp { get; set; }                   // currently synced, updated at every sign-in
     public long? LastChallengeAt { get; set; }           // each sign-in challenge counts once
     public string Name { get; set; } = "";
     public DateTimeOffset CreatedUtc { get; set; }

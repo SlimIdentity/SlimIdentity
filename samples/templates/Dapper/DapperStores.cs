@@ -353,11 +353,12 @@ public sealed class DapperPasskeyStore(NpgsqlDataSource db) : ISlimPasskeyStore
 {
     private const string Columns = """
         credential_id AS CredentialId, user_id::text AS UserId, public_key AS PublicKey, sign_count AS SignCount,
-        last_challenge_at AS LastChallengeAt, name AS Name, created_utc AS CreatedUtc, last_used_utc AS LastUsedUtc
+        last_challenge_at AS LastChallengeAt, name AS Name, created_utc AS CreatedUtc, last_used_utc AS LastUsedUtc,
+        backup_eligible AS BackupEligible, backed_up AS BackedUp
         """;
 
     private sealed record Row(byte[] CredentialId, string UserId, byte[] PublicKey, long SignCount, long? LastChallengeAt,
-        string Name, DateTime CreatedUtc, DateTime? LastUsedUtc);
+        string Name, DateTime CreatedUtc, DateTime? LastUsedUtc, bool BackupEligible, bool BackedUp);
 
     private static byte[] Hash(byte[] credentialId) => System.Security.Cryptography.SHA256.HashData(credentialId);
 
@@ -381,24 +382,26 @@ public sealed class DapperPasskeyStore(NpgsqlDataSource db) : ISlimPasskeyStore
     {
         await using var c = await db.OpenConnectionAsync(ct);
         return await c.ExecuteAsync(new CommandDefinition("""
-            INSERT INTO passkeys (credential_id_hash, credential_id, user_id, public_key, sign_count, last_challenge_at, name, created_utc, last_used_utc)
-            VALUES (@hash, @CredentialId, @UserId::uuid, @PublicKey, @SignCount, @LastChallengeAt, @Name, @CreatedUtc, @LastUsedUtc)
+            INSERT INTO passkeys (credential_id_hash, credential_id, user_id, public_key, sign_count, last_challenge_at, name, created_utc,
+                                  last_used_utc, backup_eligible, backed_up)
+            VALUES (@hash, @CredentialId, @UserId::uuid, @PublicKey, @SignCount, @LastChallengeAt, @Name, @CreatedUtc,
+                    @LastUsedUtc, @BackupEligible, @BackedUp)
             ON CONFLICT (credential_id_hash) DO NOTHING
             """, new
             {
                 hash = Hash(p.CredentialId), p.CredentialId, p.UserId, p.PublicKey, SignCount = (long)p.SignCount,
-                p.LastChallengeAt, p.Name, p.CreatedUtc, p.LastUsedUtc,
+                p.LastChallengeAt, p.Name, p.CreatedUtc, p.LastUsedUtc, p.BackupEligible, p.BackedUp,
             }, cancellationToken: ct)) == 1;
     }
 
-    public async Task<bool> TryRecordUseAsync(byte[] credentialId, uint expectedSignCount, uint signCount, long challengeIssuedAt, DateTimeOffset usedUtc, CancellationToken ct)
+    public async Task<bool> TryRecordUseAsync(byte[] credentialId, uint expectedSignCount, uint signCount, long challengeIssuedAt, DateTimeOffset usedUtc, bool backedUp, CancellationToken ct)
     {
         await using var c = await db.OpenConnectionAsync(ct);
         return await c.ExecuteAsync(new CommandDefinition("""
-            UPDATE passkeys SET sign_count = @signCount, last_challenge_at = @challengeIssuedAt, last_used_utc = @usedUtc
+            UPDATE passkeys SET sign_count = @signCount, last_challenge_at = @challengeIssuedAt, last_used_utc = @usedUtc, backed_up = @backedUp
             WHERE credential_id_hash = @hash AND sign_count = @expected
               AND (last_challenge_at IS NULL OR last_challenge_at < @challengeIssuedAt)
-            """, new { hash = Hash(credentialId), expected = (long)expectedSignCount, signCount = (long)signCount, challengeIssuedAt, usedUtc },
+            """, new { hash = Hash(credentialId), expected = (long)expectedSignCount, signCount = (long)signCount, challengeIssuedAt, usedUtc, backedUp },
             cancellationToken: ct)) == 1;
     }
 
@@ -429,7 +432,7 @@ public sealed class DapperPasskeyStore(NpgsqlDataSource db) : ISlimPasskeyStore
     private static SlimPasskey Map(Row r) => new()
     {
         UserId = r.UserId, CredentialId = r.CredentialId, PublicKey = r.PublicKey, SignCount = (uint)r.SignCount,
-        LastChallengeAt = r.LastChallengeAt, Name = r.Name,
+        LastChallengeAt = r.LastChallengeAt, Name = r.Name, BackupEligible = r.BackupEligible, BackedUp = r.BackedUp,
         CreatedUtc = new DateTimeOffset(DateTime.SpecifyKind(r.CreatedUtc, DateTimeKind.Utc)),
         LastUsedUtc = r.LastUsedUtc is { } used ? new DateTimeOffset(DateTime.SpecifyKind(used, DateTimeKind.Utc)) : null,
     };

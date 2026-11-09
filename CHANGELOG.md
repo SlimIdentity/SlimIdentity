@@ -97,8 +97,10 @@ First public release (1.0.0) in preparation.
   name (`amr: passkey`, multi-factor on its own), rename / remove in the sign-in methods with last-method protection.
   ES256 and RS256, every check of WebAuthn Level 2 §7.1/§7.2 without attestation, atomic single use per challenge,
   clone detection by counter. Options `RelyingPartyId` / `RelyingPartyName` (`AddPasskeys`); TypeScript `addPasskey`,
-  `loginWithPasskey`, `renamePasskey`, `removePasskey`. No third-party dependency (`System.Formats.Cbor` is part of
-  ASP.NET Core).
+  `loginWithPasskey`, `loginWithPasskeyAutofill` (browser autofill, conditional mediation), `renamePasskey`,
+  `removePasskey`. Backup flags: synced or device-bound (`backupEligible` / `backedUp` in `/sign-in-methods`, updated at
+  every sign-in; inconsistent flags or a changed eligibility are refused). No third-party dependency
+  (`System.Formats.Cbor` is part of ASP.NET Core).
 - Sign-in methods: `GET /auth/sign-in-methods` (password, linked external logins) and
   `POST /auth/sign-in-methods/external/remove` – password required, never the last way in. `ISlimExternalLoginStore`
   gains `GetExternalLoginsAsync` and `RemoveExternalLoginAsync` (checked by the conformance kit). **Breaking** for

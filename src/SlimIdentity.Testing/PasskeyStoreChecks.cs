@@ -10,6 +10,7 @@ internal static class PasskeyStoreChecks
         CredentialId = RandomNumberGenerator.GetBytes(32),
         PublicKey = RandomNumberGenerator.GetBytes(77),
         SignCount = signCount,
+        BackupEligible = true,
         Name = "Conformance key",
         CreatedUtc = ConformanceRun.WholeSeconds(DateTimeOffset.UtcNow),
     };
@@ -35,6 +36,7 @@ internal static class PasskeyStoreChecks
                 Expect.True(found is not null && found.PublicKey.AsSpan().SequenceEqual(mine.PublicKey), "The public key came back changed.");
                 Expect.Equal(7u, found?.SignCount, "SignCount");
                 Expect.Equal("Conformance key", found?.Name, "Name");
+                Expect.True(found is { BackupEligible: true, BackedUp: false }, "BackupEligible / BackedUp came back changed.");
                 Expect.SameInstant(mine.CreatedUtc, found?.CreatedUtc, "CreatedUtc");
 
                 var shorter = mine.CredentialId[..^1];
@@ -67,19 +69,23 @@ internal static class PasskeyStoreChecks
                 await stores.UseAsync<ISlimPasskeyStore, bool>(s => s.AddPasskeyAsync(passkey, ct));
                 var used = ConformanceRun.WholeSeconds(DateTimeOffset.UtcNow);
 
-                Expect.True(await stores.UseAsync<ISlimPasskeyStore, bool>(s => s.TryRecordUseAsync(passkey.CredentialId, 0, 1, 1_000, used, ct)), "first use refused");
-                Expect.True(!await stores.UseAsync<ISlimPasskeyStore, bool>(s => s.TryRecordUseAsync(passkey.CredentialId, 1, 2, 1_000, used, ct)), "the same challenge was accepted twice");
-                Expect.True(!await stores.UseAsync<ISlimPasskeyStore, bool>(s => s.TryRecordUseAsync(passkey.CredentialId, 1, 2, 999, used, ct)), "an older challenge was accepted");
-                Expect.True(!await stores.UseAsync<ISlimPasskeyStore, bool>(s => s.TryRecordUseAsync(passkey.CredentialId, 0, 2, 2_000, used, ct)), "an outdated expected counter was accepted");
-                Expect.True(await stores.UseAsync<ISlimPasskeyStore, bool>(s => s.TryRecordUseAsync(passkey.CredentialId, 1, 2, 2_000, used, ct)), "a newer challenge was refused");
+                Expect.True(await stores.UseAsync<ISlimPasskeyStore, bool>(s => s.TryRecordUseAsync(passkey.CredentialId, 0, 1, 1_000, used, false, ct)), "first use refused");
+                Expect.True(!await stores.UseAsync<ISlimPasskeyStore, bool>(s => s.TryRecordUseAsync(passkey.CredentialId, 1, 2, 1_000, used, false, ct)), "the same challenge was accepted twice");
+                Expect.True(!await stores.UseAsync<ISlimPasskeyStore, bool>(s => s.TryRecordUseAsync(passkey.CredentialId, 1, 2, 999, used, false, ct)), "an older challenge was accepted");
+                Expect.True(!await stores.UseAsync<ISlimPasskeyStore, bool>(s => s.TryRecordUseAsync(passkey.CredentialId, 0, 2, 2_000, used, false, ct)), "an outdated expected counter was accepted");
+                Expect.True(await stores.UseAsync<ISlimPasskeyStore, bool>(s => s.TryRecordUseAsync(passkey.CredentialId, 1, 2, 2_000, used, false, ct)), "a newer challenge was refused");
 
                 var stored = await stores.UseAsync<ISlimPasskeyStore, SlimPasskey?>(s => s.FindPasskeyAsync(passkey.CredentialId, ct));
                 Expect.Equal(2u, stored?.SignCount, "SignCount after use");
                 Expect.Equal(2_000L, stored?.LastChallengeAt, "LastChallengeAt after use");
                 Expect.SameInstant(used, stored?.LastUsedUtc, "LastUsedUtc after use");
 
+                Expect.True(await stores.UseAsync<ISlimPasskeyStore, bool>(s => s.TryRecordUseAsync(passkey.CredentialId, 2, 3, 2_500, used, true, ct)), "a use that reports a backup refused");
+                Expect.True((await stores.UseAsync<ISlimPasskeyStore, SlimPasskey?>(s => s.FindPasskeyAsync(passkey.CredentialId, ct)))?.BackedUp == true,
+                    "TryRecordUseAsync did not store the backup state (BackedUp).");
+
                 var parallel = await run.InParallelAsync(i =>
-                    stores.UseAsync<ISlimPasskeyStore, bool>(s => s.TryRecordUseAsync(passkey.CredentialId, 2, 3, 3_000 + i, used, ct)));
+                    stores.UseAsync<ISlimPasskeyStore, bool>(s => s.TryRecordUseAsync(passkey.CredentialId, 3, 4, 3_000 + i, used, false, ct)));
                 Expect.Equal(1, parallel.Count(r => r), "parallel uses with the same expected counter that succeeded");
             });
 

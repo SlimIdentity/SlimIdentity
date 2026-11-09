@@ -261,6 +261,42 @@ public sealed class PasskeyTests
         Assert.Equal("invalid_passkey", refused.Str("status"));
     }
 
+    // ------------------------------------------------------------------ synced or device-bound (flags BE / BS)
+
+    [Fact]
+    public async Task Synced_and_device_bound_passkeys_are_told_apart_and_the_backup_state_follows()
+    {
+        await using var app = await TestApp.StartAsync(WithPasskeys());
+        var me = await SignedInAsync(app);
+        using var synced = new SoftwarePasskey { BackupEligible = true, BackedUp = false };
+        using var securityKey = new SoftwarePasskey();
+        await RegisterAsync(app, me, synced);
+        await RegisterAsync(app, me, securityKey);
+
+        synced.BackedUp = true;                                   // the user switched sync on in the meantime
+        Assert.Equal(HttpStatusCode.OK, (await LoginAsync(app, synced)).Status);
+
+        var methods = (await (await me.GetAsync("/auth/sign-in-methods")).Content.ReadFromJsonAsync<JsonElement>()).GetProperty("passkeys");
+        var byId = methods.EnumerateArray().ToDictionary(p => p.Str("id")!);
+        Assert.True(byId[synced.IdBase64Url].GetProperty("backupEligible").GetBoolean());
+        Assert.True(byId[synced.IdBase64Url].GetProperty("backedUp").GetBoolean());
+        Assert.False(byId[securityKey.IdBase64Url].GetProperty("backupEligible").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Inconsistent_backup_flags_are_rejected()
+    {
+        await using var app = await TestApp.StartAsync(WithPasskeys());
+        var me = await SignedInAsync(app);
+        using var impossible = new SoftwarePasskey { BackupEligible = false, BackedUp = true };   // backed up but not eligible
+        Assert.Equal("invalid_passkey", (await RegisterAsync(app, me, impossible, expected: HttpStatusCode.BadRequest)).Str("status"));
+
+        using var deviceBound = new SoftwarePasskey();
+        await RegisterAsync(app, me, deviceBound);
+        deviceBound.BackupEligible = true;                        // eligibility is fixed: another authenticator answers
+        Assert.Equal(HttpStatusCode.Unauthorized, (await LoginAsync(app, deviceBound)).Status);
+    }
+
     // ------------------------------------------------------------------ pre-account hijacking
 
     /// <summary>

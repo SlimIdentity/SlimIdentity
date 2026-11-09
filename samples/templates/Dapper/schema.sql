@@ -73,6 +73,8 @@ CREATE TABLE passkeys (
     user_id            uuid         NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     public_key         bytea        NOT NULL,
     sign_count         bigint       NOT NULL DEFAULT 0,
+    backup_eligible    boolean      NOT NULL DEFAULT false,   -- may be synced – fixed for the passkey
+    backed_up          boolean      NOT NULL DEFAULT false,   -- currently synced – updated at every sign-in
     last_challenge_at  bigint       NULL,
     name               varchar(64)  NOT NULL,
     created_utc        timestamptz  NOT NULL,

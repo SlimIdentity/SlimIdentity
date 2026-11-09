@@ -26,7 +26,7 @@ internal sealed class SlimPasskeySignInMethods(ISlimPasskeyStore passkeys) : ISl
 {
     public async Task<IReadOnlyList<SlimPasskeyInfo>> GetPasskeysAsync(string userId, CancellationToken ct) =>
         [.. (await passkeys.GetPasskeysAsync(userId, ct)).Select(p =>
-            new SlimPasskeyInfo(Base64Url.EncodeToString(p.CredentialId), p.Name, p.CreatedUtc, p.LastUsedUtc))];
+            new SlimPasskeyInfo(Base64Url.EncodeToString(p.CredentialId), p.Name, p.CreatedUtc, p.LastUsedUtc, p.BackupEligible, p.BackedUp))];
 
     public Task RemoveAllAsync(string userId, CancellationToken ct) => passkeys.RemovePasskeysAsync(userId, ct);
 }

@@ -18,11 +18,11 @@ public interface ISlimPasskeyStore
 
     /// <summary>
     /// Records a sign-in <b>atomically</b> – one statement, e.g. <c>UPDATE passkeys SET sign_count = @signCount,
-    /// last_challenge_at = @challengeIssuedAt, last_used_utc = @usedUtc WHERE credential_id = @id AND sign_count =
-    /// @expectedSignCount AND (last_challenge_at IS NULL OR last_challenge_at &lt; @challengeIssuedAt)</c>. Returns
-    /// <c>false</c> if no row matched: a replayed sign-in or a parallel one with the same counter.
+    /// last_challenge_at = @challengeIssuedAt, last_used_utc = @usedUtc, backed_up = @backedUp WHERE credential_id = @id
+    /// AND sign_count = @expectedSignCount AND (last_challenge_at IS NULL OR last_challenge_at &lt; @challengeIssuedAt)</c>.
+    /// Returns <c>false</c> if no row matched: a replayed sign-in or a parallel one with the same counter.
     /// </summary>
-    Task<bool> TryRecordUseAsync(byte[] credentialId, uint expectedSignCount, uint signCount, long challengeIssuedAt, DateTimeOffset usedUtc, CancellationToken ct);
+    Task<bool> TryRecordUseAsync(byte[] credentialId, uint expectedSignCount, uint signCount, long challengeIssuedAt, DateTimeOffset usedUtc, bool backedUp, CancellationToken ct);
 
     /// <summary>Renames a passkey of <b>this</b> user. Returns <c>false</c> if it does not belong to the user.</summary>
     Task<bool> RenamePasskeyAsync(string userId, byte[] credentialId, string name, CancellationToken ct);
@@ -48,6 +48,13 @@ public sealed class SlimPasskey
     public required byte[] PublicKey { get; set; }
     /// <summary>Signature counter of the authenticator (0 for most synced passkeys).</summary>
     public uint SignCount { get; set; }
+    /// <summary>
+    /// The passkey may be synced to other devices (WebAuthn flag BE, e.g. iCloud Keychain, Google Password Manager);
+    /// <c>false</c> for a device-bound key such as a security key. Fixed for the lifetime of the passkey.
+    /// </summary>
+    public bool BackupEligible { get; set; }
+    /// <summary>The passkey is currently synced (flag BS, as of the last registration or sign-in).</summary>
+    public bool BackedUp { get; set; }
     /// <summary>Unix milliseconds of the challenge of the last sign-in – each challenge counts once.</summary>
     public long? LastChallengeAt { get; set; }
     /// <summary>Display name chosen by the user ("MacBook", "Phone").</summary>

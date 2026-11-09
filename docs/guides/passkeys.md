@@ -39,7 +39,7 @@ All bodies are WebAuthn's JSON form with base64url fields; the TypeScript client
 ```http
 POST /auth/passkeys/register/options   { "password": "…" }        → { "options": { …creation options… }, "state": "…" }
      navigator.credentials.create({ publicKey: options })
-POST /auth/passkeys/register            { "state", "credential", "name": "Laptop" }   → { "id", "name", "createdUtc" }
+POST /auth/passkeys/register            { "state", "credential", "name": "Laptop" }   → { "id", "name", "createdUtc", "backupEligible", "backedUp" }
 ```
 
 The password is required for accounts that have one (a stolen session must not add a permanent way in); the address
@@ -56,12 +56,33 @@ POST /auth/passkeys/login?useCookies=true|false   { "state", "credential", "reme
 The session has `amr: passkey`. Sign-in guards, inactive accounts and `RequireConfirmedEmail` apply as for every
 sign-in; a running password lockout does not block passkeys (there is nothing to guess).
 
+**Autofill** (conditional UI) – the browser offers the passkeys of the site right in the e-mail field, no extra button:
+mark the input `autocomplete="username webauthn"` and start `loginWithPasskeyAutofill(signal)` of the TypeScript client
+when the sign-in page opens. It calls the same two endpoints with `mediation: "conditional"`, fetches a fresh challenge
+every 4 minutes (a state lives 5) and returns once the user picks a passkey. Abort the signal before any other sign-in on
+the page – the browser runs one WebAuthn request at a time.
+
+```html
+<input type="email" name="email" autocomplete="username webauthn">
+```
+
+```ts
+const autofill = new AbortController();
+cookieAuth.loginWithPasskeyAutofill(autofill.signal).then(r => r.kind === "ok" && goHome());
+// password form or "sign in with passkey" button: autofill.abort() first
+```
+
+**Synced or device-bound** – `backupEligible` says whether a passkey may be synced to other devices (iCloud Keychain,
+Google Password Manager, password managers) or stays on one device (security key); `backedUp` whether it currently is
+(updated at every sign-in). Show it next to the name ("synced" / "this device only"). Eligibility is fixed for a
+passkey: a sign-in that reports a change is refused.
+
 **Manage** – passkeys appear in `GET /auth/sign-in-methods` and are renamed or removed there
 (`/sign-in-methods/passkeys/rename`, `/sign-in-methods/passkeys/remove`); removing needs the password if the account has
 one and never removes the last way in.
 
-TypeScript: `addPasskey(name, password)`, `loginWithPasskey()`, `signInMethods()`, `renamePasskey(id, name)`,
-`removePasskey(id, password)`.
+TypeScript: `addPasskey(name, password)`, `loginWithPasskey()`, `loginWithPasskeyAutofill(signal)`, `signInMethods()`,
+`renamePasskey(id, name)`, `removePasskey(id, password)`.
 
 **Taking over an account** – when the owner of an address proves the mailbox for the first time (password reset of an
 unconfirmed account, verified external sign-in), every passkey of the account is removed together with the password,
@@ -78,6 +99,7 @@ Following Web Authentication Level 2 (§7.1 registration, §7.2 authentication):
 | Origin trusted and within the RP id | ✓ | ✓ |
 | RP id hash in the authenticator data | ✓ | ✓ |
 | User present **and** verified (biometrics / PIN) | ✓ | ✓ |
+| Backup flags consistent (backed up only if eligible); eligibility unchanged since registration | ✓ | ✓ |
 | Public key: ES256 (P-256) or RS256 (modulus of at least 2048 bit – zero padding does not count); credential id unique | ✓ | |
 | Registration state bound to the account and its security stamp | ✓ | |
 | Signature over authenticator data + client data hash with the stored key | | ✓ |
@@ -94,5 +116,6 @@ acceptable. Ed25519 keys are not offered – .NET has no built-in support, and p
 `ISlimPasskeyStore` – start from the templates (`EfCorePasskeyStore`, `DapperPasskeyStore`) and verify it with
 `SlimIdentity.Testing`. Three rules matter: credential ids are unique (`AddPasskeyAsync` returns `false`, also under
 concurrency), `TryRecordUseAsync` is a single compare-and-set statement (same counter **and** a newer challenge), and
-`RemovePasskeysAsync` removes every passkey of the user (account takeover above).
+`RemovePasskeysAsync` removes every passkey of the user (account takeover above). Store `BackupEligible` and
+`BackedUp`; `TryRecordUseAsync` updates `BackedUp` in the same statement.
 Key the table by the SHA-256 of the credential id – ids can be up to 1023 bytes, more than SQL Server allows in a key.

@@ -28,6 +28,9 @@ public sealed class SoftwarePasskey : IDisposable
     /// <summary>Signature counter; 0 like most synced passkeys, or counting.</summary>
     public uint Counter { get; set; }
     public bool CountUp { get; set; }
+    /// <summary>Flags BE / BS: a synced passkey (iCloud Keychain, password manager) – or not.</summary>
+    public bool BackupEligible { get; set; }
+    public bool BackedUp { get; set; }
     /// <summary>The user handle (base64url of the user id) remembered from the registration – sent on sign-in.</summary>
     public string? UserHandle { get; set; }
 
@@ -96,7 +99,7 @@ public sealed class SoftwarePasskey : IDisposable
     private byte[] AuthData(string rpId, bool userVerified, uint counter, bool attested)
     {
         var data = new List<byte>(SHA256.HashData(Encoding.UTF8.GetBytes(rpId)));
-        data.Add((byte)(0x01 | (userVerified ? 0x04 : 0) | (attested ? 0x40 : 0)));
+        data.Add((byte)(0x01 | (userVerified ? 0x04 : 0) | (BackupEligible ? 0x08 : 0) | (BackedUp ? 0x10 : 0) | (attested ? 0x40 : 0)));
         var count = new byte[4];
         BinaryPrimitives.WriteUInt32BigEndian(count, counter);
         data.AddRange(count);
@@ -159,7 +162,7 @@ public sealed class TestPasskeyStore : ISlimPasskeyStore
 
     public Task<bool> AddPasskeyAsync(SlimPasskey passkey, CancellationToken ct) => Task.FromResult(_keys.TryAdd(Key(passkey.CredentialId), Clone(passkey)));
 
-    public Task<bool> TryRecordUseAsync(byte[] credentialId, uint expectedSignCount, uint signCount, long challengeIssuedAt, DateTimeOffset usedUtc, CancellationToken ct)
+    public Task<bool> TryRecordUseAsync(byte[] credentialId, uint expectedSignCount, uint signCount, long challengeIssuedAt, DateTimeOffset usedUtc, bool backedUp, CancellationToken ct)
     {
         if (!_keys.TryGetValue(Key(credentialId), out var p)) return Task.FromResult(false);
         lock (p)
@@ -168,6 +171,7 @@ public sealed class TestPasskeyStore : ISlimPasskeyStore
             p.SignCount = signCount;
             p.LastChallengeAt = challengeIssuedAt;
             p.LastUsedUtc = usedUtc;
+            p.BackedUp = backedUp;
             return Task.FromResult(true);
         }
     }
@@ -194,5 +198,6 @@ public sealed class TestPasskeyStore : ISlimPasskeyStore
     {
         UserId = p.UserId, CredentialId = p.CredentialId, PublicKey = p.PublicKey, SignCount = p.SignCount,
         LastChallengeAt = p.LastChallengeAt, Name = p.Name, CreatedUtc = p.CreatedUtc, LastUsedUtc = p.LastUsedUtc,
+        BackupEligible = p.BackupEligible, BackedUp = p.BackedUp,
     };
 }

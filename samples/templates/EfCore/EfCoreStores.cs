@@ -402,6 +402,7 @@ public sealed class EfCorePasskeyStore(IdentityDb identity) : ISlimPasskeyStore
             CredentialIdHash = hash, CredentialId = passkey.CredentialId, UserId = Guid.Parse(passkey.UserId), PublicKey = passkey.PublicKey,
             SignCount = passkey.SignCount, LastChallengeAt = passkey.LastChallengeAt, Name = passkey.Name,
             CreatedUtc = passkey.CreatedUtc, LastUsedUtc = passkey.LastUsedUtc,
+            BackupEligible = passkey.BackupEligible, BackedUp = passkey.BackedUp,
         };
         db.Passkeys.Add(row);
         try
@@ -418,7 +419,7 @@ public sealed class EfCorePasskeyStore(IdentityDb identity) : ISlimPasskeyStore
     }
 
     // compare-and-set in one statement: same counter AND a newer challenge than the last one used
-    public async Task<bool> TryRecordUseAsync(byte[] credentialId, uint expectedSignCount, uint signCount, long challengeIssuedAt, DateTimeOffset usedUtc, CancellationToken ct)
+    public async Task<bool> TryRecordUseAsync(byte[] credentialId, uint expectedSignCount, uint signCount, long challengeIssuedAt, DateTimeOffset usedUtc, bool backedUp, CancellationToken ct)
     {
         var hash = Hash(credentialId);
         long expected = expectedSignCount, next = signCount;
@@ -427,7 +428,8 @@ public sealed class EfCorePasskeyStore(IdentityDb identity) : ISlimPasskeyStore
             .ExecuteUpdateAsync(s => s
                 .SetProperty(p => p.SignCount, next)
                 .SetProperty(p => p.LastChallengeAt, challengeIssuedAt)
-                .SetProperty(p => p.LastUsedUtc, usedUtc), ct) == 1;
+                .SetProperty(p => p.LastUsedUtc, usedUtc)
+                .SetProperty(p => p.BackedUp, backedUp), ct) == 1;
     }
 
     public async Task<bool> RenamePasskeyAsync(string userId, byte[] credentialId, string name, CancellationToken ct)
@@ -452,5 +454,6 @@ public sealed class EfCorePasskeyStore(IdentityDb identity) : ISlimPasskeyStore
     {
         UserId = p.UserId.ToString(), CredentialId = p.CredentialId, PublicKey = p.PublicKey, SignCount = (uint)p.SignCount,
         LastChallengeAt = p.LastChallengeAt, Name = p.Name, CreatedUtc = p.CreatedUtc, LastUsedUtc = p.LastUsedUtc,
+        BackupEligible = p.BackupEligible, BackedUp = p.BackedUp,
     };
 }

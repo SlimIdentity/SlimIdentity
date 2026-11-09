@@ -95,6 +95,7 @@ internal sealed class SlimPasskeyHandlers(
             return Rejected("registration", "authenticator data");
         if (!SlimWebAuthn.IsForRelyingParty(authData, RpId)) return Rejected("registration", "rp id");
         if (!authData.UserPresent || !authData.UserVerified) return Rejected("registration", "user verification");
+        if (!authData.BackupFlagsValid) return Rejected("registration", "backup flags");
         if (SlimWebAuthn.AlgorithmOf(publicKey) is null) return Rejected("registration", "algorithm");
         if (SlimWebAuthn.FromBase64Url(credential.RawId) is not { } rawId || !rawId.AsSpan().SequenceEqual(credentialId))
             return Rejected("registration", "credential id");
@@ -105,6 +106,8 @@ internal sealed class SlimPasskeyHandlers(
             CredentialId = credentialId,
             PublicKey = publicKey,
             SignCount = authData.SignCount,
+            BackupEligible = authData.BackupEligible,
+            BackedUp = authData.BackedUp,
             Name = CleanName(request.Name) ?? "Passkey",
             CreatedUtc = time.GetUtcNow(),
         };
@@ -113,7 +116,8 @@ internal sealed class SlimPasskeyHandlers(
 
         Log.PasskeyAdded(logger, user.Id);
         await hooks.RaiseAsync(SlimEventTypes.PasskeyAdded, user.Id, SlimAuthManager.MethodPasskey, ct: ct);
-        return Results.Ok(new SlimPasskeyInfo(Base64Url.EncodeToString(credentialId), passkey.Name, passkey.CreatedUtc, null));
+        return Results.Ok(new SlimPasskeyInfo(Base64Url.EncodeToString(credentialId), passkey.Name, passkey.CreatedUtc, null,
+            passkey.BackupEligible, passkey.BackedUp));
     }
 
     // ------------------------------------------------------------------ sign-in (anonymous, discoverable credentials)
@@ -146,6 +150,7 @@ internal sealed class SlimPasskeyHandlers(
         if (authDataBytes is null || SlimWebAuthn.ParseAuthenticatorData(authDataBytes) is not { } authData) return Failed("authenticator data");
         if (!SlimWebAuthn.IsForRelyingParty(authData, RpId)) return Failed("rp id");
         if (!authData.UserPresent || !authData.UserVerified) return Failed("user verification");
+        if (!authData.BackupFlagsValid) return Failed("backup flags");
 
         // §7.2 steps 5–6: the credential and its owner
         if (SlimWebAuthn.FromBase64Url(credential.RawId) is not { } credentialId
@@ -159,6 +164,9 @@ internal sealed class SlimPasskeyHandlers(
         var signature = SlimWebAuthn.FromBase64Url(response.Signature);
         if (signature is null || !SlimWebAuthn.VerifySignature(passkey.PublicKey, authDataBytes, clientDataJson, signature))
             return Failed("signature");
+
+        // backup eligibility is a fixed property of the credential: a change means it is not the authenticator registered
+        if (authData.BackupEligible != passkey.BackupEligible) return Failed("backup eligibility");
 
         // §7.2 step 21: a counter that does not increase hints at a cloned authenticator (most synced passkeys send 0)
         if ((authData.SignCount != 0 || passkey.SignCount != 0) && authData.SignCount <= passkey.SignCount)
@@ -174,7 +182,7 @@ internal sealed class SlimPasskeyHandlers(
             return SlimResults.Status("email_not_confirmed", "The e-mail address has not been confirmed yet.", StatusCodes.Status403Forbidden);
 
         // single use, atomically: this challenge must be newer than the last one used with this passkey
-        if (!await passkeys.TryRecordUseAsync(credentialId, passkey.SignCount, authData.SignCount, state.IssuedAt, time.GetUtcNow(), ct))
+        if (!await passkeys.TryRecordUseAsync(credentialId, passkey.SignCount, authData.SignCount, state.IssuedAt, time.GetUtcNow(), authData.BackedUp, ct))
             return Failed("replay");
 
         // possession + user verification: multi-factor on its own – no second factor follows

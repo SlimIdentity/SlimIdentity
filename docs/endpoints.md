@@ -88,13 +88,14 @@ Links are created by the host with `ISlimAuthManager.CreateInvitationAsync` – 
 | Endpoint | Body | Success | Errors |
 | :--- | :--- | :--- | :--- |
 | `POST /passkeys/register/options` ⏱ 🔒 | `password` (if the account has one) | `200` `options` (creation options, base64url), `state` | `400 invalid_password`, `403 email_not_confirmed`, `403` during impersonation, `423` |
-| `POST /passkeys/register` ⏱ 🔒 | `state`, `credential` (result of `navigator.credentials.create`), `name` | `200` `id`, `name`, `createdUtc` | `400 invalid_passkey`, `409 passkey_exists` |
+| `POST /passkeys/register` ⏱ 🔒 | `state`, `credential` (result of `navigator.credentials.create`), `name` | `200` `id`, `name`, `createdUtc`, `backupEligible`, `backedUp` | `400 invalid_passkey`, `409 passkey_exists` |
 | `POST /passkeys/login/options` ⏱ | – | `200` `options` (request options), `state` | – |
 | `POST /passkeys/login?useCookies=…` ⏱ | `state`, `credential` (result of `navigator.credentials.get`), `rememberMe` | `200` session (`amr: passkey`, no second factor) | `401 invalid_passkey`, `403 email_not_confirmed`, `403 <veto>` |
 | `POST /sign-in-methods/passkeys/rename` 🔒 | `id`, `name` (1–64 characters) | `200 passkey_renamed` | `400 invalid_name`, `404 passkey_not_found` |
 | `POST /sign-in-methods/passkeys/remove` ⏱ 🔒 | `id`, `password` (if the account has one) | `200 passkey_removed` | `400 invalid_password`, `404 passkey_not_found`, `409 last_sign_in_method` |
 
-`GET /sign-in-methods` lists passkeys as `passkeys` (`id`, `name`, `createdUtc`, `lastUsedUtc`). Details:
+`GET /sign-in-methods` lists passkeys as `passkeys` (`id`, `name`, `createdUtc`, `lastUsedUtc`, `backupEligible`,
+`backedUp`). Details:
 [passkeys](guides/passkeys.md).
 
 ## Two-factor management (`ISlimTwoFactorStore`) 🔒

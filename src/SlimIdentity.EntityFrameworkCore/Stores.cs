@@ -493,6 +493,7 @@ public class SlimEfPasskeyStore<TContext, TKey>(SlimEfContext<TContext> context)
         {
             CredentialIdHash = hash, CredentialId = passkey.CredentialId, UserId = key, PublicKey = passkey.PublicKey,
             SignCount = passkey.SignCount, LastChallengeAt = passkey.LastChallengeAt, Name = passkey.Name,
+            BackupEligible = passkey.BackupEligible, BackedUp = passkey.BackedUp,
             CreatedUtc = passkey.CreatedUtc, LastUsedUtc = passkey.LastUsedUtc,
         };
         Passkeys.Add(entity);
@@ -515,7 +516,7 @@ public class SlimEfPasskeyStore<TContext, TKey>(SlimEfContext<TContext> context)
     }
 
     /// <inheritdoc />
-    public async Task<bool> TryRecordUseAsync(byte[] credentialId, uint expectedSignCount, uint signCount, long challengeIssuedAt, DateTimeOffset usedUtc, CancellationToken ct)
+    public async Task<bool> TryRecordUseAsync(byte[] credentialId, uint expectedSignCount, uint signCount, long challengeIssuedAt, DateTimeOffset usedUtc, bool backedUp, CancellationToken ct)
     {
         var hash = Hash(credentialId);
         long expected = expectedSignCount, next = signCount;
@@ -524,7 +525,8 @@ public class SlimEfPasskeyStore<TContext, TKey>(SlimEfContext<TContext> context)
             .ExecuteUpdateAsync(s => s
                 .SetProperty(p => p.SignCount, next)
                 .SetProperty(p => p.LastChallengeAt, challengeIssuedAt)
-                .SetProperty(p => p.LastUsedUtc, usedUtc), ct).ConfigureAwait(false) == 1;
+                .SetProperty(p => p.LastUsedUtc, usedUtc)
+                .SetProperty(p => p.BackedUp, backedUp), ct).ConfigureAwait(false) == 1;
     }
 
     /// <inheritdoc />
@@ -555,5 +557,6 @@ public class SlimEfPasskeyStore<TContext, TKey>(SlimEfContext<TContext> context)
     {
         UserId = SlimEf.KeyToString(p.UserId), CredentialId = p.CredentialId, PublicKey = p.PublicKey, SignCount = (uint)p.SignCount,
         LastChallengeAt = p.LastChallengeAt, Name = p.Name, CreatedUtc = p.CreatedUtc, LastUsedUtc = p.LastUsedUtc,
+        BackupEligible = p.BackupEligible, BackedUp = p.BackedUp,
     };
 }

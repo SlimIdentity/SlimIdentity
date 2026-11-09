@@ -111,6 +111,10 @@ public sealed class SlimPasskeyEntity<TKey>
     public byte[] PublicKey { get; set; } = [];
     /// <summary>Signature counter.</summary>
     public long SignCount { get; set; }
+    /// <summary>May be synced to other devices (WebAuthn flag BE).</summary>
+    public bool BackupEligible { get; set; }
+    /// <summary>Currently synced (WebAuthn flag BS).</summary>
+    public bool BackedUp { get; set; }
     /// <summary>Unix milliseconds of the last challenge used.</summary>
     public long? LastChallengeAt { get; set; }
     /// <summary>Display name.</summary>

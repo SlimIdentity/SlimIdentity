@@ -28,7 +28,8 @@ export interface LoginChallenge {
 export interface SignInMethods {
   hasPassword: boolean;
   externalLogins: { provider: string; providerKey: string }[];
-  passkeys: { id: string; name: string; createdUtc: string; lastUsedUtc?: string }[];
+  /** backupEligible: may be synced (iCloud Keychain, password manager); backedUp: currently synced – e.g. "synced" vs "this device only". */
+  passkeys: { id: string; name: string; createdUtc: string; lastUsedUtc?: string; backupEligible: boolean; backedUp: boolean }[];
 }
 
 export interface SessionInfo {
@@ -307,6 +308,21 @@ export const cookieAuth = {
     return toLoginResult(r);
   },
 
+  /**
+   * Passkey autofill: the browser offers the passkeys of this site in the e-mail field of the sign-in form – the input
+   * needs autocomplete="username webauthn". Start it when the sign-in page opens; it waits until the user picks a
+   * passkey. Abort the signal before any other sign-in (password, passkey button) – one WebAuthn request at a time.
+   * Resolves with the session, or { kind: "error", status: "unsupported" | "cancelled" | … }.
+   */
+  async loginWithPasskeyAutofill(signal: AbortSignal, rememberMe = false): Promise<LoginResult> {
+    const assertion = await passkeyAutofill((path, init) => cookieFetch(path, init), true, signal);
+    if (typeof assertion === "string") return { kind: "error", status: assertion };
+    return toLoginResult(await cookieFetch("/auth/passkeys/login?useCookies=true", {
+      method: "POST",
+      body: JSON.stringify({ ...assertion, rememberMe }),
+    }));
+  },
+
   /** Adds a passkey to the signed-in account ("passkey_added" or an error code). */
   addPasskey(name?: string, password?: string): Promise<string> {
     return addPasskeyWith((path, init) => cookieFetch(path, init), name, password);
@@ -419,7 +435,8 @@ async function addPasskeyWith(send: (path: string, init: RequestInit) => Promise
   })).then(status => (status === "http_200" ? "passkey_added" : status));
 }
 
-async function passkeyAssertion(send: (path: string, init: RequestInit) => Promise<Response>, useCookies: boolean): Promise<{ state: string; credential: object } | string> {
+async function passkeyAssertion(send: (path: string, init: RequestInit) => Promise<Response>, useCookies: boolean,
+    conditional?: AbortSignal): Promise<{ state: string; credential: object } | string> {
   // the mode tells the server whether the anti-forgery check applies to this anonymous call
   const start = await send(`/auth/passkeys/login/options?useCookies=${useCookies}`, { method: "POST", body: "{}" });
   if (!start.ok) return statusOf(Promise.resolve(start));
@@ -427,6 +444,8 @@ async function passkeyAssertion(send: (path: string, init: RequestInit) => Promi
 
   const credential = await navigator.credentials.get({
     publicKey: { ...options, challenge: fromBase64Url(options.challenge), allowCredentials: [] },
+    // autofill: no dialog – the browser offers the passkeys in the input marked autocomplete="username webauthn"
+    ...(conditional ? { mediation: "conditional" as CredentialMediationRequirement, signal: conditional } : {}),
   }).catch(() => null) as PublicKeyCredential | null;
   if (!credential) return "cancelled";
 
@@ -445,6 +464,27 @@ async function passkeyAssertion(send: (path: string, init: RequestInit) => Promi
       },
     },
   };
+}
+
+// The server's sign-in state lives 5 minutes, an autofill request waits as long as the page is open: fetch a fresh
+// challenge every 4 minutes until the user picks a passkey or the caller aborts.
+async function passkeyAutofill(send: (path: string, init: RequestInit) => Promise<Response>, useCookies: boolean,
+    signal: AbortSignal): Promise<{ state: string; credential: object } | string> {
+  if (!(await PublicKeyCredential.isConditionalMediationAvailable?.())) return "unsupported";
+  while (!signal.aborted) {
+    const round = new AbortController();
+    const stop = () => round.abort();
+    signal.addEventListener("abort", stop, { once: true });
+    const timer = setTimeout(stop, 4 * 60_000);
+    try {
+      const result = await passkeyAssertion(send, useCookies, round.signal);
+      if (result !== "cancelled" || !round.signal.aborted) return result;   // picked, failed – or the browser refused
+    } finally {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", stop);
+    }
+  }
+  return "cancelled";
 }
 
 async function removeExternal(send: (path: string, init: RequestInit) => Promise<Response>,
@@ -590,6 +630,20 @@ export const bearerAuth = {
     const anonymous = (path: string, init: RequestInit) =>
       fetch(`${API}${path}`, { ...init, headers: { "Content-Type": "application/json" } });
     const assertion = await passkeyAssertion(anonymous, false);
+    if (typeof assertion === "string") return { kind: "error", status: assertion };
+    const result = await toLoginResult(await anonymous("/auth/passkeys/login?useCookies=false", {
+      method: "POST",
+      body: JSON.stringify(assertion),
+    }));
+    if (result.kind === "ok") storeTokens(result.auth);
+    return result;
+  },
+
+  /** Passkey autofill – see cookieAuth.loginWithPasskeyAutofill. */
+  async loginWithPasskeyAutofill(signal: AbortSignal): Promise<LoginResult> {
+    const anonymous = (path: string, init: RequestInit) =>
+      fetch(`${API}${path}`, { ...init, headers: { "Content-Type": "application/json" } });
+    const assertion = await passkeyAutofill(anonymous, false, signal);
     if (typeof assertion === "string") return { kind: "error", status: assertion };
     const result = await toLoginResult(await anonymous("/auth/passkeys/login?useCookies=false", {
       method: "POST",

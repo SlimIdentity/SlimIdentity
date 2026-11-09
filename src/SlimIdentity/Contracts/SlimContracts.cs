@@ -89,7 +89,10 @@ public sealed record SlimSignInMethodsResponse(bool HasPassword, IReadOnlyList<S
 /// <param name="Name">Display name.</param>
 /// <param name="CreatedUtc">Registration time.</param>
 /// <param name="LastUsedUtc">Last sign-in with it.</param>
-public sealed record SlimPasskeyInfo(string Id, string Name, DateTimeOffset CreatedUtc, DateTimeOffset? LastUsedUtc);
+/// <param name="BackupEligible">May be synced to other devices (password manager, iCloud Keychain); <c>false</c> for a device-bound key.</param>
+/// <param name="BackedUp">Currently synced – as of the last registration or sign-in.</param>
+public sealed record SlimPasskeyInfo(string Id, string Name, DateTimeOffset CreatedUtc, DateTimeOffset? LastUsedUtc,
+    bool BackupEligible = false, bool BackedUp = false);
 
 /// <summary>Body of <c>POST /auth/sign-in-methods/external/remove</c>.</summary>
 /// <param name="Provider">Provider of the link, as listed.</param>
