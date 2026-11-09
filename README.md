@@ -32,6 +32,8 @@ the provided samples and verify your stores with the
 - **Server-side sessions** (optional): real per-device logout, device list, sign out everywhere.
 - **Brute-force protection**: per-client rate limiting plus progressive account lockout; uniform answers and timing
   against account enumeration; pluggable password rules (e.g. breached-password check).
+- **Passkeys**: sign-in with Face ID, fingerprint or device PIN – phishing-resistant, multi-factor on its own, no
+  user name needed; managed next to password and external logins.
 - **2FA**: TOTP (authenticator apps), e-mail codes, recovery codes – secrets encrypted at rest, every code usable once.
 - **External login**: any ASP.NET Core OAuth/OIDC handler (Google, Microsoft Entra ID, Keycloak, …) with safe account linking.
 - **Workflows**: registration, e-mail verification, password reset/change, e-mail change, invitations – stateless,
@@ -116,6 +118,7 @@ All packages are released together with the same version.
   [mobile / bearer](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/mobile-bearer.md) ·
   [sessions](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/sessions-and-logout.md) ·
   [2FA](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/two-factor.md) ·
+  [passkeys](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/passkeys.md) ·
   [external login](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/external-login.md) ·
   [invitations](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/invitations.md) ·
   [admin features](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/admin-features.md) ·
@@ -137,8 +140,6 @@ All packages are released together with the same version.
 
 After 1.0, roughly in this order – nothing here needs a breaking change:
 
-- **Passkeys (1.1)** – WebAuthn as a new capability (`ISlimPasskeyStore`); password-less accounts and a free-form
-  `amr` already exist.
 - Device-bound tokens (DPoP) for bearer clients.
 - API-key entity in the EF Core package; npm package of the TypeScript client if there is demand.
 

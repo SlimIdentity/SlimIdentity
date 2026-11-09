@@ -8,6 +8,7 @@
 //       .AddSessionStore<DapperSessionStore>()
 //       .AddTwoFactorStore<DapperTwoFactorStore>()
 //       .AddExternalLoginStore<DapperExternalLoginStore>()
+//       .AddPasskeyStore<DapperPasskeyStore>()
 //       .AddApiKeyStore<DapperApiKeyStore>();
 
 using System.Security.Claims;
@@ -343,4 +344,82 @@ public sealed class DapperApiKeyStore(NpgsqlDataSource db) : ISlimApiKeyStore
         claims.AddRange(k.Scopes.Select(s => new Claim("scope", s)));
         return claims;
     }
+}
+
+public sealed class DapperPasskeyStore(NpgsqlDataSource db) : ISlimPasskeyStore
+{
+    private const string Columns = """
+        credential_id AS CredentialId, user_id::text AS UserId, public_key AS PublicKey, sign_count AS SignCount,
+        last_challenge_at AS LastChallengeAt, name AS Name, created_utc AS CreatedUtc, last_used_utc AS LastUsedUtc
+        """;
+
+    private sealed record Row(byte[] CredentialId, string UserId, byte[] PublicKey, long SignCount, long? LastChallengeAt,
+        string Name, DateTime CreatedUtc, DateTime? LastUsedUtc);
+
+    private static byte[] Hash(byte[] credentialId) => System.Security.Cryptography.SHA256.HashData(credentialId);
+
+    public async Task<IReadOnlyList<SlimPasskey>> GetPasskeysAsync(string userId, CancellationToken ct)
+    {
+        await using var c = await db.OpenConnectionAsync(ct);
+        var rows = await c.QueryAsync<Row>(new CommandDefinition(
+            $"SELECT {Columns} FROM passkeys WHERE user_id = @userId::uuid ORDER BY created_utc", new { userId }, cancellationToken: ct));
+        return rows.Select(Map).ToList();
+    }
+
+    public async Task<SlimPasskey?> FindPasskeyAsync(byte[] credentialId, CancellationToken ct)
+    {
+        await using var c = await db.OpenConnectionAsync(ct);
+        var row = await c.QuerySingleOrDefaultAsync<Row>(new CommandDefinition(
+            $"SELECT {Columns} FROM passkeys WHERE credential_id_hash = @hash", new { hash = Hash(credentialId) }, cancellationToken: ct));
+        return row is not null && row.CredentialId.AsSpan().SequenceEqual(credentialId) ? Map(row) : null;
+    }
+
+    public async Task<bool> AddPasskeyAsync(SlimPasskey p, CancellationToken ct)
+    {
+        await using var c = await db.OpenConnectionAsync(ct);
+        return await c.ExecuteAsync(new CommandDefinition("""
+            INSERT INTO passkeys (credential_id_hash, credential_id, user_id, public_key, sign_count, last_challenge_at, name, created_utc, last_used_utc)
+            VALUES (@hash, @CredentialId, @UserId::uuid, @PublicKey, @SignCount, @LastChallengeAt, @Name, @CreatedUtc, @LastUsedUtc)
+            ON CONFLICT (credential_id_hash) DO NOTHING
+            """, new
+            {
+                hash = Hash(p.CredentialId), p.CredentialId, p.UserId, p.PublicKey, SignCount = (long)p.SignCount,
+                p.LastChallengeAt, p.Name, p.CreatedUtc, p.LastUsedUtc,
+            }, cancellationToken: ct)) == 1;
+    }
+
+    public async Task<bool> TryRecordUseAsync(byte[] credentialId, uint expectedSignCount, uint signCount, long challengeIssuedAt, DateTimeOffset usedUtc, CancellationToken ct)
+    {
+        await using var c = await db.OpenConnectionAsync(ct);
+        return await c.ExecuteAsync(new CommandDefinition("""
+            UPDATE passkeys SET sign_count = @signCount, last_challenge_at = @challengeIssuedAt, last_used_utc = @usedUtc
+            WHERE credential_id_hash = @hash AND sign_count = @expected
+              AND (last_challenge_at IS NULL OR last_challenge_at < @challengeIssuedAt)
+            """, new { hash = Hash(credentialId), expected = (long)expectedSignCount, signCount = (long)signCount, challengeIssuedAt, usedUtc },
+            cancellationToken: ct)) == 1;
+    }
+
+    public async Task<bool> RenamePasskeyAsync(string userId, byte[] credentialId, string name, CancellationToken ct)
+    {
+        await using var c = await db.OpenConnectionAsync(ct);
+        return await c.ExecuteAsync(new CommandDefinition(
+            "UPDATE passkeys SET name = @name WHERE credential_id_hash = @hash AND user_id = @userId::uuid",
+            new { name, hash = Hash(credentialId), userId }, cancellationToken: ct)) == 1;
+    }
+
+    public async Task<bool> RemovePasskeyAsync(string userId, byte[] credentialId, CancellationToken ct)
+    {
+        await using var c = await db.OpenConnectionAsync(ct);
+        return await c.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM passkeys WHERE credential_id_hash = @hash AND user_id = @userId::uuid",
+            new { hash = Hash(credentialId), userId }, cancellationToken: ct)) == 1;
+    }
+
+    private static SlimPasskey Map(Row r) => new()
+    {
+        UserId = r.UserId, CredentialId = r.CredentialId, PublicKey = r.PublicKey, SignCount = (uint)r.SignCount,
+        LastChallengeAt = r.LastChallengeAt, Name = r.Name,
+        CreatedUtc = new DateTimeOffset(DateTime.SpecifyKind(r.CreatedUtc, DateTimeKind.Utc)),
+        LastUsedUtc = r.LastUsedUtc is { } used ? new DateTimeOffset(DateTime.SpecifyKind(used, DateTimeKind.Utc)) : null,
+    };
 }

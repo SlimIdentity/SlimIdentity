@@ -96,7 +96,7 @@ public sealed class SlimEvent
 /// <summary>The event types of <see cref="SlimEvent.Type"/>.</summary>
 public static class SlimEventTypes
 {
-    /// <summary>A new session was issued. <c>Method</c> = amr.</summary>
+    /// <summary>A new session was issued. <c>Method</c> = amr (<c>pwd</c>, <c>mfa</c>, <c>ext</c>, <c>passkey</c>, …).</summary>
     public const string SignedIn = "signed_in";
     /// <summary>A sign-in failed. <c>Reason</c>: <c>invalid_password</c>, <c>unknown_user</c>, <c>locked_out</c>, <c>inactive</c>, <c>invalid_two_factor_code</c> or a guard's veto code.</summary>
     public const string SignInFailed = "sign_in_failed";
@@ -120,6 +120,10 @@ public static class SlimEventTypes
     public const string ExternalLoginLinked = "external_login_linked";
     /// <summary>The host's claims of the account changed (<c>RefreshClaimsAsync</c>); sessions reload them.</summary>
     public const string ClaimsChanged = "claims_changed";
+    /// <summary>A passkey was registered.</summary>
+    public const string PasskeyAdded = "passkey_added";
+    /// <summary>A passkey was removed.</summary>
+    public const string PasskeyRemoved = "passkey_removed";
     /// <summary>An external login was removed from the account. <c>Method</c> = provider.</summary>
     public const string ExternalLoginRemoved = "external_login_removed";
     /// <summary>All sessions of the account were ended (sign out everywhere, ban).</summary>

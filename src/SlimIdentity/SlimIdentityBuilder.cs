@@ -244,6 +244,18 @@ public sealed class SlimIdentityBuilder
         return AddApiKeyStore<SlimConfigurationApiKeyStore>(ServiceLifetime.Singleton);
     }
 
+    /// <summary>
+    /// Activates passkeys (WebAuthn): <c>/passkeys/*</c> and passkeys in <c>/sign-in-methods</c>. Needs
+    /// <c>Passkeys.RelyingPartyId</c> (or <c>Links.BaseUrl</c>) and the front end's origin among the trusted origins.
+    /// </summary>
+    public SlimIdentityBuilder AddPasskeyStore<[DynamicallyAccessedMembers(Ctors)] TStore>(ServiceLifetime lifetime = ServiceLifetime.Scoped)
+        where TStore : class, ISlimPasskeyStore
+    {
+        Register<ISlimPasskeyStore, TStore>(lifetime);
+        Services.TryAddScoped<SlimPasskeyHandlers>();
+        return this;
+    }
+
     /// <summary>Activates the <c>X-API-Key</c> authentication handler.</summary>
     public SlimIdentityBuilder AddApiKeyStore<[DynamicallyAccessedMembers(Ctors)] TStore>(ServiceLifetime lifetime = ServiceLifetime.Scoped)
         where TStore : class, ISlimApiKeyStore

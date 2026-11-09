@@ -426,3 +426,104 @@ public class SlimEfExternalLoginStore<TContext, TKey>(SlimEfContext<TContext> co
             .ExecuteDeleteAsync(ct).ConfigureAwait(false) > 0;
     }
 }
+
+/// <summary><see cref="ISlimPasskeyStore"/> on the <c>SlimPasskeys</c> table.</summary>
+public class SlimEfPasskeyStore<TContext, TKey>(SlimEfContext<TContext> context) : ISlimPasskeyStore
+    where TContext : DbContext
+    where TKey : IEquatable<TKey>, IParsable<TKey>
+{
+    private readonly TContext db = context.Db;
+
+    private DbSet<SlimPasskeyEntity<TKey>> Passkeys => db.Set<SlimPasskeyEntity<TKey>>();
+
+    private static byte[] Hash(byte[] credentialId) => System.Security.Cryptography.SHA256.HashData(credentialId);
+
+    private static System.Linq.Expressions.Expression<Func<SlimPasskeyEntity<TKey>, bool>> OfUser(TKey key) =>
+        SlimEf.Equal<SlimPasskeyEntity<TKey>, TKey>(nameof(SlimPasskeyEntity<TKey>.UserId), key);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<SlimPasskey>> GetPasskeysAsync(string userId, CancellationToken ct)
+    {
+        if (!SlimEf.TryParseKey<TKey>(userId, out var key)) return [];
+        var rows = await Passkeys.AsNoTracking().Where(OfUser(key)).ToListAsync(ct).ConfigureAwait(false);
+        return [.. rows.OrderBy(p => p.CreatedUtc).Select(Map)];   // in memory: SQLite cannot order by DateTimeOffset
+    }
+
+    /// <inheritdoc />
+    public async Task<SlimPasskey?> FindPasskeyAsync(byte[] credentialId, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(credentialId);
+        var hash = Hash(credentialId);
+        var row = await Passkeys.AsNoTracking().FirstOrDefaultAsync(p => p.CredentialIdHash == hash, ct).ConfigureAwait(false);
+        return row is not null && row.CredentialId.AsSpan().SequenceEqual(credentialId) ? Map(row) : null;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> AddPasskeyAsync(SlimPasskey passkey, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(passkey);
+        if (!SlimEf.TryParseKey<TKey>(passkey.UserId, out var key)) throw new ArgumentException($"'{passkey.UserId}' is not a valid user id.", nameof(passkey));
+        var hash = Hash(passkey.CredentialId);
+        if (await Passkeys.AnyAsync(p => p.CredentialIdHash == hash, ct).ConfigureAwait(false)) return false;
+
+        var entity = new SlimPasskeyEntity<TKey>
+        {
+            CredentialIdHash = hash, CredentialId = passkey.CredentialId, UserId = key, PublicKey = passkey.PublicKey,
+            SignCount = passkey.SignCount, LastChallengeAt = passkey.LastChallengeAt, Name = passkey.Name,
+            CreatedUtc = passkey.CreatedUtc, LastUsedUtc = passkey.LastUsedUtc,
+        };
+        Passkeys.Add(entity);
+        try
+        {
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            return true;
+        }
+        catch (DbUpdateException)
+        {
+            // registered concurrently (primary key) – anything else is rethrown
+            db.Entry(entity).State = EntityState.Detached;
+            if (await Passkeys.AnyAsync(p => p.CredentialIdHash == hash, ct).ConfigureAwait(false)) return false;
+            throw;
+        }
+        finally
+        {
+            db.ChangeTracker.Clear();
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> TryRecordUseAsync(byte[] credentialId, uint expectedSignCount, uint signCount, long challengeIssuedAt, DateTimeOffset usedUtc, CancellationToken ct)
+    {
+        var hash = Hash(credentialId);
+        long expected = expectedSignCount, next = signCount;
+        return await Passkeys
+            .Where(p => p.CredentialIdHash == hash && p.SignCount == expected && (p.LastChallengeAt == null || p.LastChallengeAt < challengeIssuedAt))
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(p => p.SignCount, next)
+                .SetProperty(p => p.LastChallengeAt, challengeIssuedAt)
+                .SetProperty(p => p.LastUsedUtc, usedUtc), ct).ConfigureAwait(false) == 1;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> RenamePasskeyAsync(string userId, byte[] credentialId, string name, CancellationToken ct)
+    {
+        if (!SlimEf.TryParseKey<TKey>(userId, out var key)) return false;
+        var hash = Hash(credentialId);
+        return await Passkeys.Where(OfUser(key)).Where(p => p.CredentialIdHash == hash)
+            .ExecuteUpdateAsync(s => s.SetProperty(p => p.Name, name), ct).ConfigureAwait(false) == 1;
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> RemovePasskeyAsync(string userId, byte[] credentialId, CancellationToken ct)
+    {
+        if (!SlimEf.TryParseKey<TKey>(userId, out var key)) return false;
+        var hash = Hash(credentialId);
+        return await Passkeys.Where(OfUser(key)).Where(p => p.CredentialIdHash == hash).ExecuteDeleteAsync(ct).ConfigureAwait(false) == 1;
+    }
+
+    private static SlimPasskey Map(SlimPasskeyEntity<TKey> p) => new()
+    {
+        UserId = SlimEf.KeyToString(p.UserId), CredentialId = p.CredentialId, PublicKey = p.PublicKey, SignCount = (uint)p.SignCount,
+        LastChallengeAt = p.LastChallengeAt, Name = p.Name, CreatedUtc = p.CreatedUtc, LastUsedUtc = p.LastUsedUtc,
+    };
+}

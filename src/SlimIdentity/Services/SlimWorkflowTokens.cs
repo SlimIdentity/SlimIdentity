@@ -21,6 +21,8 @@ internal sealed class SlimWorkflowTokens(IDataProtectionProvider provider, TimeP
     public const string TwoFactorSetupPurpose = "SlimIdentity.TwoFactorSetup.v1";
     public const string ExternalExchangePurpose = "SlimIdentity.ExternalExchange.v1";
     public const string ExternalLinkPurpose = "SlimIdentity.ExternalLink.v1";
+    public const string PasskeyRegistrationPurpose = "SlimIdentity.PasskeyRegistration.v1";
+    public const string PasskeyLoginPurpose = "SlimIdentity.PasskeyLogin.v1";
     public const string RefreshTokenPurpose = "SlimIdentity.RefreshToken.v1";
     public const string InvitationPurpose = "SlimIdentity.Invitation.v1";
     public const string EmailChangePurpose = "SlimIdentity.EmailChange.v1";
@@ -90,6 +92,10 @@ internal sealed record SlimRememberDevicePayload(string Uid, string Stamp, long 
 internal sealed record SlimEmailChangePayload(string Uid, string OldEmail, string NewEmail, string Stamp);
 internal sealed record SlimTwoFactorSetupPayload(string Uid, string Secret, string Stamp);
 /// <summary><c>CodeChallenge</c>: PKCE S256 challenge – the code is redeemable only with the matching verifier.</summary>
+/// <summary>A pending passkey registration: the challenge, bound to the account and its security stamp.</summary>
+internal sealed record SlimPasskeyRegistrationPayload(string Uid, string Stamp, string Challenge);
+/// <summary>A pending passkey sign-in: the challenge and when it was issued (unix ms – each counts once per passkey).</summary>
+internal sealed record SlimPasskeyLoginPayload(string Challenge, long IssuedAt);
 /// <summary>An external identity to be linked to the signed-in account; PKCE-bound like the exchange code.</summary>
 internal sealed record SlimExternalLinkPayload(string Provider, string ProviderKey, string Nonce, string CodeChallenge);
 internal sealed record SlimExchangePayload(string Uid, string Stamp, string Provider, string Nonce, string CodeChallenge);

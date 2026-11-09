@@ -13,6 +13,12 @@ public sealed class SlimEntityFrameworkOptions
     public bool Sessions { get; set; } = true;
     /// <summary><see cref="ISlimExternalLoginStore"/>: <c>/login/{provider}</c>. Default <c>true</c>.</summary>
     public bool ExternalLogins { get; set; } = true;
+    /// <summary>
+    /// <see cref="ISlimPasskeyStore"/>: passkeys (<c>/passkeys/*</c>). Default <c>false</c> – opt in deliberately: passkeys
+    /// need a relying party id that can never change (<c>Passkeys.RelyingPartyId</c>) and a front end that offers them.
+    /// The <c>SlimPasskeys</c> table is part of the model either way, so switching them on needs no migration.
+    /// </summary>
+    public bool Passkeys { get; set; }
     /// <summary>Persist user agent and IP address of sessions (personal data, shown in the device list). Default <c>true</c>.</summary>
     public bool StoreClientInfo { get; set; } = true;
 }
@@ -48,6 +54,7 @@ public static class SlimEntityFrameworkBuilderExtensions
         if (options.RefreshTokens) builder.AddRefreshTokenStore<SlimEfRefreshTokenStore<TContext, TKey>>();
         if (options.Sessions) builder.AddSessionStore<SlimEfSessionStore<TContext, TKey>>();
         if (options.ExternalLogins) builder.AddExternalLoginStore<SlimEfExternalLoginStore<TContext, TKey>>();
+        if (options.Passkeys) builder.AddPasskeyStore<SlimEfPasskeyStore<TContext, TKey>>();
         return builder;
     }
 }

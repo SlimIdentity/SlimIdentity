@@ -28,6 +28,7 @@ export interface LoginChallenge {
 export interface SignInMethods {
   hasPassword: boolean;
   externalLogins: { provider: string; providerKey: string }[];
+  passkeys: { id: string; name: string; createdUtc: string; lastUsedUtc?: string }[];
 }
 
 export interface SessionInfo {
@@ -219,9 +220,34 @@ export const cookieAuth = {
     return finishLink((path, init) => cookieFetch(path, init), password);
   },
 
-  /** Password and linked providers – for a "sign-in methods" settings page. */
+  /** Password, linked providers and passkeys – for a "sign-in methods" settings page. */
   async signInMethods(): Promise<SignInMethods> {
     return (await cookieFetch("/auth/sign-in-methods")).json();
+  },
+
+  /** Sign in with a passkey – no e-mail needed; the browser shows the passkeys of this site. */
+  async loginWithPasskey(rememberMe = false): Promise<LoginResult> {
+    const assertion = await passkeyAssertion((path, init) => cookieFetch(path, init), true);
+    if (typeof assertion === "string") return { kind: "error", status: assertion };
+    const r = await cookieFetch("/auth/passkeys/login?useCookies=true", {
+      method: "POST",
+      body: JSON.stringify({ ...assertion, rememberMe }),
+    });
+    return toLoginResult(r);
+  },
+
+  /** Adds a passkey to the signed-in account ("passkey_added" or an error code). */
+  addPasskey(name?: string, password?: string): Promise<string> {
+    return addPasskeyWith((path, init) => cookieFetch(path, init), name, password);
+  },
+
+  renamePasskey(id: string, name: string): Promise<string> {
+    return statusOf(cookieFetch("/auth/sign-in-methods/passkeys/rename", { method: "POST", body: JSON.stringify({ id, name }) }));
+  },
+
+  /** "passkey_removed", or last_sign_in_method / invalid_password. */
+  removePasskey(id: string, password?: string): Promise<string> {
+    return statusOf(cookieFetch("/auth/sign-in-methods/passkeys/remove", { method: "POST", body: JSON.stringify({ id, password }) }));
   },
 
   /** "external_login_removed", or an error code – last_sign_in_method: add another way in first. */
@@ -272,6 +298,82 @@ async function finishLink(send: (path: string, init: RequestInit) => Promise<Res
   const r = await send("/auth/link/external", { method: "POST", body: JSON.stringify({ code, codeVerifier, password }) });
   if (r.ok) sessionStorage.removeItem(LINK_PKCE_KEY);   // kept on a wrong password: the user may try again
   return ((await r.json().catch(() => ({}))) as { status?: string }).status ?? `http_${r.status}`;
+}
+
+// Passkeys (WebAuthn): the server sends options with base64url fields; the browser API wants ArrayBuffers.
+function fromBase64Url(value: string): ArrayBuffer {
+  const base64 = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
+  return Uint8Array.from(atob(base64), c => c.charCodeAt(0)).buffer;
+}
+
+const toBase64Url = (buffer: ArrayBuffer) => base64Url(new Uint8Array(buffer));
+
+async function statusOf(response: Promise<Response>): Promise<string> {
+  const r = await response;
+  return ((await r.json().catch(() => ({}))) as { status?: string }).status ?? `http_${r.status}`;
+}
+
+async function addPasskeyWith(send: (path: string, init: RequestInit) => Promise<Response>, name?: string, password?: string): Promise<string> {
+  const start = await send("/auth/passkeys/register/options", { method: "POST", body: JSON.stringify({ password }) });
+  if (!start.ok) return statusOf(Promise.resolve(start));
+  const { options, state } = await start.json();
+
+  const credential = await navigator.credentials.create({
+    publicKey: {
+      ...options,
+      challenge: fromBase64Url(options.challenge),
+      user: { ...options.user, id: fromBase64Url(options.user.id) },
+      excludeCredentials: options.excludeCredentials.map((c: { type: "public-key"; id: string }) => ({ type: c.type, id: fromBase64Url(c.id) })),
+    },
+  }).catch(() => null) as PublicKeyCredential | null;
+  if (!credential) return "cancelled";
+
+  const response = credential.response as AuthenticatorAttestationResponse;
+  return statusOf(send("/auth/passkeys/register", {
+    method: "POST",
+    body: JSON.stringify({
+      state,
+      name,
+      credential: {
+        id: credential.id,
+        rawId: toBase64Url(credential.rawId),
+        type: credential.type,
+        response: {
+          clientDataJSON: toBase64Url(response.clientDataJSON),
+          attestationObject: toBase64Url(response.attestationObject),
+          transports: response.getTransports?.() ?? [],
+        },
+      },
+    }),
+  })).then(status => (status === "http_200" ? "passkey_added" : status));
+}
+
+async function passkeyAssertion(send: (path: string, init: RequestInit) => Promise<Response>, useCookies: boolean): Promise<{ state: string; credential: object } | string> {
+  // the mode tells the server whether the anti-forgery check applies to this anonymous call
+  const start = await send(`/auth/passkeys/login/options?useCookies=${useCookies}`, { method: "POST", body: "{}" });
+  if (!start.ok) return statusOf(Promise.resolve(start));
+  const { options, state } = await start.json();
+
+  const credential = await navigator.credentials.get({
+    publicKey: { ...options, challenge: fromBase64Url(options.challenge), allowCredentials: [] },
+  }).catch(() => null) as PublicKeyCredential | null;
+  if (!credential) return "cancelled";
+
+  const response = credential.response as AuthenticatorAssertionResponse;
+  return {
+    state,
+    credential: {
+      id: credential.id,
+      rawId: toBase64Url(credential.rawId),
+      type: credential.type,
+      response: {
+        clientDataJSON: toBase64Url(response.clientDataJSON),
+        authenticatorData: toBase64Url(response.authenticatorData),
+        signature: toBase64Url(response.signature),
+        userHandle: response.userHandle ? toBase64Url(response.userHandle) : null,
+      },
+    },
+  };
 }
 
 async function removeExternal(send: (path: string, init: RequestInit) => Promise<Response>,
@@ -411,6 +513,31 @@ export const bearerAuth = {
 
   async signInMethods(): Promise<SignInMethods> {
     return (await bearerFetch("/auth/sign-in-methods")).json();
+  },
+
+  async loginWithPasskey(): Promise<LoginResult> {
+    const anonymous = (path: string, init: RequestInit) =>
+      fetch(`${API}${path}`, { ...init, headers: { "Content-Type": "application/json" } });
+    const assertion = await passkeyAssertion(anonymous, false);
+    if (typeof assertion === "string") return { kind: "error", status: assertion };
+    const result = await toLoginResult(await anonymous("/auth/passkeys/login?useCookies=false", {
+      method: "POST",
+      body: JSON.stringify(assertion),
+    }));
+    if (result.kind === "ok") storeTokens(result.auth);
+    return result;
+  },
+
+  addPasskey(name?: string, password?: string): Promise<string> {
+    return addPasskeyWith((path, init) => bearerFetch(path, init), name, password);
+  },
+
+  renamePasskey(id: string, name: string): Promise<string> {
+    return statusOf(bearerFetch("/auth/sign-in-methods/passkeys/rename", { method: "POST", body: JSON.stringify({ id, name }) }));
+  },
+
+  removePasskey(id: string, password?: string): Promise<string> {
+    return statusOf(bearerFetch("/auth/sign-in-methods/passkeys/remove", { method: "POST", body: JSON.stringify({ id, password }) }));
   },
 
   removeExternalLogin(provider: string, providerKey: string, password?: string): Promise<string> {

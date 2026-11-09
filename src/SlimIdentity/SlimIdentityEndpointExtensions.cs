@@ -67,7 +67,14 @@ public static class SlimIdentityEndpointExtensions
         if (Has<ISlimSessionStore>()) MapSessions(group);
         if (Has<ISlimTwoFactorStore>()) MapTwoFactor(group, o);
         if (Has<ISlimExternalLoginStore>()) MapExternal(group, o);
-        MapSignInMethods(group, Has<ISlimExternalLoginStore>());
+        MapSignInMethods(group, Has<ISlimExternalLoginStore>(), Has<ISlimPasskeyStore>());
+        if (Has<ISlimPasskeyStore>())
+        {
+            if (o.Passkeys.EffectiveRelyingPartyId(o.Links) is null)
+                throw new InvalidOperationException("SlimIdentity: passkeys need Passkeys.RelyingPartyId (or Links.BaseUrl) – the domain " +
+                    "they are bound to – choose it once, changing it later makes every registered passkey unusable.");
+            MapPasskeys(group);
+        }
         if (Has<ISlimExternalLoginStore>() && Has<SlimBackChannelProviders>()) MapBackChannelLogout(group);
 
         return group;
@@ -388,7 +395,49 @@ public static class SlimIdentityEndpointExtensions
 
     // ------------------------------------------------------------------ external login
 
-    private static void MapSignInMethods(RouteGroupBuilder root, bool externalLogins)
+    private static void MapPasskeys(RouteGroupBuilder root)
+    {
+        var group = root.MapGroup("/passkeys");
+
+        group.MapPost("/register/options", static ([FromBody] SlimPasskeyRegistrationOptionsRequest request,
+                [FromServices] SlimPasskeyHandlers h, CancellationToken ct) => h.RegistrationOptionsAsync(request, ct))
+            .WithName("SlimIdentity_PasskeyRegistrationOptions")
+            .WithSummary("Start adding a passkey (password required if the account has one): options for navigator.credentials.create and a state.")
+            .Produces<SlimPasskeyCreationOptionsResponse>()
+            .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
+            .Produces<SlimStatusResponse>(StatusCodes.Status403Forbidden)
+            .RequireAuthorization(SlimAuthorize)
+            .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy);
+
+        group.MapPost("/register", static ([FromBody] SlimPasskeyRegisterRequest request,
+                [FromServices] SlimPasskeyHandlers h, CancellationToken ct) => h.RegisterAsync(request, ct))
+            .WithName("SlimIdentity_PasskeyRegister")
+            .WithSummary("Finish adding a passkey with the result of navigator.credentials.create.")
+            .Produces<SlimPasskeyInfo>()
+            .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
+            .Produces<SlimStatusResponse>(StatusCodes.Status409Conflict)
+            .RequireAuthorization(SlimAuthorize)
+            .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy);
+
+        group.MapPost("/login/options", static ([FromServices] SlimPasskeyHandlers h) => h.LoginOptions())
+            .WithName("SlimIdentity_PasskeyLoginOptions")
+            .WithSummary("Start a passkey sign-in: options for navigator.credentials.get (no user name needed) and a state.")
+            .Produces<SlimPasskeyRequestOptionsResponse>()
+            .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
+            .AllowAnonymous();
+
+        group.MapPost("/login", static ([FromBody] SlimPasskeyLoginRequest request, [FromQuery] bool? useCookies,
+                [FromServices] SlimPasskeyHandlers h, CancellationToken ct) => h.LoginAsync(request, useCookies, ct))
+            .WithName("SlimIdentity_PasskeyLogin")
+            .WithSummary("Sign in with the result of navigator.credentials.get. A passkey is multi-factor: no second factor follows.")
+            .Produces<SlimAuthResponse>()
+            .Produces<SlimStatusResponse>(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status429TooManyRequests)
+            .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
+            .AllowAnonymous();
+    }
+
+    private static void MapSignInMethods(RouteGroupBuilder root, bool externalLogins, bool passkeys)
     {
         var group = root.MapGroup("/sign-in-methods").RequireAuthorization(SlimAuthorize);
 
@@ -396,6 +445,27 @@ public static class SlimIdentityEndpointExtensions
             .WithName("SlimIdentity_SignInMethods")
             .WithSummary("The sign-in methods of the account: password, linked external logins.")
             .Produces<SlimSignInMethodsResponse>();
+
+        if (passkeys)
+        {
+            group.MapPost("/passkeys/rename", static ([FromBody] SlimPasskeyRenameRequest request,
+                    [FromServices] SlimPasskeyHandlers h, CancellationToken ct) => h.RenameAsync(request, ct))
+                .WithName("SlimIdentity_RenamePasskey")
+                .WithSummary("Rename a passkey of the account.")
+                .Produces<SlimStatusResponse>()
+                .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
+                .Produces<SlimStatusResponse>(StatusCodes.Status404NotFound);
+
+            group.MapPost("/passkeys/remove", static ([FromBody] SlimRemovePasskeyRequest request,
+                    [FromServices] SlimSignInMethodHandlers h, CancellationToken ct) => h.RemovePasskeyAsync(request, ct))
+                .WithName("SlimIdentity_RemovePasskey")
+                .WithSummary("Remove a passkey (password required if the account has one) – never the last sign-in method.")
+                .Produces<SlimStatusResponse>()
+                .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
+                .Produces<SlimStatusResponse>(StatusCodes.Status404NotFound)
+                .Produces<SlimStatusResponse>(StatusCodes.Status409Conflict)
+                .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy);
+        }
 
         if (!externalLogins) return;
         group.MapPost("/external/remove", static ([FromBody] SlimRemoveExternalLoginRequest request,

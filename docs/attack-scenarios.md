@@ -67,6 +67,10 @@ Test names refer to `tests/SlimIdentity.Tests` (`Integration/…`, `Unit/Propert
 | D9 | Disable 2FA / regenerate codes without password or during impersonation | covered – `OpenScenario.D9_two_factor_changes_need_the_password`, `…G2_*` |
 | D10 | Database dump alone → TOTP secrets unreadable; key ring lost → defined behaviour | covered – `TwoFactor.Totp_secret_and_recovery_codes_are_never_stored_in_clear_text`; key loss documented ([guide](guides/data-protection.md)) |
 | D11 | Stolen session replaces the authenticator (locks the owner out) | covered – `ReviewRound1.R2_replacing_the_authenticator_needs_the_password`, `…R2_a_setup_token_dies_with_the_security_stamp`. **Fixed** (review round 1): `/2fa/enable` needed no password |
+| D12 | Forged passkey registration (foreign / outside origin, cross-origin, wrong RP id, type, challenge, no user verification, other account's or stale state) | covered – `Passkey.Forged_registrations_are_rejected`, `…A_registration_state_belongs_to_its_account_and_stamp` |
+| D13 | Forged passkey sign-in (origin, RP id, type, challenge, no user verification, foreign signature, foreign user handle, unknown credential) | covered – `Passkey.Forged_sign_ins_are_rejected`, `…An_unknown_passkey_is_rejected` |
+| D14 | Replayed passkey assertion, cloned authenticator (counter goes back) | covered – `Passkey.A_replayed_sign_in_is_rejected`, `…A_counter_that_goes_back_is_rejected`, conformance (`TryRecordUseAsync` single use and compare-and-set, also parallel) |
+| D15 | Stolen session adds a passkey, or removes the last way in | covered – `Passkey.Adding_a_passkey_needs_the_password_a_confirmed_address_and_no_impersonation`, `…The_last_way_in_stays_across_passkeys_and_external_logins`, `…Someone_elses_passkey_cannot_be_renamed_or_removed` |
 
 ## E. Workflow tokens (reset, verification, invitation, e-mail change)
 

@@ -98,13 +98,36 @@ public sealed class SlimExternalLoginEntity<TKey>
     public TKey UserId { get; set; } = default!;
 }
 
+/// <summary>A registered passkey (table <c>SlimPasskeys</c>).</summary>
+public sealed class SlimPasskeyEntity<TKey>
+{
+    /// <summary>SHA-256 of the credential id – the key (credential ids may exceed index size limits).</summary>
+    public byte[] CredentialIdHash { get; set; } = [];
+    /// <summary>Credential id as chosen by the authenticator.</summary>
+    public byte[] CredentialId { get; set; } = [];
+    /// <summary>Owner.</summary>
+    public TKey UserId { get; set; } = default!;
+    /// <summary>COSE public key.</summary>
+    public byte[] PublicKey { get; set; } = [];
+    /// <summary>Signature counter.</summary>
+    public long SignCount { get; set; }
+    /// <summary>Unix milliseconds of the last challenge used.</summary>
+    public long? LastChallengeAt { get; set; }
+    /// <summary>Display name.</summary>
+    public string Name { get; set; } = string.Empty;
+    /// <summary>Registration time.</summary>
+    public DateTimeOffset CreatedUtc { get; set; }
+    /// <summary>Last sign-in.</summary>
+    public DateTimeOffset? LastUsedUtc { get; set; }
+}
+
 /// <summary>Model configuration: <c>modelBuilder.ApplySlimIdentity&lt;AppUser, Guid&gt;()</c> in <c>OnModelCreating</c>.</summary>
 public static class SlimModelBuilderExtensions
 {
     /// <summary>
     /// Configures the SlimIdentity columns of <typeparamref name="TUser"/> (lengths, unique index on
-    /// <c>NormalizedEmail</c>) and adds the tables <c>SlimRefreshTokens</c>, <c>SlimSessions</c>, <c>SlimRecoveryCodes</c>
-    /// and <c>SlimExternalLogins</c> with a cascading foreign key to your users. Your own configuration of
+    /// <c>NormalizedEmail</c>) and adds the tables <c>SlimRefreshTokens</c>, <c>SlimSessions</c>, <c>SlimRecoveryCodes</c>,
+    /// <c>SlimExternalLogins</c> and <c>SlimPasskeys</c> with a cascading foreign key to your users. Your own configuration of
     /// <typeparamref name="TUser"/> (table name, business columns) stays as it is.
     /// </summary>
     public static ModelBuilder ApplySlimIdentity<TUser, TKey>(this ModelBuilder modelBuilder)
@@ -161,6 +184,18 @@ public static class SlimModelBuilderExtensions
             e.HasKey(x => new { x.Provider, x.ProviderKey });
             e.Property(x => x.Provider).HasMaxLength(128);
             e.Property(x => x.ProviderKey).HasMaxLength(256);
+            e.HasIndex(x => x.UserId);
+            e.HasOne<TUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<SlimPasskeyEntity<TKey>>(e =>
+        {
+            e.ToTable("SlimPasskeys");
+            e.HasKey(x => x.CredentialIdHash);
+            e.Property(x => x.CredentialIdHash).HasMaxLength(32);
+            e.Property(x => x.CredentialId).HasMaxLength(1023);
+            e.Property(x => x.PublicKey).HasMaxLength(1024);
+            e.Property(x => x.Name).HasMaxLength(64);
             e.HasIndex(x => x.UserId);
             e.HasOne<TUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
         });

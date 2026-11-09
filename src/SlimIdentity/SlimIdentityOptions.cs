@@ -39,6 +39,8 @@ public sealed class SlimIdentityOptions
     public SlimCookieOptions Cookies { get; set; } = new();
     /// <summary>Two-factor authentication.</summary>
     public SlimTwoFactorOptions TwoFactor { get; set; } = new();
+    /// <summary>Passkeys (with <c>ISlimPasskeyStore</c>).</summary>
+    public SlimPasskeyOptions Passkeys { get; set; } = new();
     /// <summary>OAuth / OIDC logins.</summary>
     public SlimExternalLoginOptions ExternalLogin { get; set; } = new();
     /// <summary>Links in mails.</summary>
@@ -227,6 +229,25 @@ public sealed class SlimCookieOptions
     /// <c>00:00:00</c> = on every request. Default 1 minute.
     /// </summary>
     public TimeSpan SecurityStampValidationInterval { get; set; } = TimeSpan.FromMinutes(1);
+}
+
+/// <summary>Passkeys (WebAuthn).</summary>
+public sealed class SlimPasskeyOptions
+{
+    /// <summary>
+    /// Relying party id: the domain passkeys are bound to, e.g. <c>example.com</c> – the front end's host or a parent
+    /// domain of it (<c>app.example.com</c> may use <c>example.com</c>). Default: the host of <c>Links.BaseUrl</c>.
+    /// Changing it later makes every registered passkey unusable.
+    /// </summary>
+    public string? RelyingPartyId { get; set; }
+
+    /// <summary>Name shown by the authenticator ("Sign in to …"). Default: <c>TwoFactor.AuthenticatorIssuer</c>.</summary>
+    public string? RelyingPartyName { get; set; }
+
+    internal string? EffectiveRelyingPartyId(SlimLinkOptions links) =>
+        !string.IsNullOrWhiteSpace(RelyingPartyId) ? RelyingPartyId.Trim().ToLowerInvariant()
+        : Uri.TryCreate(links.BaseUrl, UriKind.Absolute, out var baseUrl) ? baseUrl.Host.ToLowerInvariant()
+        : null;
 }
 
 /// <summary>Two-factor authentication (TOTP per RFC 6238 with ±1 time step, 10 recovery codes).</summary>

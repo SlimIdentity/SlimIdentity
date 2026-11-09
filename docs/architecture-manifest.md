@@ -59,6 +59,7 @@ No profile or business data – that stays in the host's own user model.
 | `ISlimSessionStore` | – | server-side sessions, per-device logout, `/sessions` |
 | `ISlimTwoFactorStore` | – | `/login/2fa`, `/2fa/*` (encrypted TOTP secrets, recovery-code hashes, replay protection, single-use challenges) |
 | `ISlimExternalLoginStore` | – | OAuth/OIDC login and account linking (also used for client certificates) |
+| `ISlimPasskeyStore` | – | passkeys (WebAuthn): `/passkeys/*`, public keys only, atomic single use per challenge |
 | `ISlimApiKeyStore` | – | `X-API-Key` authentication (key hashes only) |
 | `ISlimCustomPasswordValidator` | – | LDAP / legacy password verification |
 | `ISlimPasswordRule` (any number) | – | additional rules for new passwords (e.g. breached-password check) |

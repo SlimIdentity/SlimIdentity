@@ -99,7 +99,8 @@ public sealed class EntityFrameworkStoreTests
         var services = new ServiceCollection();
         services.AddDbContext<TContext>(provider);
         services.AddSingleton(TimeProvider.System);
-        services.AddSlimIdentity(o => o.Tokens.JwtSecret = new string('x', 32)).AddEntityFrameworkStores<TContext, TUser, TKey>();
+        services.AddSlimIdentity(o => o.Tokens.JwtSecret = new string('x', 32))
+            .AddEntityFrameworkStores<TContext, TUser, TKey>(o => o.Passkeys = true);   // opt-in – checked like every store
         var sp = services.BuildServiceProvider();
         await using var scope = sp.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<TContext>();
@@ -115,7 +116,7 @@ public sealed class EntityFrameworkStoreTests
         var file = SqliteFile();   // once – the options callback runs per scope
         await using var sp = await BuildAsync<GuidContext, GuidUser, Guid>(o => o.UseSqlite(file), wal: true);
         var report = await SlimStoreConformance.VerifyAsync(sp);
-        Assert.Equal(5, report.Results.Select(r => r.Store).Distinct().Count());
+        Assert.Equal(6, report.Results.Select(r => r.Store).Distinct().Count());   // user, 2FA, refresh, sessions, external logins, passkeys
     }
 
     [Fact]
@@ -162,6 +163,7 @@ public sealed class EntityFrameworkStoreTests
         builder.Services.AddDbContext<GuidContext>(o => o.UseSqlite(file));
         builder.Services.AddScoped<ISlimUserClaimsProvider<GuidUser>, RoleClaims>();
         builder.Services.AddSingleton<ISlimUserFactory<GuidUser>, NamedUsers>();
+        // no Links.BaseUrl / relying party: passkeys are opt-in, the default setup must start without them
         builder.Services.AddSlimIdentity(o => o.Tokens.JwtSecret = new string('x', 32))
             .AddEntityFrameworkStores<GuidContext, GuidUser, Guid>()
             .AddNullEmailSender();

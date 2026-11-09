@@ -35,6 +35,7 @@ public sealed class DapperTemplateConformanceTests
             .AddScoped<ISlimRefreshTokenStore, DapperRefreshTokenStore>()
             .AddScoped<ISlimSessionStore, DapperSessionStore>()
             .AddScoped<ISlimExternalLoginStore, DapperExternalLoginStore>()
+            .AddScoped<ISlimPasskeyStore, DapperPasskeyStore>()
             .BuildServiceProvider();
 
         var report = await SlimStoreConformance.VerifyAsync(services);

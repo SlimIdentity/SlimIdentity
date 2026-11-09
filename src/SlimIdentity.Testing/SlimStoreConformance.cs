@@ -18,7 +18,7 @@ namespace SlimIdentity.Testing;
 /// <remarks>
 /// <para>
 /// Every registered store interface is checked: <see cref="ISlimUserStore"/> (required), <see cref="ISlimTwoFactorStore"/>,
-/// <see cref="ISlimRefreshTokenStore"/>, <see cref="ISlimSessionStore"/> and <see cref="ISlimExternalLoginStore"/>.
+/// <see cref="ISlimRefreshTokenStore"/>, <see cref="ISlimSessionStore"/>, <see cref="ISlimExternalLoginStore"/> and <see cref="ISlimPasskeyStore"/>.
 /// Each operation resolves the store from a <b>new DI scope</b>, so scoped stores with their own <c>DbContext</c> or
 /// connection run truly in parallel – exactly like concurrent HTTP requests.
 /// </para>
@@ -65,6 +65,7 @@ public static class SlimStoreConformance
         if (access.Has<ISlimRefreshTokenStore>()) await RefreshTokenStoreChecks.RunAsync(run).ConfigureAwait(false);
         if (access.Has<ISlimSessionStore>()) await SessionStoreChecks.RunAsync(run).ConfigureAwait(false);
         if (access.Has<ISlimExternalLoginStore>()) await ExternalLoginStoreChecks.RunAsync(run).ConfigureAwait(false);
+        if (access.Has<ISlimPasskeyStore>()) await PasskeyStoreChecks.RunAsync(run).ConfigureAwait(false);
         return run.ToReport();
     }
 }

@@ -19,11 +19,12 @@ public sealed class StoreConformanceTests
             .AddSingleton<ISlimRefreshTokenStore, TestRefreshTokenStore>()
             .AddSingleton<ISlimSessionStore, TestSessionStore>()
             .AddSingleton<ISlimExternalLoginStore, TestExternalLoginStore>()
+            .AddSingleton<ISlimPasskeyStore, TestPasskeyStore>()
             .BuildServiceProvider();
 
         var report = await SlimStoreConformance.VerifyAsync(services);
 
-        Assert.All(new[] { nameof(ISlimUserStore), nameof(ISlimTwoFactorStore), nameof(ISlimRefreshTokenStore), nameof(ISlimSessionStore), nameof(ISlimExternalLoginStore) },
+        Assert.All(new[] { nameof(ISlimUserStore), nameof(ISlimTwoFactorStore), nameof(ISlimRefreshTokenStore), nameof(ISlimSessionStore), nameof(ISlimExternalLoginStore), nameof(ISlimPasskeyStore) },
             store => Assert.Contains(report.Results, r => r.Store == store));
     }
 

@@ -16,6 +16,7 @@
 - [Mobile apps and bearer tokens](guides/mobile-bearer.md) – access/refresh tokens, rotation
 - [Sessions and logout](guides/sessions-and-logout.md) – server-side sessions, device list, sign out everywhere
 - [Two-factor authentication](guides/two-factor.md) – TOTP with QR code, e-mail codes, recovery codes, replay protection
+- [Passkeys](guides/passkeys.md) – WebAuthn sign-in without password, setup, flows, what is checked
 - [External login (OAuth / OIDC)](guides/external-login.md) – Google, Entra ID, Keycloak, account linking
 - [Invitations](guides/invitations.md) – invite-only registration, "complete your registration"
 - [Admin features](guides/admin-features.md) – impersonation, sudo mode, bans, API keys

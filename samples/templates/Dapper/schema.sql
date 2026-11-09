@@ -66,6 +66,20 @@ CREATE TABLE external_logins (
 );
 CREATE INDEX ix_external_logins_user ON external_logins(user_id);
 
+-- ISlimPasskeyStore (credential ids may be up to 1023 bytes: keyed by their SHA-256)
+CREATE TABLE passkeys (
+    credential_id_hash bytea        PRIMARY KEY,
+    credential_id      bytea        NOT NULL,
+    user_id            uuid         NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    public_key         bytea        NOT NULL,
+    sign_count         bigint       NOT NULL DEFAULT 0,
+    last_challenge_at  bigint       NULL,
+    name               varchar(64)  NOT NULL,
+    created_utc        timestamptz  NOT NULL,
+    last_used_utc      timestamptz  NULL
+);
+CREATE INDEX ix_passkeys_user ON passkeys(user_id);
+
 -- ISlimApiKeyStore
 CREATE TABLE api_keys (
     key_hash   char(64)    PRIMARY KEY,   -- SlimApiKeys.Hash(key)

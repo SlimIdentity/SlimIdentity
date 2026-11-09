@@ -59,6 +59,7 @@ public sealed class EfCoreTemplateConformanceTests
             .AddScoped<ISlimRefreshTokenStore, EfCoreRefreshTokenStore>()
             .AddScoped<ISlimSessionStore, EfCoreSessionStore>()
             .AddScoped<ISlimExternalLoginStore, EfCoreExternalLoginStore>()
+            .AddScoped<ISlimPasskeyStore, EfCorePasskeyStore>()
             .BuildServiceProvider();
 
         await using (var scope = services.CreateAsyncScope())

@@ -84,6 +84,13 @@ First public release (1.0.0) in preparation.
 - Tenants with own domains: `ISlimOriginPolicy` (`AddOriginPolicy<T>()`) decides trusted origins per request for the
   CSRF check, `returnUrl` and CORS; `ISlimLinkBuilder` (`AddLinkBuilder<T>()`) builds mail, reset and invitation links
   per request. `AddCorsPolicy()` derives CORS from the same origins (`SlimIdentityDefaults.CorsPolicy`).
+- Passkeys (WebAuthn), opt-in: `ISlimPasskeyStore` (EF Core package table `SlimPasskeys`, `o.Passkeys = true`; EF Core and Dapper
+  templates; conformance checks), registration for signed-in users (password, confirmed address), sign-in without user
+  name (`amr: passkey`, multi-factor on its own), rename / remove in the sign-in methods with last-method protection.
+  ES256 and RS256, every check of WebAuthn Level 2 §7.1/§7.2 without attestation, atomic single use per challenge,
+  clone detection by counter. Options `Passkeys.RelyingPartyId` / `RelyingPartyName`; TypeScript `addPasskey`,
+  `loginWithPasskey`, `renamePasskey`, `removePasskey`. No third-party dependency (`System.Formats.Cbor` is part of
+  ASP.NET Core).
 - Sign-in methods: `GET /auth/sign-in-methods` (password, linked external logins) and
   `POST /auth/sign-in-methods/external/remove` – password required, never the last way in. `ISlimExternalLoginStore`
   gains `GetExternalLoginsAsync` and `RemoveExternalLoginAsync` (checked by the conformance kit). **Breaking** for

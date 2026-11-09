@@ -21,6 +21,8 @@ internal sealed class SlimAuthManager(
     internal const string MethodMfa = "mfa";
     internal const string MethodExternal = "ext";
     internal const string MethodImpersonation = "impersonation";
+    /// <summary>Passkey with user verification: possession and biometrics / PIN – multi-factor on its own.</summary>
+    internal const string MethodPasskey = "passkey";
     /// <summary>Password + a device on which the second factor was remembered.</summary>
     internal const string MethodRememberedDevice = "mfa_remembered";
 

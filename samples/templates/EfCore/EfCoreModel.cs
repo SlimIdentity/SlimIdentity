@@ -71,6 +71,19 @@ public class RecoveryCode
     public string CodeHash { get; set; } = "";
 }
 
+public class UserPasskey
+{
+    public byte[] CredentialIdHash { get; set; } = [];   // SHA-256 of the credential id – the key (ids may be up to 1023 bytes)
+    public byte[] CredentialId { get; set; } = [];
+    public Guid UserId { get; set; }
+    public byte[] PublicKey { get; set; } = [];          // COSE key; the private key never leaves the device
+    public long SignCount { get; set; }
+    public long? LastChallengeAt { get; set; }           // each sign-in challenge counts once
+    public string Name { get; set; } = "";
+    public DateTimeOffset CreatedUtc { get; set; }
+    public DateTimeOffset? LastUsedUtc { get; set; }
+}
+
 public class ExternalLogin
 {
     public string Provider { get; set; } = "";
@@ -126,6 +139,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<RecoveryCode> RecoveryCodes => Set<RecoveryCode>();
     public DbSet<ExternalLogin> ExternalLogins => Set<ExternalLogin>();
+    public DbSet<UserPasskey> Passkeys => Set<UserPasskey>();
     public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
     public DbSet<UserSession> Sessions => Set<UserSession>();
     public DbSet<OutboxMail> OutboxMails => Set<OutboxMail>();
@@ -148,6 +162,14 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         b.Entity<RefreshToken>(e => { e.HasKey(x => x.TokenHash); e.HasIndex(x => x.UserId); });
         b.Entity<RecoveryCode>().HasKey(x => new { x.UserId, x.CodeHash });
         b.Entity<ExternalLogin>(e => { e.HasKey(x => new { x.Provider, x.ProviderKey }); e.HasIndex(x => x.UserId); });
+        b.Entity<UserPasskey>(e =>
+        {
+            e.HasKey(x => x.CredentialIdHash);
+            e.Property(x => x.CredentialIdHash).HasMaxLength(32);
+            e.Property(x => x.CredentialId).HasMaxLength(1023);
+            e.Property(x => x.Name).HasMaxLength(64);
+            e.HasIndex(x => x.UserId);
+        });
         b.Entity<ApiKey>().HasKey(x => x.KeyHash);
         b.Entity<UserSession>(e =>
         {

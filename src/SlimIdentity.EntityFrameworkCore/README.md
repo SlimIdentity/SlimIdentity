@@ -48,7 +48,9 @@ builder.Services.AddSlimIdentity(builder.Configuration.GetSection("SlimIdentity"
 ```
 
 Then create a migration (`dotnet ef migrations add SlimIdentity`). Besides the columns on your user table it adds
-`SlimRefreshTokens`, `SlimSessions`, `SlimRecoveryCodes` and `SlimExternalLogins`.
+`SlimRefreshTokens`, `SlimSessions`, `SlimRecoveryCodes`, `SlimExternalLogins` and `SlimPasskeys` (set
+the passkeys are opt-in: `AddEntityFrameworkStores<…>(o => o.Passkeys = true)` with `Passkeys.RelyingPartyId` or
+`Links.BaseUrl`).
 
 The stores use their own `AppDbContext` instance per request (from `IDbContextFactory<AppDbContext>` if registered,
 otherwise from the same options), never the one your endpoints resolve: signing a user in never saves your pending

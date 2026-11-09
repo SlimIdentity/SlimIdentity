@@ -10,6 +10,7 @@
 //       .AddExternalLoginStore<EfCoreExternalLoginStore>()
 //       .AddApiKeyStore<EfCoreApiKeyStore>()
 //       .AddSessionStore<EfCoreSessionStore>()
+//       .AddPasskeyStore<EfCorePasskeyStore>()           // with o.Passkeys.RelyingPartyId (or Links.BaseUrl)
 //       .AddEmailSender<MailKitEmailSender>();
 
 using System.Data.Common;
@@ -366,4 +367,81 @@ public sealed class IdentityDb(IDbContextFactory<AppDbContext> factory) : IDispo
     private AppDbContext? _db;
     public AppDbContext Db => _db ??= factory.CreateDbContext();
     public void Dispose() => _db?.Dispose();
+}
+
+/// <summary>Passkeys (WebAuthn). Credential ids are keyed by their SHA-256 – they may exceed index size limits.</summary>
+public sealed class EfCorePasskeyStore(IdentityDb identity) : ISlimPasskeyStore
+{
+    private readonly AppDbContext db = identity.Db;
+
+    private static byte[] Hash(byte[] credentialId) => System.Security.Cryptography.SHA256.HashData(credentialId);
+
+    public async Task<IReadOnlyList<SlimPasskey>> GetPasskeysAsync(string userId, CancellationToken ct)
+    {
+        var id = Guid.Parse(userId);
+        var rows = await db.Passkeys.AsNoTracking().Where(p => p.UserId == id).ToListAsync(ct);
+        return rows.OrderBy(p => p.CreatedUtc).Select(Map).ToList();   // in memory: SQLite cannot order by DateTimeOffset
+    }
+
+    public async Task<SlimPasskey?> FindPasskeyAsync(byte[] credentialId, CancellationToken ct)
+    {
+        var hash = Hash(credentialId);
+        var row = await db.Passkeys.AsNoTracking().FirstOrDefaultAsync(p => p.CredentialIdHash == hash, ct);
+        return row is not null && row.CredentialId.AsSpan().SequenceEqual(credentialId) ? Map(row) : null;
+    }
+
+    public async Task<bool> AddPasskeyAsync(SlimPasskey passkey, CancellationToken ct)
+    {
+        var hash = Hash(passkey.CredentialId);
+        if (await db.Passkeys.AnyAsync(p => p.CredentialIdHash == hash, ct)) return false;
+        var row = new UserPasskey
+        {
+            CredentialIdHash = hash, CredentialId = passkey.CredentialId, UserId = Guid.Parse(passkey.UserId), PublicKey = passkey.PublicKey,
+            SignCount = passkey.SignCount, LastChallengeAt = passkey.LastChallengeAt, Name = passkey.Name,
+            CreatedUtc = passkey.CreatedUtc, LastUsedUtc = passkey.LastUsedUtc,
+        };
+        db.Passkeys.Add(row);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+            return true;
+        }
+        catch (DbUpdateException)
+        {
+            db.Entry(row).State = EntityState.Detached;   // registered concurrently (primary key)
+            if (await db.Passkeys.AnyAsync(p => p.CredentialIdHash == hash, ct)) return false;
+            throw;
+        }
+    }
+
+    // compare-and-set in one statement: same counter AND a newer challenge than the last one used
+    public async Task<bool> TryRecordUseAsync(byte[] credentialId, uint expectedSignCount, uint signCount, long challengeIssuedAt, DateTimeOffset usedUtc, CancellationToken ct)
+    {
+        var hash = Hash(credentialId);
+        long expected = expectedSignCount, next = signCount;
+        return await db.Passkeys
+            .Where(p => p.CredentialIdHash == hash && p.SignCount == expected && (p.LastChallengeAt == null || p.LastChallengeAt < challengeIssuedAt))
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(p => p.SignCount, next)
+                .SetProperty(p => p.LastChallengeAt, challengeIssuedAt)
+                .SetProperty(p => p.LastUsedUtc, usedUtc), ct) == 1;
+    }
+
+    public async Task<bool> RenamePasskeyAsync(string userId, byte[] credentialId, string name, CancellationToken ct)
+    {
+        var (id, hash) = (Guid.Parse(userId), Hash(credentialId));
+        return await db.Passkeys.Where(p => p.UserId == id && p.CredentialIdHash == hash).ExecuteUpdateAsync(s => s.SetProperty(p => p.Name, name), ct) == 1;
+    }
+
+    public async Task<bool> RemovePasskeyAsync(string userId, byte[] credentialId, CancellationToken ct)
+    {
+        var (id, hash) = (Guid.Parse(userId), Hash(credentialId));
+        return await db.Passkeys.Where(p => p.UserId == id && p.CredentialIdHash == hash).ExecuteDeleteAsync(ct) == 1;
+    }
+
+    private static SlimPasskey Map(UserPasskey p) => new()
+    {
+        UserId = p.UserId.ToString(), CredentialId = p.CredentialId, PublicKey = p.PublicKey, SignCount = (uint)p.SignCount,
+        LastChallengeAt = p.LastChallengeAt, Name = p.Name, CreatedUtc = p.CreatedUtc, LastUsedUtc = p.LastUsedUtc,
+    };
 }
