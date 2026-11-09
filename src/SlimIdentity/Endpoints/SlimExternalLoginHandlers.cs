@@ -117,7 +117,7 @@ internal sealed class SlimExternalLoginHandlers(
         var user = await externalStore.FindByExternalLoginAsync(provider, providerKey, ct);
         if (user is null)
         {
-            if (string.IsNullOrWhiteSpace(email)) return Redirect(returnUrl, "slim_error", "email_required");
+            if (!SlimRegistrationService.IsValidEmail(email)) return Redirect(returnUrl, "slim_error", "email_required");
 
             var existing = await store.FindByEmailAsync(email, ct);
             if (existing is not null)
@@ -303,9 +303,8 @@ internal sealed class SlimExternalLoginHandlers(
         if (O.Email.Enabled && !user.EmailConfirmed)
             return SlimResults.Status("email_not_confirmed", "Confirm your e-mail address before linking an external login.", StatusCodes.Status403Forbidden);
 
-        // a stolen session alone must not add a permanent way in; accounts without a password have nothing to confirm
-        var hasPassword = !string.IsNullOrEmpty(user.PasswordHash) || services.GetService<ISlimCustomPasswordValidator>() is not null;
-        if (hasPassword && await credentials.ConfirmPasswordAsync(user, request.Password, Http, ct) is { } failure)
+        // a stolen session alone must not add a permanent way in: the password, or without one a fresh sign-in
+        if (await credentials.ConfirmPasswordAsync(user, request.Password, Http, ct) is { } failure)
             return failure;
 
         if (!nonces.TryConsume(payload.Nonce, expiresAt))   // after the password: a typo does not burn the code

@@ -78,7 +78,8 @@ POST /auth/link/external          (signed in: cookie + X-CSRF, or bearer)
 → 200 external_login_linked
 ```
 
-- `password` is required for accounts that have one (a stolen session alone must not add a permanent way in).
+- `password` is required for accounts that have one; accounts without one need a sign-in within the last 5 minutes
+  (`403 reauthentication_required` – sign in again, then repeat): a stolen session alone must not add a permanent way in.
 - The account's address must be confirmed (`403 email_not_confirmed`), like for setting up 2FA.
 - An external account already linked to another user answers `409 external_login_taken`.
 - A link code planted in someone else's URL (link CSRF) fails at the verifier. Codes live 1 minute and work once.
@@ -95,7 +96,8 @@ GET  /auth/sign-in-methods                    → { "hasPassword": true, "extern
 POST /auth/sign-in-methods/external/remove    { "provider": "Google", "providerKey": "1093…", "password": "…" }
 ```
 
-- Removing needs the current password if the account has one – a stolen session alone must not cut the owner's ways in.
+- Removing needs the current password – or, for accounts without one, a sign-in within the last 5 minutes: a stolen
+  session alone must not cut the owner's ways in.
 - **The last way in is never removed:** an account without a password keeps at least one external login or passkey
   (`409 last_sign_in_method` – link another provider or set a password via reset first). Parallel removals cannot get
   around it.

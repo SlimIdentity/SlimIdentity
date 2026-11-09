@@ -20,7 +20,11 @@ The validator binds against the directory with the user's credentials (LDAPS); a
 `System.DirectoryServices.Protocols` is in [`samples/templates/Enterprise/LdapPasswordValidator.cs`](../../samples/templates/Enterprise/LdapPasswordValidator.cs).
 Return `false` on infrastructure errors and log them – never allow anonymous binds (empty password).
 
-Invitations cannot set a password in this mode (`400 password_managed_externally`).
+Invitations cannot set a password in this mode (`400 password_managed_externally`). Keep the three switches above:
+a local password change or reset would store a hash the directory check never reads – the user would be told it worked.
+
+Every account counts as having a password (in the directory), so sensitive changes ask for it. Accounts that sign in
+only externally override `HasPasswordAsync` (below) and confirm such changes with a fresh sign-in instead.
 
 ## Migrating legacy hashes
 
@@ -29,8 +33,13 @@ The same interface can verify old hashes once and upgrade them in place:
 ```csharp
 public sealed class LegacyHashMigrationValidator(IPasswordHasher<SlimUser> hasher, ISlimUserStore store) : ISlimCustomPasswordValidator
 {
+    // accounts without any hash (external login, passkeys only) have no password to ask for
+    public ValueTask<bool> HasPasswordAsync(SlimUser user, CancellationToken ct) =>
+        ValueTask.FromResult(!string.IsNullOrEmpty(user.PasswordHash));
+
     public async Task<bool> ValidateAsync(SlimUser user, string password, CancellationToken ct)
     {
+        if (string.IsNullOrEmpty(user.PasswordHash)) return false;
         if (!user.PasswordHash.StartsWith("legacy:", StringComparison.Ordinal))
             return hasher.VerifyHashedPassword(user, user.PasswordHash, password) != PasswordVerificationResult.Failed;
 

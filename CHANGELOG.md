@@ -185,6 +185,30 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
   instead of being signed out at the first validation.
 - The conformance kit checks that `FindByIdAsync` returns `null` for malformed ids.
 
+### Security (external review round 4)
+
+- Accounts without a password (external login, passkeys) confirm sensitive changes – adding or removing a sign-in
+  method, every 2FA change, an e-mail change – with a sign-in within the last 5 minutes instead of a password they do
+  not have (`403 reauthentication_required`). Before, a stolen session cookie could add the attacker's passkey and
+  remove the owner's external login without any proof, and the 2FA page counted the missing password as failed
+  attempts until the account was locked. `ISlimCustomPasswordValidator.HasPasswordAsync` (default `true`) tells which
+  accounts a custom validator considers to have a password; `ISlimAuthManager.ConfirmPasswordAsync` follows the same rule.
+- Addresses must be plain: `Name <addr>` and `addr (comment)` – accepted by `MailAddress` and delivered to the inner
+  address – no longer bypass the mail limit per recipient or create look-alike accounts (`/register`, `/change-email`,
+  `RegisterAsync`, external logins).
+- Back-channel logout tokens without `jti` are rejected (required by the specification; needed for single use).
+- Ending an impersonation returns to the administrator's own sign-in (`auth_time`, absolute lifetime) instead of a
+  fresh session chain.
+- Without `ISlimSessionStore`, refreshes and other renewals were reported as new sign-ins (guard stage `SignIn`, event
+  `signed_in`); the stage now follows the original sign-in time.
+- An authenticator can be enabled right after a sign-in with an e-mail code (both share the "last code" marker).
+- LDAP template: password reset and registration are switched off as in the guide; the legacy-migration example handles
+  accounts without a hash.
+- TypeScript client: the bearer flow gains 2FA setup (`setupAuthenticator`, `enableAuthenticator`,
+  `enableEmailTwoFactor`, storing the renewed tokens), `twoFactorStatus`, `me`, `changeEmail`, `confirmEmailChange`,
+  `logoutAll`, `sessions`, `revokeSession`, `invitationInfo`, `acceptInvitation`, `forgetAllDevices`; the cookie flow
+  `twoFactorStatus` and `enableEmailTwoFactor`.
+
 ### Fixed
 
 - `POST /auth/login/password-change` runs in the per-account attempt gate and answers `423` during a lockout, like

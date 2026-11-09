@@ -40,7 +40,7 @@ builder.Services.AddSlimIdentity(…).AddSignInGuard<TenantGuard>();
 | Stage | When | A veto means |
 | :--- | :--- | :--- |
 | `SignIn` | password, second factor, external login, invitation, impersonation, end of an impersonation | `403` with your code and message (`slim_error` for an external cookie sign-in); no session |
-| `Renewal` | `/refresh`, step-up (`ElevateSessionAsync`) | `403`; the client signs in again |
+| `Renewal` | `/refresh`, step-up (`ElevateSessionAsync`), the new session after a password or 2FA change – with or without a session store | `403`; the client signs in again |
 | `Revalidation` | every bearer request, cookies every `Cookies.SecurityStampValidationInterval` | the running session ends (`401`) |
 
 Re-validation runs often – **keep the check cheap** and cache what you look up (a few seconds of cache are fine:

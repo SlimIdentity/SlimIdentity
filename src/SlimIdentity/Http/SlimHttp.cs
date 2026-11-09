@@ -5,15 +5,15 @@ using SlimIdentity.Contracts;
 namespace SlimIdentity.Http;
 
 /// <summary>
-/// CSRF protection for cookie-based, state-changing requests: requires a custom header
-/// (forces a CORS preflight for cross-origin callers) and checks the <c>Origin</c> header.
-/// </summary>
-/// <summary>
 /// Endpoint metadata: authenticated by something else than a cookie (a signed token in the body), so a cookie that
 /// happens to be sent along cannot be abused – no CSRF check. Used by the back-channel logout of identity providers.
 /// </summary>
 internal sealed class SlimNoCookieAuthentication;
 
+/// <summary>
+/// CSRF protection for cookie-based, state-changing requests: requires a custom header
+/// (forces a CORS preflight for cross-origin callers) and checks the <c>Origin</c> header.
+/// </summary>
 internal sealed class SlimCsrfEndpointFilter(IOptions<SlimIdentityOptions> options, ILogger<SlimCsrfEndpointFilter> logger) : IEndpointFilter
 {
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)

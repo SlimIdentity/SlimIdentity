@@ -18,7 +18,6 @@ internal sealed class SlimPasskeyHandlers(
     ISlimPasskeyStore passkeys,
     ISlimUserStore store,
     SlimAccountHandlers account,
-    SlimSignInMethodHandlers signInMethods,
     SlimCredentialService credentials,
     SlimAuthManager authManager,
     SlimWorkflowTokens workflow,
@@ -48,8 +47,8 @@ internal sealed class SlimPasskeyHandlers(
         // like 2FA and linking: never on an unconfirmed account (the registrant may not own the address)
         if (O.Email.Enabled && !user.EmailConfirmed)
             return SlimResults.Status("email_not_confirmed", "Confirm your e-mail address before adding a passkey.", StatusCodes.Status403Forbidden);
-        // a new way in: a stolen session alone must not add one
-        if (signInMethods.HasPassword(user) && await credentials.ConfirmPasswordAsync(user, request?.Password, Http, ct) is { } failure)
+        // a new way in: a stolen session alone must not add one – the password, or without one a fresh sign-in
+        if (await credentials.ConfirmPasswordAsync(user, request?.Password, Http, ct) is { } failure)
             return failure;
 
         var challenge = SlimWebAuthn.NewChallenge();
@@ -217,10 +216,11 @@ internal sealed class SlimPasskeyHandlers(
         if (SlimWebAuthn.FromBase64Url(request?.Id) is not { } id) return NotFound();
         if (!(await passkeys.GetPasskeysAsync(user.Id, ct)).Any(p => p.CredentialId.AsSpan().SequenceEqual(id))) return NotFound();
 
-        if (signInMethods.HasPassword(user))
+        // the password – or, without one, a fresh sign-in – keeps a stolen session from cutting the owner's methods
+        if (await credentials.ConfirmPasswordAsync(user, request?.Password, Http, ct) is { } failure) return failure;
+        if (await credentials.HasPasswordAsync(user, ct))
         {
-            // the password stays a way in – confirming it is what keeps a stolen session from cutting the owner's methods
-            if (await credentials.ConfirmPasswordAsync(user, request?.Password, Http, ct) is { } failure) return failure;
+            // the password stays a way in
             if (!await passkeys.RemovePasskeyAsync(user.Id, id, ct)) return NotFound();
         }
         else

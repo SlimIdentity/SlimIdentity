@@ -26,7 +26,7 @@ internal sealed class SlimSignInMethodHandlers(
 
         var external = ExternalStore is { } store ? await store.GetExternalLoginsAsync(user.Id, ct) : [];
         var passkeys = Passkeys is { } keys ? await keys.GetPasskeysAsync(user.Id, ct) : [];
-        return Results.Ok(new SlimSignInMethodsResponse(HasPassword(user), external, passkeys));
+        return Results.Ok(new SlimSignInMethodsResponse(await credentials.HasPasswordAsync(user, ct), external, passkeys));
     }
 
     // POST /sign-in-methods/external/remove
@@ -39,10 +39,11 @@ internal sealed class SlimSignInMethodHandlers(
         var target = new SlimExternalLogin(request.Provider, request.ProviderKey);
         if (!(await store.GetExternalLoginsAsync(user.Id, ct)).Contains(target)) return NotFound();
 
-        if (HasPassword(user))
+        // the password – or, without one, a fresh sign-in – keeps a stolen session from cutting the owner's methods
+        if (await credentials.ConfirmPasswordAsync(user, request.Password, Http, ct) is { } failure) return failure;
+        if (await credentials.HasPasswordAsync(user, ct))
         {
-            // the password stays a way in – confirming it is what keeps a stolen session from cutting the owner's methods
-            if (await credentials.ConfirmPasswordAsync(user, request.Password, Http, ct) is { } failure) return failure;
+            // the password stays a way in
             if (!await store.RemoveExternalLoginAsync(user.Id, target.Provider, target.ProviderKey, ct)) return NotFound();
         }
         else
@@ -65,10 +66,6 @@ internal sealed class SlimSignInMethodHandlers(
 
     private async Task<int> PasskeyCountAsync(string userId, CancellationToken ct) =>
         Passkeys is { } keys ? (await keys.GetPasskeysAsync(userId, ct)).Count : 0;
-
-    /// <summary>A password counts as a way in – also when an LDAP / legacy validator checks it.</summary>
-    internal bool HasPassword(SlimUser user) =>
-        !string.IsNullOrEmpty(user.PasswordHash) || services.GetService<ISlimCustomPasswordValidator>() is not null;
 
     private static IResult NotFound() =>
         SlimResults.Status("external_login_not_found", "This external login is not linked to your account.", StatusCodes.Status404NotFound);

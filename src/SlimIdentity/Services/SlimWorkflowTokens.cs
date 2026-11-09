@@ -98,9 +98,9 @@ internal sealed record SlimPreAuthPayload(string Uid, string Stamp, bool UseCook
 internal sealed record SlimRememberDevicePayload(string Uid, string Stamp, long ExpiresAt);
 internal sealed record SlimEmailChangePayload(string Uid, string OldEmail, string NewEmail, string Stamp);
 internal sealed record SlimTwoFactorSetupPayload(string Uid, string Secret, string Stamp);
-/// <summary><c>CodeChallenge</c>: PKCE S256 challenge – the code is redeemable only with the matching verifier.</summary>
 /// <summary>An external identity to be linked to the signed-in account; PKCE-bound like the exchange code.</summary>
 internal sealed record SlimExternalLinkPayload(string Provider, string ProviderKey, string Nonce, string CodeChallenge);
+/// <summary><c>CodeChallenge</c>: PKCE S256 challenge – the code is redeemable only with the matching verifier.</summary>
 internal sealed record SlimExchangePayload(string Uid, string Stamp, string Provider, string Nonce, string CodeChallenge);
 /// <summary><c>AuthTime</c> = unix seconds of the original sign-in (absolute lifetime), <c>Sid</c> = server-side session (optional).</summary>
 internal sealed record SlimRefreshPayload(string Uid, string Stamp, string Amr, string Nonce, long AuthTime, string? Sid);

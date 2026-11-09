@@ -42,7 +42,8 @@ POST /auth/passkeys/register/options   { "password": "…" }        → { "optio
 POST /auth/passkeys/register            { "state", "credential", "name": "Laptop" }   → { "id", "name", "createdUtc", "backupEligible", "backedUp" }
 ```
 
-The password is required for accounts that have one (a stolen session must not add a permanent way in); the address
+The password is required for accounts that have one, a sign-in within the last 5 minutes for accounts without one
+(`403 reauthentication_required`) – a stolen session must not add a permanent way in; the address
 must be confirmed, and not during an impersonation – the same rules as for 2FA and linking.
 
 **Sign in** (anonymous, no e-mail needed – discoverable credentials):
@@ -78,7 +79,7 @@ Google Password Manager, password managers) or stays on one device (security key
 passkey: a sign-in that reports a change is refused.
 
 **Manage** – passkeys appear in `GET /auth/sign-in-methods` and are renamed or removed there
-(`/sign-in-methods/passkeys/rename`, `/sign-in-methods/passkeys/remove`); removing needs the password if the account has
+(`/sign-in-methods/passkeys/rename`, `/sign-in-methods/passkeys/remove`); removing needs the password (or a recent sign-in) if the account has
 one and never removes the last way in.
 
 TypeScript: `addPasskey(name, password)`, `loginWithPasskey()`, `loginWithPasskeyAutofill(signal)`, `signInMethods()`,

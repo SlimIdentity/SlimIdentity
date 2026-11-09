@@ -433,3 +433,6 @@ FodyWeavers.xsd
 
 # Visual Studio creates launch profiles for test projects with the Web SDK – they are never used
 tests/**/Properties/launchSettings.json
+
+# git worktrees of Claude Code agents
+.claude/worktrees/

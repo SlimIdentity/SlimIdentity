@@ -68,12 +68,13 @@ public interface ISlimAuthManager
     Task<SlimAuthResult> ElevateSessionAsync(SlimUser user, IEnumerable<Claim> additionalClaims, bool useCookies, CancellationToken ct = default);
 
     /// <summary>
-    /// Re-confirms the password of <paramref name="user"/> with the rules of the built-in endpoints: an active lockout
-    /// is honoured, failures count towards it (incl. the lockout notification), parallel attempts are serialized and
-    /// <see cref="ISlimCustomPasswordValidator"/> is used when registered. A correct password resets the failed-attempt
-    /// counter and upgrades an outdated hash, like a sign-in; <paramref name="user"/> is updated accordingly. Returns
-    /// <c>null</c> when the password is correct, otherwise the result to return as-is: <c>400 invalid_password</c> or
-    /// <c>423</c> with <c>Retry-After</c>.
+    /// Confirms that the owner is present before a sensitive change, with the rules of the built-in endpoints. Accounts
+    /// with a password re-enter it: an active lockout is honoured, failures count towards it (incl. the lockout
+    /// notification), parallel attempts are serialized and <see cref="ISlimCustomPasswordValidator"/> is used when
+    /// registered; a correct password resets the failed-attempt counter and upgrades an outdated hash, like a sign-in
+    /// (<paramref name="user"/> is updated accordingly). Accounts without a password (external login, passkeys) need a
+    /// sign-in of at most 5 minutes ago instead. Returns <c>null</c> when confirmed, otherwise the result to return
+    /// as-is: <c>400 invalid_password</c>, <c>423</c> with <c>Retry-After</c>, or <c>403 reauthentication_required</c>.
     /// </summary>
     /// <example><code>
     /// if (await auth.ConfirmPasswordAsync(user, request.Password, ct) is { } failure) return failure;

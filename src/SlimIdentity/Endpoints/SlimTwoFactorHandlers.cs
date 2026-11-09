@@ -67,7 +67,7 @@ internal sealed class SlimTwoFactorHandlers(
             return SlimResults.InvalidToken();
 
         // the first code is consumed as well – it cannot be replayed for a sign-in afterwards
-        if (!await twoFactor.VerifyTotpAsync(user, payload.Secret, request!.Code, ct))
+        if (!await twoFactor.VerifyTotpAsync(user, payload.Secret, request!.Code, ct, newSecret: true))
             return SlimResults.BadRequest("invalid_two_factor_code", "The code is invalid.");
 
         await twoFactor.SetSecretAsync(user, payload.Secret, ct);

@@ -20,6 +20,9 @@ internal sealed class SlimCredentialService(
     IServiceProvider services,
     ILogger<SlimCredentialService> logger)
 {
+    /// <summary>How recent a sign-in must be to stand in for the password of an account that has none.</summary>
+    internal static readonly TimeSpan RecentSignInWindow = TimeSpan.FromMinutes(5);
+
     private static readonly SlimUser DummyUser = new() { Id = "slim-dummy", Email = "dummy@invalid" };
     private static string? s_dummyHash;
 
@@ -64,12 +67,31 @@ internal sealed class SlimCredentialService(
     }
 
     /// <summary>
-    /// Re-confirms the password of an authenticated user (2FA changes, e-mail change, …) with lockout bookkeeping.
-    /// Returns <c>null</c> on success, otherwise the error result (423 or 400 <c>invalid_password</c>).
+    /// A password to confirm: a local hash, or – with an <see cref="ISlimCustomPasswordValidator"/> – what it says.
+    /// </summary>
+    public async ValueTask<bool> HasPasswordAsync(SlimUser user, CancellationToken ct) =>
+        !string.IsNullOrEmpty(user.PasswordHash)
+        || (services.GetService<ISlimCustomPasswordValidator>() is { } custom && await custom.HasPasswordAsync(user, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// The owner confirms a sensitive change (a sign-in method, 2FA, the e-mail address) – a stolen session alone must
+    /// not do it. With a password: the password, with lockout bookkeeping (400 <c>invalid_password</c> or 423). Without
+    /// one: a sign-in of at most <see cref="RecentSignInWindow"/> ago – otherwise 403 <c>reauthentication_required</c>
+    /// (sign in again with the provider or a passkey, then repeat); nothing is counted as a failed attempt.
+    /// Returns <c>null</c> when confirmed.
     /// </summary>
     public async Task<IResult?> ConfirmPasswordAsync(SlimUser user, string? password, HttpContext http, CancellationToken ct)
     {
         var now = time.GetUtcNow();
+        if (!await HasPasswordAsync(user, ct))
+        {
+            return long.TryParse(http.User.FindFirst(SlimClaimTypes.AuthTime)?.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var signedIn)
+                && now - DateTimeOffset.FromUnixTimeSeconds(signedIn) <= RecentSignInWindow
+                ? null
+                : Http.SlimResults.Status("reauthentication_required",
+                    "Sign in again to confirm this change – your account has no password.", StatusCodes.Status403Forbidden);
+        }
+
         using var attempt = await gate.TryEnterAsync(user.Id, ct);
         if (attempt is null) return Http.SlimResults.BadRequest("invalid_password", "The password is incorrect.");   // queue full: not evaluated
         // re-read inside the gate: a queued predecessor may just have locked the account

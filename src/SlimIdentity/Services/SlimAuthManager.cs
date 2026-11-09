@@ -104,7 +104,8 @@ internal sealed class SlimAuthManager(
             return SlimAuthResult.Failed("impersonator_invalid");
 
         var currentAmr = httpContextAccessor.HttpContext?.User.FindFirst(SlimClaimTypes.AuthenticationMethod)?.Value;
-        var actor = SlimClaims.SerializeActor(SlimClaims.CreateActor(impersonator.Id, impersonator.SecurityStamp, currentAmr));
+        var currentAuthTime = httpContextAccessor.HttpContext?.User is { } admin ? CurrentAuthTime(admin) : null;
+        var actor = SlimClaims.SerializeActor(SlimClaims.CreateActor(impersonator.Id, impersonator.SecurityStamp, currentAmr, currentAuthTime));
 
         var started = await SignInCoreAsync(targetUser, useCookies, isPersistent: false, MethodImpersonation, null, actor, issueRefreshToken: false, ct);
         if (started.Succeeded)
@@ -138,8 +139,9 @@ internal sealed class SlimAuthManager(
         Log.ImpersonationEnded(logger, impersonator.Id, current.GetSlimUserId());
         metrics.Impersonation("ended");
         await Hooks.RaiseAsync(SlimEventTypes.ImpersonationEnded, current.GetSlimUserId(), actorId: impersonator.Id, ct: ct);
+        // back to the administrator's own sign-in – its time and its absolute lifetime, not a fresh chain
         return await SignInCoreAsync(impersonator, useCookies, isPersistent: false, actor.AuthenticationMethod ?? MethodPassword,
-            null, null, issueRefreshToken: true, ct);
+            null, null, issueRefreshToken: true, ct, authTime: actor.AuthTime, stage: SlimSignInStage.SignIn);
     }
 
     public async Task<IResult?> SetPasswordAsync(SlimUser user, string password, bool mustChange = true, CancellationToken ct = default)
@@ -331,18 +333,21 @@ internal sealed class SlimAuthManager(
         CancellationToken ct,
         string? sessionId = null,
         DateTimeOffset? authTime = null,
-        bool checkGuards = true)
+        bool checkGuards = true,
+        SlimSignInStage? stage = null)
     {
-        var stage = sessionId is null ? SlimSignInStage.SignIn : SlimSignInStage.Renewal;
+        // every renewal (refresh, sudo, re-issue after a password or 2FA change) carries the original sign-in time –
+        // with or without a session store; a new sign-in never does
+        var signInStage = stage ?? (sessionId is null && authTime is null ? SlimSignInStage.SignIn : SlimSignInStage.Renewal);
         var impersonatorId = SlimClaims.ParseActorClaim(actorJson)?.UserId;
-        if (user.IsActive && checkGuards && await Hooks.CheckSignInAsync(user, authMethod, stage, impersonatorId, ct) is { } veto)
+        if (user.IsActive && checkGuards && await Hooks.CheckSignInAsync(user, authMethod, signInStage, impersonatorId, ct) is { } veto)
         {
             await Hooks.RaiseAsync(SlimEventTypes.SignInFailed, user.Id, authMethod, veto.Error, impersonatorId, ct);
             return SlimAuthResult.Veto(veto);
         }
 
         var result = await IssueSessionAsync(user, useCookies, isPersistent, authMethod, additionalClaims, actorJson, issueRefreshToken, sessionId, authTime, ct);
-        if (result.Succeeded && stage == SlimSignInStage.SignIn)
+        if (result.Succeeded && signInStage == SlimSignInStage.SignIn)
             await Hooks.RaiseAsync(SlimEventTypes.SignedIn, user.Id, authMethod, null, impersonatorId, ct);
         return result;
     }

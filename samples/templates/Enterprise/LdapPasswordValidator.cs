@@ -2,7 +2,13 @@
 // Package: System.DirectoryServices.Protocols (cross-platform)
 //
 //   builder.Services.Configure<LdapSettings>(builder.Configuration.GetSection("Ldap"));
-//   builder.Services.AddSlimIdentity(o => o.Endpoints.EnableChangePassword = false) // password lives in AD
+//   builder.Services.AddSlimIdentity(o =>
+//       {
+//           // the password lives in AD: a local change or reset would set a hash nobody ever checks
+//           o.Endpoints.EnableChangePassword = false;
+//           o.Endpoints.EnablePasswordReset = false;
+//           o.Endpoints.EnableRegistration = false;
+//       })
 //       .AddUserStore<MyUserStore>()          // users still exist locally (lockout, 2FA, claims)
 //       .AddCustomPasswordValidator<LdapPasswordValidator>();
 //

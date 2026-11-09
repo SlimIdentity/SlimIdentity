@@ -100,6 +100,19 @@ public sealed class BackChannelLogoutTests
         Assert.NotEqual(stampBefore, app.Users.Get(TestApp.UserEmail).SecurityStamp);
     }
 
+    /// <summary>Review round 4: jti is required – without it the single-use check could not apply.</summary>
+    [Fact]
+    public async Task A_logout_token_without_jti_is_rejected()
+    {
+        await using var app = await TestApp.StartAsync(WithIdp());
+        var (user, _) = await SignedInAsync(app);
+
+        var response = await PostAsync(app, LogoutToken(app, c => c.Remove("jti")));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await user.GetAsync("/auth/me")).StatusCode);
+    }
+
     [Fact]
     public async Task An_unknown_subject_is_acknowledged_without_effect()
     {

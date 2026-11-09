@@ -100,12 +100,17 @@ internal sealed class SlimTwoFactorService(
 
     public Task RemoveSecretAsync(SlimUser user, CancellationToken ct) => store.SetTotpSecretAsync(user, string.Empty, ct);
 
-    /// <summary>Verifies a TOTP code and consumes its time step (a code is accepted only once).</summary>
-    public async Task<bool> VerifyTotpAsync(SlimUser user, string secret, string? code, CancellationToken ct)
+    /// <summary>
+    /// Verifies a TOTP code and consumes its time step (a code is accepted only once). <paramref name="newSecret"/>: the
+    /// first code of an authenticator being set up – no code of this secret can have been used before, so a newer marker
+    /// (an e-mail code of the same 30 seconds shares the "last code" value) does not refuse it; the step is still marked
+    /// where possible, and a replay of the code later is refused by that newer marker anyway.
+    /// </summary>
+    public async Task<bool> VerifyTotpAsync(SlimUser user, string secret, string? code, CancellationToken ct, bool newSecret = false)
     {
         if (!SlimTotp.TryVerify(secret, code, time.GetUtcNow(), SlimIdentityDefaults.TotpTimeStepTolerance, out var step))
             return false;
-        if (await store.TryMarkCodeUsedAsync(user, SlimTotp.StepStart(step), ct)) return true;
+        if (await store.TryMarkCodeUsedAsync(user, SlimTotp.StepStart(step), ct) || newSecret) return true;
 
         Log.TwoFactorCodeReplayed(logger, user.Id);
         return false;

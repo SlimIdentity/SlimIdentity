@@ -26,8 +26,16 @@ internal sealed class SlimRegistrationService(
     internal static IResult Accepted => SlimResults.Status("registration_accepted",
         "If the address can be used, a confirmation e-mail has been sent.");
 
-    internal static bool IsValidEmail(string? email) =>
-        !string.IsNullOrEmpty(email) && email.Length <= MaxEmailLength && MailAddress.TryCreate(email, out _);
+    /// <summary>
+    /// A plain address only: <see cref="MailAddress"/> also accepts <c>Name &lt;addr&gt;</c> and <c>addr (comment)</c>, and a mail
+    /// transport delivers those to the address inside – one inbox behind endless "different" addresses (mail limit,
+    /// look-alike accounts). The parsed address must be the whole input.
+    /// </summary>
+    internal static bool IsValidEmail([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? email) =>
+        !string.IsNullOrEmpty(email) && email.Length <= MaxEmailLength
+        && MailAddress.TryCreate(email, out var parsed)
+        && string.IsNullOrEmpty(parsed.DisplayName)
+        && string.Equals(parsed.Address, email, StringComparison.Ordinal);
 
     internal static IResult InvalidEmail(string field) =>
         SlimResults.Validation(new Dictionary<string, string[]> { [field] = ["A valid e-mail address is required."] });

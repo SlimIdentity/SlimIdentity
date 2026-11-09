@@ -23,7 +23,8 @@ app.MapPost("/api/impersonation/stop", async (ISlimAuthManager auth, Cancellatio
 - The session belongs to the target user; the admin is kept in the RFC 8693 `act` claim (`User.GetImpersonatorId()`,
   `/auth/me` → `isImpersonating`). Log it for your audit trail.
 - The `act` claim contains the admin's security stamp: banning the admin or signing them out everywhere ends the
-  impersonation immediately. `EndImpersonationAsync` checks it again before signing the admin back in.
+  impersonation immediately. `EndImpersonationAsync` checks it again before signing the admin back in – into the
+  admin's own sign-in (its `auth_time` and absolute lifetime), not a fresh session chain.
 - Never persistent, no refresh token. Password change, 2FA changes, `/logout-all` and session management are blocked
   during impersonation.
 - Consider requiring sudo mode (below) before impersonating.

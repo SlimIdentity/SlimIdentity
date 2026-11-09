@@ -13,6 +13,10 @@ metadata (tag `SlimIdentity`), so typed clients can be generated from `/openapi/
   `accessToken`, `expiresIn`, `refreshToken` and expiry timestamps.
 - **CSRF:** in cookie mode every state-changing request needs the header `X-CSRF` (any value) and, if present, an
   allowed `Origin` – otherwise `403 csrf_validation_failed`.
+- **Confirmation of sensitive changes:** where a `password` is asked (2FA, sign-in methods, e-mail change), accounts
+  without a password – external login, passkeys – send none; they need a sign-in within the last 5 minutes instead,
+  otherwise `403 reauthentication_required` (sign in again, then repeat).
+- **Addresses:** plain addresses only – `Name <addr>` or `addr (comment)` are rejected as invalid.
 - **Rate limiting:** endpoints marked ⏱ use the `SlimIdentity_BruteForce` policy, `/refresh` uses
   `SlimIdentity_Refresh`; exceeding them returns `429` with `Retry-After`.
 
@@ -114,7 +118,7 @@ Links are created by the host with `ISlimAuthManager.CreateInvitationAsync` – 
 
 Enabling or disabling 2FA rotates the security stamp: all other devices are signed out, the calling device receives a
 new session. Every TOTP time step and e-mail code is accepted only once (replay protection) – including the code used
-for `/2fa/enable`. Every 2FA change needs the current password – a stolen session alone cannot install or replace the
-second factor; a setup token dies with the security stamp (password change, logout-all).
+for `/2fa/enable`. Every 2FA change needs the current password (accounts without one: a sign-in within the last 5 minutes) – a stolen
+session alone cannot install or replace the second factor; a setup token dies with the security stamp (password change, logout-all).
 
 🔒 = requires authentication (cookie or bearer token via the `SlimIdentity.User` policy scheme – API keys are machine-to-machine credentials and are not accepted here).
