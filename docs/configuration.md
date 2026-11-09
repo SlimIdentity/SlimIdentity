@@ -61,7 +61,7 @@ All defaults are the secure choice. The options are listed in three tiers – mo
 | `Endpoints.ConfigureDefaultAuthenticationScheme` | `true` | Makes the `SlimIdentity` policy scheme the default, so plain `[Authorize]` works. |
 | `SignIn.RevealAccountState` | `false` | `false`: inactive/locked accounts answer like a wrong password (401). `true`: `403 account_disabled` / `423` with `lockoutEndUtc`. |
 | `Lockout.MaxFailedAttempts` | `5` | Failed attempts per lockout step; `0` disables the lockout (not recommended). |
-| `Lockout.Duration` / `MaxDuration` | `00:01:00` / `01:00:00` | First lockout, doubled with every further step up to the maximum. The counter is only reset by a successful sign-in (with 2FA: after the second factor). |
+| `Lockout.Duration` / `MaxDuration` | `00:01:00` / `01:00:00` | First lockout, doubled with every further step up to the maximum. The counter is only reset by a successful sign-in (with 2FA: after the second factor) or a correct password confirmation in a session (`/change-email`, `/2fa/*`, `ConfirmPasswordAsync`). |
 | `RateLimit.PermitLimit` / `Window` | `10` / `00:01:00` | Policy `SlimIdentity_BruteForce` (login, 2FA, register, reset, invitations, external login, …) per client. |
 | `RateLimit.RefreshPermitLimit` | `60` | Policy `SlimIdentity_Refresh` for `/refresh` (same window). |
 | `RateLimit.IPv6PrefixLength` | `64` | IPv6 clients are grouped by network prefix (32–128). |

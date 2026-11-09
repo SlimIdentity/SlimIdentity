@@ -39,8 +39,10 @@ public interface ISlimAuthManager
     /// <summary>
     /// Re-confirms the password of <paramref name="user"/> with the rules of the built-in endpoints: an active lockout
     /// is honoured, failures count towards it (incl. the lockout notification), parallel attempts are serialized and
-    /// <see cref="ISlimCustomPasswordValidator"/> is used when registered. Returns <c>null</c> when the password is
-    /// correct, otherwise the result to return as-is: <c>400 invalid_password</c> or <c>423</c> with <c>Retry-After</c>.
+    /// <see cref="ISlimCustomPasswordValidator"/> is used when registered. A correct password resets the failed-attempt
+    /// counter and upgrades an outdated hash, like a sign-in; <paramref name="user"/> is updated accordingly. Returns
+    /// <c>null</c> when the password is correct, otherwise the result to return as-is: <c>400 invalid_password</c> or
+    /// <c>423</c> with <c>Retry-After</c>.
     /// </summary>
     /// <example><code>
     /// if (await auth.ConfirmPasswordAsync(user, request.Password, ct) is { } failure) return failure;

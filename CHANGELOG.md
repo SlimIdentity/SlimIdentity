@@ -116,6 +116,10 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
 
 ### Fixed
 
+- A correct password confirmation (`/change-email`, `/2fa/*`, `ConfirmPasswordAsync`) now resets the failed-attempt
+  counter and upgrades an outdated hash, like a sign-in. Before, a few typos stayed on the counter for good, and later
+  ones locked the account early; endpoints that write the security state afterwards no longer write the old counter
+  back.
 - The per-recipient mail limit no longer switches itself off when its table is full: 100,000 fresh addresses within
   15 minutes (a distributed flood) let every later recipient be flooded. It now fails closed for new recipients
   (warning 7006) and frees expired entries at most once a minute.

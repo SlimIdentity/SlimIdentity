@@ -62,6 +62,52 @@ public sealed class ReviewRound2Tests
         Assert.NotNull(later);
     }
 
+    // ------------------------------------------------------------------ F-04: a confirmed password resets the counter
+
+    [Fact]
+    public async Task F04_a_correct_password_confirmation_resets_the_failed_attempts()
+    {
+        await using var app = await TestApp.StartAsync();
+        var client = app.CreateClient();
+        client.BearerToken = (await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword)).AccessToken;
+
+        for (var i = 0; i < 4; i++)   // threshold is 5
+            await client.PostJsonAsync("/auth/change-email", new { newEmail = "new@test.local", password = "wrong" }, HttpStatusCode.BadRequest);
+        Assert.Equal(4, app.Users.Get(TestApp.UserEmail).FailedLoginAttempts);
+
+        await client.PostJsonAsync("/auth/change-email", new { newEmail = "new@test.local", password = TestApp.UserPassword });
+
+        Assert.Equal(0, app.Users.Get(TestApp.UserEmail).FailedLoginAttempts);
+    }
+
+    [Fact]
+    public async Task F04_the_reset_survives_endpoints_that_write_the_security_state_afterwards()
+    {
+        // /2fa/disable writes the whole security state after the confirmation – it must not write the old counter back
+        await using var app = await TestApp.StartAsync();
+        var client = app.CreateClient();
+        client.BearerToken = (await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword)).AccessToken;
+        await client.PostJsonAsync("/auth/2fa/enable-email", new { password = TestApp.UserPassword });
+        var me = app.CreateClient();
+        me.BearerToken = await SignInWithEmailCodeAsync(app);
+
+        for (var i = 0; i < 4; i++)
+            await me.PostJsonAsync("/auth/2fa/disable", new { password = "wrong" }, HttpStatusCode.BadRequest);
+        var disabled = await me.PostJsonAsync("/auth/2fa/disable", new { password = TestApp.UserPassword });
+
+        Assert.False(app.Users.Get(TestApp.UserEmail).TwoFactorEnabled);
+        Assert.Equal(0, app.Users.Get(TestApp.UserEmail).FailedLoginAttempts);
+        Assert.False(string.IsNullOrEmpty(disabled.Str("accessToken")));
+    }
+
+    private static async Task<string> SignInWithEmailCodeAsync(TestApp app)
+    {
+        var challenge = await app.CreateClient().PostJsonAsync("/auth/login?useCookies=false",
+            new { email = TestApp.UserEmail, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized);
+        var code = (await app.Mail.WaitForAsync("two-factor", TestApp.UserEmail)).Payload;
+        return (await app.CreateClient().PostJsonAsync("/auth/login/2fa", new { preAuthToken = challenge.Str("preAuthToken"), code })).Str("accessToken");
+    }
+
     // ------------------------------------------------------------------ F-05: mail throttle at capacity
 
     [Fact]

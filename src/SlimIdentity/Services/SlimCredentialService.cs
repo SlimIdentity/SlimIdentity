@@ -77,7 +77,22 @@ internal sealed class SlimCredentialService(
 
         if (current.IsLockedOut(now)) return Http.SlimResults.Locked(http, current.LockoutEndUtc!.Value, now);
 
-        if (await VerifyPasswordAsync(current, password, ct) != SlimPasswordCheck.Failed) return null;
+        var check = await VerifyPasswordAsync(current, password, ct);
+        if (check != SlimPasswordCheck.Failed)
+        {
+            // like a successful sign-in: the counter starts over and an outdated hash is upgraded. The session already
+            // passed the second factor, so the reset opens no way to guess codes.
+            await RegisterSuccessAsync(current, password, rehash: check == SlimPasswordCheck.SuccessRehashNeeded, resetLockout: true, ct);
+            if (!ReferenceEquals(user, current))
+            {
+                // the caller continues with its own copy and may write the whole security state afterwards
+                // (e.g. /2fa/disable) – it must not write the old counter or hash back
+                user.FailedLoginAttempts = current.FailedLoginAttempts;
+                user.LockoutEndUtc = current.LockoutEndUtc;
+                user.PasswordHash = current.PasswordHash;
+            }
+            return null;
+        }
 
         var locked = await RegisterFailureAsync(current, ct);
         return locked
