@@ -1,8 +1,9 @@
 # Minimal setup
 
-The shortest path to a working, secure login with Entity Framework Core: your user entity, three small additions, a
-few lines in `Program.cs`. Not using EF Core? Then step 3 is one copied store class instead – see
-[without EF Core](#without-ef-core).
+The shortest path to a working, secure login for an **EF Core-backed browser app using cookies**: your user entity,
+three small additions, a few lines in `Program.cs`. This is the recommended first setup for same-site web apps.
+For bearer/JWT clients or a closer look at implementing `ISlimUserStore`, use
+[Getting started](getting-started.md) instead; it is an alternate path, not another step in this one.
 
 **What you get:** `/auth/register`, `/auth/login`, `/auth/logout`, `/auth/me`, e-mail verification, password reset and
 change, e-mail change, invitations, server-side sessions, 2FA and external login (once you add a provider) – with rate
@@ -177,4 +178,5 @@ because several methods must be **atomic single statements** (e.g. `IncrementFai
 security guarantees depend on that ([why](how-it-works.md#your-part-the-stores)). Register it with
 `.AddUserStore<MyUserStore>()` and verify it against your database with one call from `SlimIdentity.Testing`
 ([how](how-it-works.md#verify-your-stores)). The optional stores (`AddSessionStore`, `AddTwoFactorStore`,
-`AddRefreshTokenStore`, `AddExternalLoginStore`) follow the same pattern.
+`AddRefreshTokenStore`, `AddExternalLoginStore`) follow the same pattern. For the full store contract and a bearer
+example, continue with [Getting started](getting-started.md).

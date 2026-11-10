@@ -3,6 +3,11 @@
 This page describes what SlimIdentity defends against, how, and which responsibilities stay with the host.
 If you find a gap, please report it privately ([SECURITY.md](../SECURITY.md)).
 
+This is the detailed security reference, not a prerequisite for getting a first login running. For setup, follow
+[minimal setup](minimal-setup.md); before production, use its checklist and the relevant deployment guides. If you are
+reviewing an integration, focus on [assumptions](#assumptions), [host responsibilities](#host-responsibilities) and
+[known limitations](#known-limitations).
+
 ## Assumptions
 
 - **Transport:** browsers talk to the application via **HTTPS** (directly or through a TLS-terminating proxy that

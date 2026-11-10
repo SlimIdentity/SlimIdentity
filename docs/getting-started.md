@@ -1,8 +1,10 @@
 # Getting started
 
-This walks through a setup with JWT login for a SPA or mobile app, backed by your own database, and explains each
-step. Just want it running? See the [minimal setup](minimal-setup.md). How the pieces fit together – and why some
-store methods must be atomic – is described in [How SlimIdentity works](how-it-works.md).
+This is the **custom-store and bearer/JWT path**: it walks through the `ISlimUserStore` contract, registration and
+token login for a SPA or mobile app. For the quickest EF Core setup with browser cookies, use
+[Minimal setup](minimal-setup.md) instead. The two pages are alternatives for different starting points.
+How the pieces fit together – and why some store methods must be atomic – is described in
+[How SlimIdentity works](how-it-works.md).
 
 ## 1. Install
 

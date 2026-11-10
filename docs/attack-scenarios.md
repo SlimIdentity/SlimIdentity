@@ -5,6 +5,9 @@ A checklist for reviews – by people and by AI agents – and the current state
 **Rule:** a finding is real only once a failing test demonstrates it. Every defence that is confirmed gets a permanent
 regression test. (This is how the findings marked *fixed* below were handled.)
 
+Entries marked **Fixed** record historical context for a resolved issue; the test named in that row is the current
+regression check. They are not a list of open findings.
+
 Status: **covered** – a test proves the defence · **design** – deliberate behaviour, documented · **host** – the
 responsibility of the application (only our templates are reviewed) · **open** – not yet proven by a test.
 
@@ -18,7 +21,7 @@ Test names refer to `tests/SlimIdentity.Tests` (`Integration/…`, `Unit/Propert
 | A1 | Many parallel wrong passwords → counter exact, lockout applies, no guess beyond the threshold is evaluated | covered – `Concurrency.Parallel_failed_logins_are_all_counted`, `ReviewRound1.R3_parallel_password_guesses_beyond_the_threshold_are_not_evaluated` (40 parallel), conformance (atomic increment). **Fixed** (review round 1): up to 14 of 40 parallel guesses were verified; `ReviewRound2.Different_spellings_of_one_address_share_the_attempt_gate` (**fixed** in round 2: 40 spellings of one address bypassed the gate) |
 | A1b | Many parallel attempts keep an account's queue busy | covered – `ReviewRound2.The_queue_of_one_account_is_limited` (at most 8 waiting, the rest refused unevaluated; refused attempts burn their dummy hash outside the queue) |
 | A2 | Locked account + correct password → not evaluated, answer identical to a wrong password | covered – `Login.Lockout_is_progressive_and_hidden_by_default` |
-| A3 | Unknown / known / inactive / locked → same answer and statistically same time | covered – `Login.Wrong_password_unknown_user_and_inactive_user_get_identical_answers`; timing `Timing.A3_…` (opt-in before a release: `SLIMIDENTITY_TIMING=1`, Mann-Whitney over interleaved requests). Last run: medians 47.8–47.9 ms, \|z\| ≤ 0.95 |
+| A3 | Unknown / known / inactive / locked → same answer and statistically same time | covered – `Login.Wrong_password_unknown_user_and_inactive_user_get_identical_answers`; timing `Timing.A3_…` (opt-in before a release: `SLIMIDENTITY_TIMING=1`, Mann-Whitney over interleaved requests). Record fresh results, runtime and environment when running the timing check; previous measurements are not a release guarantee. |
 | A4 | Address variants: case, Unicode normalization, whitespace, `+tag`, homoglyphs | covered – `AttackScenario.A4_*`. **Fixed:** NFC and NFD forms of one address created two accounts; addresses are now trimmed and NFC-normalized. `+tag` and homoglyphs are different addresses by design. |
 | A5 | Password longer than the maximum, huge bodies → rejected before hashing | covered – `Login.Oversized_password_is_rejected_without_distinguishing_accounts` (body size: Kestrel limits, host) |
 | A6 | Permanent lockout of a victim → growth capped (≤ 1 h) | covered – `Login.Lockout_is_progressive_and_hidden_by_default`, unit `LockoutDuration` |

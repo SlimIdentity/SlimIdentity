@@ -1,16 +1,21 @@
 # SlimIdentity documentation
 
-**Start here**
+**Choose a path**
 
-- [Minimal setup](minimal-setup.md) – the shortest path: one table, one store, a few lines
-- [How SlimIdentity works](how-it-works.md) – a facade over ASP.NET Core; what it does, and what your stores must guarantee
-- [Getting started](getting-started.md) – the same setup explained step by step, with JWT and refresh tokens
+- [Minimal setup](minimal-setup.md) – quickest route for an EF Core app with browser cookies
+- [Getting started](getting-started.md) – implement your own store and set up a bearer/JWT client
+- [Agent integration](agent-integration.md) – compact, task-oriented instructions for coding agents working in a host application
+- [How SlimIdentity works](how-it-works.md) – responsibilities, store contracts and conformance checks
+
+**References**
+
 - [Configuration reference](configuration.md) – every option with its default
 - [Endpoint reference](endpoints.md) – routes, request/response bodies, status codes
-- [Security model](security.md) – what SlimIdentity protects against, and what remains your job
-- [Attack scenarios](attack-scenarios.md) – review checklist with the test that covers each scenario
+- [Security model](security.md) – threat model, assumptions and host responsibilities; a detailed reference
 
 **Guides**
+
+The guides below are task-specific recipes; read the ones that match the capabilities and deployment you use.
 
 - [SPA with cookies](guides/spa-cookies.md) – same-site and cross-subdomain setups, CSRF
 - [Mobile apps and bearer tokens](guides/mobile-bearer.md) – access/refresh tokens, rotation
@@ -39,4 +44,5 @@
 **Background**
 
 - [Architecture and design principles](architecture-manifest.md)
-- [Review prompt](review-prompt.md) – briefing for an independent (AI or human) review
+- [Attack scenarios](attack-scenarios.md) – review checklist mapped to tests
+- [Review prompt](review-prompt.md) – maintainer briefing for an independent (AI or human) review

@@ -124,36 +124,15 @@ All packages are released together with the same version.
 
 ## Documentation
 
-- [Minimal setup](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/minimal-setup.md) ·
-  [Getting started](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/getting-started.md) ·
-  [How it works](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/how-it-works.md)
-- [Configuration reference](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/configuration.md) ·
-  [Endpoint reference](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/endpoints.md) ·
-  [Security model](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/security.md)
-- Guides: [SPA with cookies](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/spa-cookies.md) ·
-  [mobile / bearer](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/mobile-bearer.md) ·
-  [sessions](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/sessions-and-logout.md) ·
-  [2FA](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/two-factor.md) ·
-  [passkeys](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/passkeys.md) ·
-  [external login](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/external-login.md) ·
-  [Google and Entra ID](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/google-and-entra-id.md) ·
-  [registration with business data](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/registration-profile.md) ·
-  [the first administrator](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/seeding.md) ·
-  [invitations](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/invitations.md) ·
-  [admin features](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/admin-features.md) ·
-  [without e-mail](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/without-email.md) ·
-  [hooks](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/hooks.md) ·
-  [roles and permissions](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/roles-and-permissions.md) ·
-  [multi-tenancy](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/multi-tenancy.md) ·
-  [LDAP](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/ldap-and-legacy-passwords.md) ·
-  [client certificates](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/client-certificates.md) ·
-  [Data Protection](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/data-protection.md) ·
-  [reverse proxy](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/reverse-proxy.md) ·
-  [several instances](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/multiple-instances.md) ·
-  [observability](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/observability.md) ·
-  [Native AOT](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/native-aot.md) ·
-  [migrating from ASP.NET Core Identity](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/migrating-from-aspnet-identity.md)
-- [Architecture and design principles](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/architecture-manifest.md)
+Choose the path that matches your application; the [documentation index](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/README.md)
+links to every guide and reference.
+
+- **Same-site browser app with EF Core:** [minimal setup](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/minimal-setup.md)
+- **Custom store or bearer/JWT client:** [getting started](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/getting-started.md)
+- **Coding agents integrating SlimIdentity:** [agent integration guide](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/agent-integration.md)
+- **Look up a route, option or security responsibility:** [endpoints](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/endpoints.md) ·
+  [configuration](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/configuration.md) ·
+  [security model](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/security.md)
 
 ## Roadmap
 

@@ -251,7 +251,7 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
   account has no authenticator; it said `email` before. The endpoint reference no longer lists password-policy fields
   that do not exist (`require*`).
 
-All packages of the repository (`SlimIdentity`, `SlimIdentity.EntityFrameworkCore`, `SlimIdentity.Testing`) are released
-together with the same version.
+All packages of the repository (`SlimIdentity`, `SlimIdentity.EntityFrameworkCore`, `SlimIdentity.Passkeys`,
+`SlimIdentity.Testing`) are released together with the same version.
 
 [Unreleased]: https://github.com/SlimIdentity/SlimIdentity/commits/main

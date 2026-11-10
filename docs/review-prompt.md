@@ -1,7 +1,9 @@
 # Review prompt
 
-Prompt for an independent review of SlimIdentity by an AI (or as a briefing for a human reviewer). Hand it over
-together with the repository (ZIP or checkout). Adjust the report language in the first line if needed.
+Prompt for an independent review of SlimIdentity by an AI (or as a briefing for a human reviewer). This is a
+0.9.0 pre-release snapshot: refresh the release status, review history and test evidence before reusing it for a later
+release. Hand it over together with the repository (ZIP or checkout). Adjust the report language in the first line if
+needed.
 
 ---
 
@@ -39,15 +41,16 @@ facts.
   methods must be atomic; that is part of the contract and checked by the Testing package.
 - Packages (all in `src/`, released with one version): `SlimIdentity` (core, Native-AOT compatible, no database
   dependency), `SlimIdentity.EntityFrameworkCore` (stores on the host's DbContext and user entity),
-  `SlimIdentity.Testing` (conformance checks for store implementations). Copy-paste templates (EF Core, Dapper, mail,
-  admin endpoints, TypeScript client) are in `samples/templates`.
-- Target: .NET 10. Status: pre-release; two earlier external review rounds, no professional audit.
+  `SlimIdentity.Passkeys` (optional WebAuthn support), and `SlimIdentity.Testing` (conformance checks for store
+  implementations). Copy-paste templates (EF Core, Dapper, mail, admin endpoints, TypeScript client) are in
+  `samples/templates`.
+- Target: .NET 10. Status: 0.9.0 pre-release; four external review rounds, no professional audit.
 
 ## Read first (in this order)
 
 1. `README.md`, `docs/how-it-works.md` – purpose and division of responsibility.
-2. `docs/minimal-setup.md`, `docs/getting-started.md` – the integration path a new user follows (also your usability
-   test).
+2. Choose the relevant integration path: `docs/minimal-setup.md` for EF Core and browser cookies, or
+   `docs/getting-started.md` for a custom store and bearer/JWT. These are alternatives, not sequential setup steps.
 3. `docs/security.md` – threat model, host responsibilities, **known limitations**.
 4. `docs/attack-scenarios.md` – every scenario with the test that is supposed to cover it.
 5. `docs/architecture-manifest.md` – principles and design decisions with their reasons.
