@@ -53,7 +53,7 @@ internal sealed class SlimAuthManager(
                 "SlimIdentity issues itself for special sessions (impersonation, api_key).", nameof(authenticationMethod));
 
         // the rules of /login after the first factor – a host endpoint must not be a way around them
-        var refusal = !user.IsActive ? "account_inactive"
+        var refusal = !user.IsActive ? "account_disabled"
             : user.IsLockedOut(time.GetUtcNow()) ? "locked_out"
             : options.Value.SignIn.RequireConfirmedEmail && !user.EmailConfirmed ? "email_not_confirmed"
             : user.PasswordChangeRequired ? "password_change_required"
@@ -401,7 +401,7 @@ internal sealed class SlimAuthManager(
         DateTimeOffset? authTime,
         CancellationToken ct)
     {
-        if (!user.IsActive) return SlimAuthResult.Failed("account_inactive");
+        if (!user.IsActive) return SlimAuthResult.Failed("account_disabled");
 
         // a user created outside SlimIdentity (seeding, import) may have no stamp – every session would fail its first
         // validation: give it one before anything is bound to it

@@ -21,7 +21,7 @@ public sealed record SlimAuthResult
     public ClaimsPrincipal? Principal { get; init; }
     /// <summary>Server-side session id (only with <see cref="ISlimSessionStore"/>).</summary>
     public string? SessionId { get; init; }
-    /// <summary>Machine-readable error code, e.g. <c>account_inactive</c>, <c>impersonator_invalid</c> or a sign-in guard's veto.</summary>
+    /// <summary>Machine-readable error code, e.g. <c>account_disabled</c>, <c>impersonator_invalid</c> or a sign-in guard's veto.</summary>
     public string? Error { get; init; }
     /// <summary>Message of a sign-in guard's veto, else <c>null</c>.</summary>
     public string? ErrorMessage { get; init; }

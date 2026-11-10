@@ -179,7 +179,7 @@ public sealed class ReviewRound5Tests
         for (var i = 0; i < 6; i++)
             Assert.Equal(HttpStatusCode.Unauthorized, (await stranger.PostAsync("/auth/login", new { email = SocialEmail, password = "guess-" + i })).StatusCode);
 
-        Assert.DoesNotContain("account_locked", await ExternalSignInAsync(app.CreateClient()));
+        Assert.DoesNotContain("locked_out", await ExternalSignInAsync(app.CreateClient()));
         Assert.Equal(0, app.Users.Get(SocialEmail).FailedLoginAttempts);
     }
 

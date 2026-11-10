@@ -198,7 +198,7 @@ public sealed class ReviewRound4Tests
 
     /// <summary>
     /// A passwordless account is asked for "the password" by every 2FA endpoint; each attempt counts as a failed
-    /// password, and five of them lock the account – which then also blocks the external sign-in (account_locked).
+    /// password, and five of them lock the account – which then also blocks the external sign-in (locked_out).
     /// </summary>
     [Fact]
     public async Task U_a_passwordless_account_is_not_locked_out_by_the_2fa_settings_page()
@@ -212,7 +212,7 @@ public sealed class ReviewRound4Tests
         var fresh = app.CreateClient();
         var start = await fresh.GetAsync("/auth/login/Fake?useCookies=true&returnUrl=/done");
         var callback = await fresh.GetAsync(start.Headers.Location!.OriginalString);
-        Assert.DoesNotContain("account_locked", callback.Headers.Location!.OriginalString);
+        Assert.DoesNotContain("locked_out", callback.Headers.Location!.OriginalString);
     }
 }
 

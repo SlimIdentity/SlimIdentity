@@ -10,7 +10,7 @@ public interface ISlimAuthManager
 {
     /// <summary>
     /// Signs <paramref name="user"/> in after <b>your</b> first factor – a client certificate, a magic link, your own
-    /// password check – with every rule of <c>/login</c> that follows it: inactive (<c>account_inactive</c>), locked
+    /// password check – with every rule of <c>/login</c> that follows it: inactive (<c>account_disabled</c>), locked
     /// (<c>locked_out</c>), unconfirmed with <c>RequireConfirmedEmail</c> (<c>email_not_confirmed</c>) and
     /// administrator-set passwords (<c>password_change_required</c>) are refused, sign-in guards apply. If the account
     /// has 2FA, no session is issued: <see cref="SlimAuthResult.TwoFactorChallenge"/> holds the challenge – return it

@@ -203,7 +203,7 @@ internal sealed class SlimExternalLoginHandlers(
 
         var now = time.GetUtcNow();
         var rejection = !user.IsActive ? "account_disabled"
-            : user.IsLockedOut(now) ? "account_locked"
+            : user.IsLockedOut(now) ? "locked_out"
             : O.SignIn.RequireConfirmedEmail && !user.EmailConfirmed ? "email_not_confirmed"
             : user.PasswordChangeRequired ? "password_change_required"   // the start password is replaced first
             : null;

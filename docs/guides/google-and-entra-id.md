@@ -91,7 +91,7 @@ Messages for the errors a user can actually run into:
 | `account_conflict` | "An account with this address already exists. Sign in with your password and link Google in your settings." |
 | `email_not_verified` | "Google has not verified this address. Verify it at Google or register with your e-mail." |
 | `registration_disabled` | "There is no account for this address." |
-| `account_disabled`, `account_locked` | as for a password sign-in |
+| `account_disabled`, `locked_out` | as for a password sign-in |
 | `password_change_required` | "Sign in with your password once – you have to change it." |
 
 The full list is in the [endpoint reference](../endpoints.md#external-login-islimexternalloginstore).

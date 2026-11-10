@@ -10,7 +10,8 @@ metadata (tag `SlimIdentity`), so typed clients can be generated from `/openapi/
   and the field errors in `errors`: `{ "status": 400, "code": "validation_failed", "errors": { "password": ["…"] } }`.
 - **Mode:** endpoints that sign in accept `?useCookies=true|false` (default `Endpoints.DefaultUseCookies`).
   Cookie mode answers `{ "status": "success", "mode": "cookie" }` and sets the cookie; bearer mode returns
-  `accessToken`, `expiresIn`, `refreshToken` and expiry timestamps.
+  `accessToken`, `expiresIn`, `refreshToken` and expiry timestamps. A mode that is switched off answers
+  `400 cookie_auth_disabled` (`Endpoints.AllowCookieAuth = false`) or `400 jwt_auth_disabled` (no `Tokens.JwtSecret`).
 - **CSRF:** in cookie mode every state-changing request needs the header `X-CSRF` (any value) and, if present, an
   allowed `Origin` – otherwise `403 csrf_validation_failed`.
 - **Confirmation of sensitive changes:** where a `password` is asked (2FA, sign-in methods, e-mail change), accounts
@@ -50,8 +51,10 @@ with `ISlimTwoFactorStore`.
 
 Redirect results on `returnUrl`: cookie mode – cookie set, no parameters; bearer mode – `#code=…` (fragment); 2FA
 required in cookie mode – `#slim_status=requires_two_factor&preAuthToken=…&method=…`; errors – `?slim_error=` one of
-`account_conflict`, `email_not_verified`, `registration_disabled`, `email_required`, `account_disabled`, `account_locked`, `email_not_confirmed`, `password_change_required`,
-`provider_mismatch`, `missing_provider_key`, `two_factor_unavailable` – and, with `UseSlimErrorRedirects()` on the
+`account_conflict`, `email_not_verified`, `registration_disabled`, `email_required`, `account_disabled`, `locked_out`, `email_not_confirmed`, `password_change_required`,
+`provider_mismatch`, `missing_provider_key`, `code_challenge_required` (bearer mode or link flow without PKCE),
+`two_factor_unavailable`, the veto code of a registration or sign-in guard, `sign_in_failed` (no session could be
+issued) – and, with `UseSlimErrorRedirects()` on the
 handler, `access_denied` (cancelled at the provider) and `external_login_failed` (the provider's answer could not be
 matched).
 

@@ -40,8 +40,11 @@ builder.Services.AddSlimIdentity(…).AddSignInGuard<TenantGuard>();
 | Stage | When | A veto means |
 | :--- | :--- | :--- |
 | `SignIn` | password, second factor, external login, invitation, impersonation, end of an impersonation | `403` with your code and message (`slim_error` for an external cookie sign-in); no session |
-| `Renewal` | `/refresh`, step-up (`ElevateSessionAsync`), the new session after a password or 2FA change – with or without a session store | `403`; the client signs in again |
+| `Renewal` | `/refresh`, step-up (`ElevateSessionAsync`) – with or without a session store | `403`; the client signs in again |
 | `Revalidation` | every bearer request, cookies every `Cookies.SecurityStampValidationInterval` | the running session ends (`401`) |
+
+The session re-issued for the calling device after its own password or 2FA change is not asked again – the user has
+just proven the account; the next revalidation applies your guards to it like to every other session.
 
 Re-validation runs often – **keep the check cheap** and cache what you look up (a few seconds of cache are fine:
 re-validation is not the only gate). A guard that throws fails closed: no session.
@@ -88,7 +91,7 @@ public sealed class AuditTrail(AppDbContext db) : ISlimEventObserver
 | :--- | :--- |
 | `claims_changed` | – (`RefreshClaimsAsync`) |
 | `signed_in` | method (`pwd`, `mfa`, `ext`, …); `ActorId` during an impersonation |
-| `sign_in_failed` | reason: `invalid_password`, `unknown_user` (no `UserId`), `locked_out`, `inactive`, `attempts_queued`, `invalid_two_factor_code`, a guard's veto code |
+| `sign_in_failed` | reason: `invalid_password`, `unknown_user` (no `UserId`), `locked_out`, `account_disabled`, `attempts_queued`, `invalid_two_factor_code`, a guard's veto code |
 | `locked_out`, `unlocked` | – |
 | `user_created` | reason `registration` or `external` (method = provider) |
 | `email_confirmed`, `email_changed` | – |
