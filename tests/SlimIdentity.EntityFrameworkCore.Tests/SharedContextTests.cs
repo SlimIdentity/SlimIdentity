@@ -70,4 +70,36 @@ public sealed class SharedContextTests
 
         Assert.Null((await StoredUserAsync(sp)).DisplayName);
     }
+
+    [Fact]
+    public async Task A_write_inside_the_hosts_open_transaction_fails_at_once_on_SQLite()
+    {
+        await using var sp = await CreateAsync();
+        await using var scope = sp.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<GuidContext>();
+        var users = scope.ServiceProvider.GetRequiredService<ISlimUserStore>();
+        var user = await users.FindByEmailAsync("a@test.local", default);
+
+        await using (var tx = await db.Database.BeginTransactionAsync())
+        {
+            Assert.NotNull(await users.FindByIdAsync(user!.Id, default));   // reading is fine
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => users.ResetFailedLoginAttemptsAsync(user, default));
+            Assert.Contains("Commit your transaction first", error.Message, StringComparison.Ordinal);
+            await tx.CommitAsync();
+        }
+
+        await users.ResetFailedLoginAttemptsAsync(user, default);   // committed: works again
+    }
+
+    [Fact]
+    public async Task A_write_inside_a_TransactionScope_fails_at_once_on_SQLite()
+    {
+        await using var sp = await CreateAsync();
+        await using var scope = sp.CreateAsyncScope();
+        var users = scope.ServiceProvider.GetRequiredService<ISlimUserStore>();
+        var user = await users.FindByEmailAsync("a@test.local", default);
+
+        using var ambient = new System.Transactions.TransactionScope(System.Transactions.TransactionScopeAsyncFlowOption.Enabled);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => users.ResetFailedLoginAttemptsAsync(user!, default));
+    }
 }

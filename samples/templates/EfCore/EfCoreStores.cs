@@ -388,7 +388,8 @@ public sealed class EfCoreApiKeyStore(IdentityDb identity, TimeProvider time) : 
 
 /// <summary>
 /// The stores' own AppDbContext per request – never the scoped one your endpoints use: a store's SaveChanges would
-/// otherwise save your pending changes along with its own.
+/// otherwise save your pending changes along with its own. Consequence: their writes are never part of a transaction
+/// you opened – commit it before you call SlimIdentity (on SQLite such a write waits for your transaction and fails).
 /// </summary>
 public sealed class IdentityDb(IDbContextFactory<AppDbContext> factory) : IDisposable
 {
