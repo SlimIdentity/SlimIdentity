@@ -16,9 +16,7 @@ on:
     tags: ['v*']
 
 permissions:
-  contents: write      # create the GitHub release
-  id-token: write      # OIDC token for nuget.org Trusted Publishing and for signing the attestations
-  attestations: write  # build provenance of the packages
+  contents: read
 
 env:
   DOTNET_NOLOGO: true
@@ -28,6 +26,10 @@ jobs:
   release:
     runs-on: ubuntu-latest
     environment: nuget
+    permissions:
+      contents: write      # create the GitHub release
+      id-token: write      # OIDC token for nuget.org Trusted Publishing and for signing the attestations
+      attestations: write  # build provenance of the packages
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

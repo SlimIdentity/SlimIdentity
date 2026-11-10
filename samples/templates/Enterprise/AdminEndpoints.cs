@@ -45,7 +45,8 @@ public static class AdminEndpoints
                 var target = await store.FindByIdAsync(userId, ct);
                 if (target is null) return Results.NotFound();
 
-                lf.CreateLogger("Audit").LogWarning("AUDIT impersonation {Admin} -> {Target}", me.GetSlimUserId(), target.Id);
+                lf.CreateLogger("Audit").LogWarning("AUDIT impersonation {Admin} -> {Target}",
+                    EscapeLogLineBreaks(me.GetSlimUserId() ?? ""), EscapeLogLineBreaks(target.Id));
                 var result = await auth.ImpersonateAsync(target, me.GetSlimUserId()!, useCookies ?? me.IsSlimCookieSession(), ct);
                 return result.Succeeded
                     ? Results.Ok(result.ToResponse())
@@ -164,4 +165,8 @@ public static class AdminEndpoints
 
         return app;
     }
+
+    private static string EscapeLogLineBreaks(string value) =>
+        value.Replace("\r", "\\r", StringComparison.Ordinal)
+            .Replace("\n", "\\n", StringComparison.Ordinal);
 }
