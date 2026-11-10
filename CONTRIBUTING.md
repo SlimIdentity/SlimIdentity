@@ -42,7 +42,9 @@ Native AOT check (needs the platform's native toolchain, see the
 dotnet publish samples/SlimIdentity.Demo -c Release -r linux-x64   # or win-x64 / osx-arm64
 ```
 
-CI builds with warnings as errors, runs all tests and publishes the demo as Native AOT.
+CI builds with warnings as errors, runs all tests (templates against PostgreSQL and SQL Server service containers),
+publishes the demo – with passkeys – as Native AOT, type-checks the TypeScript client, checks for vulnerable packages
+and packs; pull requests also get a dependency review. CodeQL runs on every push and weekly.
 
 Optional local runs:
 
@@ -81,7 +83,12 @@ One-time setup before the first release (repository settings, not code):
 - [ ] Repository public; **Settings → Code security**: private vulnerability reporting, Dependabot alerts and security
       updates, secret scanning **with push protection** (code scanning then runs via `codeql.yml` on its own).
 - [ ] Branch protection for `main`: CI and CodeQL must pass.
+- [ ] Tag ruleset for `v*`: only maintainers may create, move or delete release tags (a tag publishes to nuget.org).
+- [ ] Environment `nuget` with a required reviewer – a pushed tag then waits for an approval before anything is published.
+- [ ] Repository topics for discoverability, e.g. `aspnetcore`, `authentication`, `identity`, `passkeys`, `webauthn`,
+      `jwt`, `2fa`, `dotnet`, `security`; the description from the README.
 - [ ] nuget.org: Trusted Publishing policy (owner `timmkautz`, repository `slimidentity`, workflow `release.yml`,
-      environment `nuget`) and reserved ID prefix `SlimIdentity.*`.
+      environment `nuget`) and reserved ID prefix `SlimIdentity.*` (covers all four packages, `SlimIdentity.Passkeys`
+      included).
 - [ ] GitHub environment `nuget` with the variable `NUGET_USER`.
 - [ ] After the first release: `PackageValidationBaselineVersion` in `src/Directory.Build.props`.

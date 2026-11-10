@@ -11,6 +11,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\SlimIdentity\SlimIdentity.csproj" />
+    <!-- passkeys in the playground; the AOT publish of the demo checks the passkey package as well -->
+    <ProjectReference Include="..\..\src\SlimIdentity.Passkeys\SlimIdentity.Passkeys.csproj" />
   </ItemGroup>
 
 </Project>

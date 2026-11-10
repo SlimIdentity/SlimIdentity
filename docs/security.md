@@ -90,7 +90,6 @@ If you find a gap, please report it privately ([SECURITY.md](../SECURITY.md)).
 - An e-mail change to an address the attacker does not own needs the owner of that address to confirm a link they
   never asked for; if they do, the account they then "own" keeps the attacker's passkeys and external logins
   (comparable to E12 – the confirmation proves the mailbox, not who created the account).
-
 - Without `ISlimSessionStore` sessions are stateless: a copied cookie stays valid until it expires or the stamp
   rotates (`/logout-all`).
 - Cookie revocation takes effect at the next validation (`Cookies.SecurityStampValidationInterval`, default 1 min).

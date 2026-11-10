@@ -53,7 +53,8 @@ var slim = builder.Services.AddSlimIdentity(
     .AddSessionStore<InMemorySessionStore>(ServiceLifetime.Singleton)            // per-device logout, /auth/sessions
     .AddTwoFactorStore<InMemoryTwoFactorStore>(ServiceLifetime.Singleton)
     .AddExternalLoginStore<InMemoryExternalLoginStore>(ServiceLifetime.Singleton)
-    .AddApiKeyStore<InMemoryApiKeyStore>(ServiceLifetime.Singleton);
+    .AddApiKeyStore<InMemoryApiKeyStore>(ServiceLifetime.Singleton)
+    .AddPasskeyStore<InMemoryPasskeyStore>(ServiceLifetime.Singleton);   // package SlimIdentity.Passkeys; relying party: host of Links.BaseUrl
 
 // Social login: add any remote handler and point it at the SlimIdentity external scheme, e.g.
 // (package Microsoft.AspNetCore.Authentication.Google)

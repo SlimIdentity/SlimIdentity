@@ -104,8 +104,9 @@ outbox), LDAP, admin endpoints and a **TypeScript client** are in [`samples/`](h
 docker compose up --build      # → http://localhost:8080
 ```
 
-A playground for every flow – cookies and bearer tokens, 2FA with a virtual authenticator, sessions, password reset,
-impersonation – with a fake mailbox and a request log. Want to attack it? [`BREAKME.md`](https://github.com/timmkautz/slimidentity/blob/main/BREAKME.md).
+A playground for every flow – cookies and bearer tokens, 2FA with a virtual authenticator, passkeys with a virtual
+passkey (sign-in, autofill, sign-in methods), sessions, password reset, impersonation – with a fake mailbox and a request
+log. Want to attack it? [`BREAKME.md`](https://github.com/timmkautz/slimidentity/blob/main/BREAKME.md).
 Without Docker: `dotnet run --project samples/SlimIdentity.Demo` → <http://localhost:5209> (seeded users
 `admin@demo.local` / `Admin123!` and `user@demo.local` / `User1234!`; requests in `SlimIdentity.Demo.http`).
 

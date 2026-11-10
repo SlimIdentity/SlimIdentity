@@ -84,6 +84,12 @@ First public release (1.0.0) in preparation.
 - Tenants with own domains: `ISlimOriginPolicy` (`AddOriginPolicy<T>()`) decides trusted origins per request for the
   CSRF check, `returnUrl` and CORS; `ISlimLinkBuilder` (`AddLinkBuilder<T>()`) builds mail, reset and invitation links
   per request. `AddCorsPolicy()` derives CORS from the same origins (`SlimIdentityDefaults.CorsPolicy`).
+- Playground: passkeys – add, sign in, autofill, sign-in methods with sync status, rename, remove – with a virtual
+  passkey (ES256 in WebCrypto) that answers like a real authenticator, so no phone or security key is needed. The demo
+  references `SlimIdentity.Passkeys`, so the Native AOT publish in CI checks the passkey package as well.
+- Tests with one user store per tenant and colliding ids: links, refresh tokens and access tokens of one tenant are
+  refused by the other (bound to the security stamp); the multi-tenancy guide documents the one exception
+  (`ValidateSecurityStampOnEachRequest = false`).
 - Guide "The first administrator": seeding by code at start-up (start password with forced change, or a reset link),
   roles through the registration profile, database seeds. The minimal setup covers a front-end dev server on another
   port (proxy or `AddCorsPolicy()`) and initializes `SecurityStamp` in the user entity; the README separates what is in

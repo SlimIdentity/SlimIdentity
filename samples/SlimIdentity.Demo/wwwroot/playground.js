@@ -1,6 +1,8 @@
 // SlimIdentity Playground – plain ES module, no dependencies.
 // Everything from the server (mails, addresses, JSON) is inserted with textContent only – never as HTML.
 
+import { installVirtualPasskey } from "./virtual-passkey.js";
+
 const $ = (id) => document.getElementById(id);
 const state = { accessToken: null, refreshToken: null, preAuthToken: null, rememberToken: null, totpSecret: null, link: null };
 
@@ -110,6 +112,7 @@ const actions = {
     await call("POST", "/auth/logout", { refreshToken: state.refreshToken });
     state.accessToken = state.refreshToken = null;
     await updateWho();
+    startAutofill();
   },
 
   async logoutAll() {
@@ -213,6 +216,71 @@ const actions = {
     }
   },
 
+  // ---------------------------------------------------------------- passkeys (WebAuthn)
+
+  async addPasskey() {
+    stopAutofill();   // the browser runs one WebAuthn request at a time
+    const start = await call("POST", "/auth/passkeys/register/options", { password: password() || null });
+    if (start.ok) {
+      const { options, state: ceremony } = start.json;
+      const credential = await navigator.credentials.create({
+        publicKey: {
+          ...options,
+          challenge: fromB64url(options.challenge),
+          user: { ...options.user, id: fromB64url(options.user.id) },
+          excludeCredentials: options.excludeCredentials.map((c) => ({ type: c.type, id: fromB64url(c.id) })),
+        },
+      }).catch((e) => { log("WebAuthn", "create", 0, e.message); return null; });
+      if (credential) {
+        await call("POST", "/auth/passkeys/register", {
+          state: ceremony,
+          name: $("passkeyName").value || null,
+          credential: {
+            id: credential.id, rawId: b64url(credential.rawId), type: credential.type,
+            response: {
+              clientDataJSON: b64url(credential.response.clientDataJSON),
+              attestationObject: b64url(credential.response.attestationObject),
+              transports: credential.response.getTransports?.() ?? [],
+            },
+          },
+        });
+        await actions.signInMethods();
+      }
+    }
+    startAutofill();
+  },
+
+  async loginPasskey() {
+    stopAutofill();
+    await passkeySignIn();
+    startAutofill();
+  },
+
+  pickAutofill() { virtual?.pickForAutofill(); },
+
+  async signInMethods() {
+    const r = await call("GET", "/auth/sign-in-methods");
+    const list = $("methodList");
+    list.replaceChildren();
+    if (!r.ok) return;
+    const item = (text) => { const li = document.createElement("li"); li.textContent = text; list.append(li); return li; };
+    item(r.json.hasPassword ? "Password" : "No password (a fresh sign-in confirms changes)");
+    for (const e of r.json.externalLogins) item(`External login: ${e.provider}`);
+    for (const p of r.json.passkeys) {
+      const synced = p.backedUp ? "synced" : p.backupEligible ? "may be synced" : "this device only";
+      const used = p.lastUsedUtc ? ` · last used ${new Date(p.lastUsedUtc).toLocaleString()}` : "";
+      const li = item(`Passkey "${p.name}" · ${synced} · added ${new Date(p.createdUtc).toLocaleString()}${used}`);
+      li.append(button("Rename", async () => {
+        const name = prompt("New name", p.name);
+        if (name) { await call("POST", "/auth/sign-in-methods/passkeys/rename", { id: p.id, name }); await actions.signInMethods(); }
+      }));
+      li.append(button("Remove", async () => {
+        await call("POST", "/auth/sign-in-methods/passkeys/remove", { id: p.id, password: password() || null });
+        await actions.signInMethods();
+      }));
+    }
+  },
+
   async stopImpersonation() { const r = await call("POST", "/api/admin/impersonate/stop", {}); if (r.ok) storeSession(r.json); await updateWho(); },
   async adminOnly() { await call("GET", "/api/admin"); },
   clearLog() { $("log").replaceChildren(); },
@@ -240,6 +308,68 @@ function safeLink(text) {
     const url = new URL(match[0]);
     return url.origin === location.origin ? url.pathname + url.search : null;
   } catch { return null; }
+}
+
+// ------------------------------------------------------------------ passkeys: sign-in and autofill
+
+const b64url = (buffer) => btoa(String.fromCharCode(...new Uint8Array(buffer))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const fromB64url = (text) => Uint8Array.from(atob(text.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(text.length / 4) * 4, "=")), (c) => c.charCodeAt(0));
+
+let virtual = null;
+let autofill = null;
+
+/** One sign-in: options, the authenticator (dialog or – with a signal – autofill), the server. */
+async function passkeySignIn(signal) {
+  const start = await call("POST", "/auth/passkeys/login/options", {});
+  if (!start.ok) return;
+  const { options, state: ceremony } = start.json;
+  const credential = await navigator.credentials.get({
+    publicKey: { ...options, challenge: fromB64url(options.challenge), allowCredentials: [] },
+    ...(signal ? { mediation: "conditional", signal } : {}),
+  }).catch((e) => { if (!signal?.aborted) log("WebAuthn", "get", 0, e.message); return null; });
+  if (!credential) return;
+  const r = await call("POST", `/auth/passkeys/login?useCookies=${mode() === "cookie"}`, {
+    state: ceremony,
+    rememberMe: $("rememberMe").checked,
+    credential: {
+      id: credential.id, rawId: b64url(credential.rawId), type: credential.type,
+      response: {
+        clientDataJSON: b64url(credential.response.clientDataJSON),
+        authenticatorData: b64url(credential.response.authenticatorData),
+        signature: b64url(credential.response.signature),
+        userHandle: credential.response.userHandle ? b64url(credential.response.userHandle) : null,
+      },
+    },
+  });
+  if (r.ok) storeSession(r.json);
+  await updateWho();
+}
+
+// autofill: a conditional request waits in the background while the page is open; the state of a ceremony lives
+// 5 minutes, so a fresh one is fetched every 4
+async function startAutofill() {
+  stopAutofill();
+  if (!(await window.PublicKeyCredential?.isConditionalMediationAvailable?.())) return;
+  const controller = new AbortController();
+  autofill = controller;
+  while (!controller.signal.aborted) {
+    const round = new AbortController();
+    const stop = () => round.abort();
+    controller.signal.addEventListener("abort", stop, { once: true });
+    const timer = setTimeout(stop, 4 * 60_000);
+    await passkeySignIn(round.signal);
+    clearTimeout(timer);
+    if (!round.signal.aborted) break;   // signed in (or failed): no new offer until the next sign-out
+  }
+}
+
+function stopAutofill() { autofill?.abort(); autofill = null; }
+
+function applyVirtualPasskey() {
+  stopAutofill();
+  if ($("virtualPasskey").checked) virtual ??= installVirtualPasskey((name) => { $("autofillOffer").hidden = !name; $("autofillName").textContent = name ?? ""; });
+  else { virtual?.uninstall(); virtual = null; $("autofillOffer").hidden = true; }
+  startAutofill();
 }
 
 // ------------------------------------------------------------------ links from mails
@@ -295,9 +425,11 @@ document.addEventListener("click", async (e) => {
   if (action && actions[action]) { e.preventDefault(); await actions[action](); }
 });
 $("mode").addEventListener("change", async () => { document.body.classList.toggle("bearer", mode() === "bearer"); await updateWho(); });
+$("virtualPasskey").addEventListener("change", applyVirtualPasskey);
 
 const info = await (await fetch("/api/playground/info")).json();
 $("breakme").hidden = !info.breakme;
 if (!info.jwtEnabled) { $("mode").querySelector("[value=bearer]").disabled = true; }
 await handleLinkPage();
 await updateWho();
+applyVirtualPasskey();

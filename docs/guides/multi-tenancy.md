@@ -85,9 +85,11 @@ domain's owner. Mails carry the tenant in their [context](../configuration.md#bu
 
 ## What stays global
 
-- **Links and codes are not bound to a tenant** – they carry the user id and security stamp. Keep user ids unique
-  across tenants (a shared store with global ids, or GUIDs per tenant store); stores per tenant with colliding ids
-  (`1`, `2`, … in every tenant database) would let a link of one tenant reach the same id in another.
+- **A store per tenant with colliding ids** (`1`, `2`, … in every tenant database) is supported: links, codes, refresh
+  tokens and sessions carry the user's security stamp, so a reset link or token of tenant A is refused by user `1` of
+  tenant B (`TenantStoreTests`). One exception: with `Tokens.ValidateSecurityStampOnEachRequest = false` an access token
+  is checked by its signature alone – all tenants share the signing key and audience, so it works at the other tenant
+  until it expires (15 minutes). Keep the default, or use ids that are unique across tenants (GUIDs).
 - **The mail limit per recipient** (3 mails per kind and 15 minutes, 5 for 2FA codes) counts per address across tenants – it protects
   the mailbox, which is the same.
 - **Rate limiting** is per client IP. For a limit per tenant, use `.UseRateLimitPartitionKey(…)` with the tenant.

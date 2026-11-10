@@ -257,6 +257,59 @@ public sealed class InMemorySessionStore : ISlimSessionStore
 }
 
 /// <summary>One demo key: <c>X-API-Key: demo-key-123</c>.</summary>
+/// <summary>Passkeys in memory – atomic where the contract demands it (unique ids, single use per challenge).</summary>
+public sealed class InMemoryPasskeyStore : ISlimPasskeyStore
+{
+    private readonly ConcurrentDictionary<string, SlimPasskey> _keys = new(StringComparer.Ordinal);
+    private static string Key(byte[] credentialId) => Convert.ToHexString(credentialId);
+
+    public Task<IReadOnlyList<SlimPasskey>> GetPasskeysAsync(string userId, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<SlimPasskey>>([.. _keys.Values.Where(p => p.UserId == userId).OrderBy(p => p.CreatedUtc).Select(Copy)]);
+
+    public Task<SlimPasskey?> FindPasskeyAsync(byte[] credentialId, CancellationToken ct) =>
+        Task.FromResult(_keys.TryGetValue(Key(credentialId), out var p) ? Copy(p) : null);
+
+    public Task<bool> AddPasskeyAsync(SlimPasskey passkey, CancellationToken ct) =>
+        Task.FromResult(_keys.TryAdd(Key(passkey.CredentialId), Copy(passkey)));
+
+    public Task<bool> TryRecordUseAsync(byte[] credentialId, uint expectedSignCount, uint signCount, long challengeIssuedAt,
+        DateTimeOffset usedUtc, bool backedUp, CancellationToken ct)
+    {
+        if (!_keys.TryGetValue(Key(credentialId), out var p)) return Task.FromResult(false);
+        lock (p)
+        {
+            if (p.SignCount != expectedSignCount || p.LastChallengeAt >= challengeIssuedAt) return Task.FromResult(false);
+            (p.SignCount, p.LastChallengeAt, p.LastUsedUtc, p.BackedUp) = (signCount, challengeIssuedAt, usedUtc, backedUp);
+            return Task.FromResult(true);
+        }
+    }
+
+    public Task<bool> RenamePasskeyAsync(string userId, byte[] credentialId, string name, CancellationToken ct)
+    {
+        if (!_keys.TryGetValue(Key(credentialId), out var p) || p.UserId != userId) return Task.FromResult(false);
+        lock (p) p.Name = name;
+        return Task.FromResult(true);
+    }
+
+    public Task<bool> RemovePasskeyAsync(string userId, byte[] credentialId, CancellationToken ct) =>
+        Task.FromResult(_keys.TryGetValue(Key(credentialId), out var p) && p.UserId == userId
+            && _keys.TryRemove(new KeyValuePair<string, SlimPasskey>(Key(credentialId), p)));
+
+    public Task RemovePasskeysAsync(string userId, CancellationToken ct)
+    {
+        foreach (var (key, p) in _keys)
+            if (p.UserId == userId) _keys.TryRemove(key, out _);
+        return Task.CompletedTask;
+    }
+
+    private static SlimPasskey Copy(SlimPasskey p) => new()
+    {
+        UserId = p.UserId, CredentialId = p.CredentialId, PublicKey = p.PublicKey, SignCount = p.SignCount,
+        BackupEligible = p.BackupEligible, BackedUp = p.BackedUp, LastChallengeAt = p.LastChallengeAt, Name = p.Name,
+        CreatedUtc = p.CreatedUtc, LastUsedUtc = p.LastUsedUtc,
+    };
+}
+
 public sealed class InMemoryApiKeyStore : ISlimApiKeyStore
 {
     private static readonly string DemoKeyHash = SlimApiKeys.Hash("demo-key-123");

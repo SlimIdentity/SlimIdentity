@@ -27,7 +27,7 @@
 <main>
   <section>
     <h2>Account</h2>
-    <label>E-mail <input id="email" type="email" autocomplete="username" placeholder="you@playground.local"></label>
+    <label>E-mail <input id="email" type="email" autocomplete="username webauthn" placeholder="you@playground.local"></label>
     <label>Password <input id="password" type="password" autocomplete="current-password" placeholder="at least 8 characters"></label>
     <div class="row">
       <label class="check"><input id="rememberMe" type="checkbox"> remember me</label>
@@ -75,6 +75,24 @@
       <button data-action="forgetDevice">Forget this device</button>
     </div>
     <p class="small">Actions that change 2FA ask for the password in the field above.</p>
+  </section>
+
+  <section>
+    <h2>Passkeys</h2>
+    <label class="check"><input id="virtualPasskey" type="checkbox" checked> virtual passkey in this browser – no phone or security key needed</label>
+    <label>Name <input id="passkeyName" placeholder="e.g. Laptop"></label>
+    <div class="row">
+      <button data-action="addPasskey">Add passkey</button>
+      <button data-action="loginPasskey" class="primary">Sign in with passkey</button>
+      <button data-action="signInMethods">My sign-in methods</button>
+    </div>
+    <div id="autofillOffer" class="box" hidden>
+      <p>The e-mail field offers your passkey <strong id="autofillName"></strong> (autofill).</p>
+      <button data-action="pickAutofill">Pick it</button>
+    </div>
+    <ul id="methodList" class="list"></ul>
+    <p class="small">Adding or removing a passkey asks for the password above – accounts without one need a sign-in within
+      the last 5 minutes. A passkey is multi-factor on its own: no second factor follows.</p>
   </section>
 
   <section>

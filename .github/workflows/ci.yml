@@ -9,11 +9,26 @@ on:
 permissions:
   contents: read
 
+# a new push to the same branch or pull request replaces the run in progress
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
 
 jobs:
+  # pull requests: new dependencies with known vulnerabilities or an incompatible license stop the merge
+  # (GitHub dependency graph – free for public repositories)
+  dependency-review:
+    if: ${{ github.event_name == 'pull_request' && !github.event.repository.private }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: moderate
+
   build:
     runs-on: ubuntu-latest
     # disposable databases for the store conformance checks of the templates (tests/SlimIdentity.Samples.Tests):
@@ -58,7 +73,7 @@ jobs:
       - name: Test
         run: dotnet test SlimIdentity.slnx --configuration Release --no-build --logger "trx;LogFileName=results.trx" --results-directory TestResults
 
-      # the demo is published as Native AOT: any trimming/AOT warning in the library fails the build
+      # the demo is published as Native AOT: any trimming/AOT warning in the library (core and passkeys) fails the build
       - name: Native AOT publish (demo)
         run: dotnet publish samples/SlimIdentity.Demo --configuration Release --runtime linux-x64 --output aot
 

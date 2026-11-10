@@ -9,9 +9,12 @@ public sealed class TestUserStore : ISlimUserStore
     private readonly ConcurrentDictionary<string, SlimUser> _users = new();
     private readonly ConcurrentDictionary<string, string[]> _roles = new();
 
-    public SlimUser Seed(string email, string? password, params string[] roles)
+    public SlimUser Seed(string email, string? password, params string[] roles) => SeedWithId(Guid.NewGuid().ToString(), email, password, roles);
+
+    /// <summary>A user with a chosen id – e.g. the same id in two tenant stores.</summary>
+    public SlimUser SeedWithId(string id, string email, string? password, params string[] roles)
     {
-        var user = new SlimUser { Id = Guid.NewGuid().ToString(), Email = email, EmailConfirmed = true };
+        var user = new SlimUser { Id = id, Email = email, EmailConfirmed = true };
         if (password is not null) user.PasswordHash = new PasswordHasher<SlimUser>().HashPassword(user, password);
         _users[user.Id] = user;
         _roles[user.Id] = roles;

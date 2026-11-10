@@ -42,7 +42,8 @@ public sealed class TestApp : IAsyncDisposable
     {
         App = app;
         Time = time;
-        Users = (TestUserStore)app.Services.GetRequiredService<ISlimUserStore>();
+        // a test may bring its own user store (e.g. one per tenant); Users is then an unused empty store
+        Users = app.Services.GetRequiredService<ISlimUserStore>() as TestUserStore ?? new TestUserStore();
         Mail = app.Services.GetService<ISlimEmailSender>() as CapturingEmailSender ?? new CapturingEmailSender();
         Sessions = app.Services.GetService<ISlimSessionStore>() as TestSessionStore;
     }
@@ -62,7 +63,7 @@ public sealed class TestApp : IAsyncDisposable
         if (options.LoggerProvider is { } loggerProvider)
             builder.Logging.AddProvider(loggerProvider).SetMinimumLevel(LogLevel.Trace);
 
-        // starts at the real time: JWT validation uses the system clock
+        // starts at the real time (cookies and JWTs follow this clock, the TestServer's own headers do not)
         var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
         builder.Services.AddSingleton<TimeProvider>(time);
 
@@ -89,9 +90,11 @@ public sealed class TestApp : IAsyncDisposable
         MapHostEndpoints(app);
         options.Map?.Invoke(app);
 
-        var users = (TestUserStore)app.Services.GetRequiredService<ISlimUserStore>();
-        users.Seed(AdminEmail, AdminPassword, "Admin");
-        users.Seed(UserEmail, UserPassword);
+        if (app.Services.GetRequiredService<ISlimUserStore>() is TestUserStore users)
+        {
+            users.Seed(AdminEmail, AdminPassword, "Admin");
+            users.Seed(UserEmail, UserPassword);
+        }
 
         await app.StartAsync();
         return new TestApp(app, time);
