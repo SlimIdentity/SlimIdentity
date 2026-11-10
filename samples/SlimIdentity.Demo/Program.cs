@@ -2,6 +2,7 @@ using System.Net;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
@@ -56,15 +57,20 @@ var slim = builder.Services.AddSlimIdentity(
     .AddApiKeyStore<InMemoryApiKeyStore>(ServiceLifetime.Singleton)
     .AddPasskeyStore<InMemoryPasskeyStore>(ServiceLifetime.Singleton);   // package SlimIdentity.Passkeys; relying party: host of Links.BaseUrl
 
-// Social login: add any remote handler and point it at the SlimIdentity external scheme, e.g.
-// (package Microsoft.AspNetCore.Authentication.Google)
-// slim.Authentication.AddGoogle("Google", o =>
-// {
-//     o.ClientId = builder.Configuration["Google:ClientId"]!;
-//     o.ClientSecret = builder.Configuration["Google:ClientSecret"]!;
-//     o.SignInScheme = SlimIdentityDefaults.ExternalScheme;
-// });
-// → browser navigation to /auth/login/Google?returnUrl=/&useCookies=true
+// Social login (docs/guides/google-and-entra-id.md) – only when credentials are configured, e.g.
+//   dotnet user-secrets set "Google:ClientId" "…" --project samples/SlimIdentity.Demo
+//   dotnet user-secrets set "Google:ClientSecret" "…" --project samples/SlimIdentity.Demo
+// with the redirect URI http://localhost:5209/signin-google registered at Google.
+if (builder.Configuration["Google:ClientId"] is { Length: > 0 } googleClientId)
+{
+    slim.Authentication.AddGoogle("Google", o =>
+    {
+        o.ClientId = googleClientId;
+        o.ClientSecret = builder.Configuration["Google:ClientSecret"]!;
+        o.ClaimActions.MapJsonKey("email_verified", "email_verified");   // Google's own verification – not blind trust
+        o.UseSlimErrorRedirects();                                       // "Cancel" at Google → ?slim_error=access_denied
+    });
+}
 
 var app = builder.Build();
 
@@ -103,8 +109,9 @@ app.MapSlimIdentityApi();
 // ---------------------------------------------------------------------------------------------
 
 // Playground (wwwroot/index.html): fake mailbox and the links from the mails (they point back into the page)
-app.MapGet("/api/playground/info", (DemoSettings settings, IOptions<SlimIdentityOptions> options) =>
-    new DemoInfo(settings.Breakme, !string.IsNullOrEmpty(options.Value.Tokens.JwtSecret), ["admin@demo.local", "user@demo.local"]));
+app.MapGet("/api/playground/info", async (DemoSettings settings, IOptions<SlimIdentityOptions> options, IAuthenticationSchemeProvider schemes) =>
+    new DemoInfo(settings.Breakme, !string.IsNullOrEmpty(options.Value.Tokens.JwtSecret), ["admin@demo.local", "user@demo.local"],
+        [.. (await schemes.GetRequestHandlerSchemesAsync()).Select(s => s.Name)]));   // the configured external providers
 app.MapGet("/api/playground/mailbox", (string address, DemoMailbox mailbox) => mailbox.For(address))
     .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy);
 foreach (var page in new[] { "/verify-email", "/reset-password", "/accept-invitation", "/confirm-email-change" })

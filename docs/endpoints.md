@@ -51,7 +51,9 @@ with `ISlimTwoFactorStore`.
 Redirect results on `returnUrl`: cookie mode – cookie set, no parameters; bearer mode – `#code=…` (fragment); 2FA
 required in cookie mode – `#slim_status=requires_two_factor&preAuthToken=…&method=…`; errors – `?slim_error=` one of
 `account_conflict`, `email_not_verified`, `registration_disabled`, `email_required`, `account_disabled`, `account_locked`, `email_not_confirmed`, `password_change_required`,
-`provider_mismatch`, `missing_provider_key`, `two_factor_unavailable`.
+`provider_mismatch`, `missing_provider_key`, `two_factor_unavailable` – and, with `UseSlimErrorRedirects()` on the
+handler, `access_denied` (cancelled at the provider) and `external_login_failed` (the provider's answer could not be
+matched).
 
 ## Account
 

@@ -18,6 +18,7 @@
 - [Two-factor authentication](guides/two-factor.md) – TOTP with QR code, e-mail codes, recovery codes, replay protection
 - [Passkeys](guides/passkeys.md) – WebAuthn sign-in without password, setup, flows, what is checked
 - [External login (OAuth / OIDC)](guides/external-login.md) – Google, Entra ID, Keycloak, account linking
+- [Google and Microsoft Entra ID](guides/google-and-entra-id.md) – step by step, from the provider console to the front end
 - [Invitations](guides/invitations.md) – invite-only registration, "complete your registration"
 - [Admin features](guides/admin-features.md) – impersonation, sudo mode, bans, API keys
 - [Running without e-mail](guides/without-email.md) – internal services: accounts, start passwords and resets by an administrator

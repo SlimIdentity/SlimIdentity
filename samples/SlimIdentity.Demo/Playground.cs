@@ -47,4 +47,4 @@ public sealed class DemoMailbox(TimeProvider time)
 }
 
 public sealed record DemoMail(string To, string Subject, string Body, DateTimeOffset SentAt);
-public sealed record DemoInfo(bool Breakme, bool JwtEnabled, string[] SeededAccounts);
+public sealed record DemoInfo(bool Breakme, bool JwtEnabled, string[] SeededAccounts, string[] Providers);

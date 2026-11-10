@@ -51,7 +51,7 @@ Each one is a line of configuration – nothing of it runs, or has to be underst
 
 | Capability | Add | Guide |
 | :--- | :--- | :--- |
-| Sign-in with Google, Entra ID, Keycloak, … | an OAuth/OIDC handler on `.Authentication` | [external login](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/external-login.md) |
+| Sign-in with Google, Entra ID, Keycloak, … | an OAuth/OIDC handler on `.Authentication` | [external login](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/external-login.md), [Google and Entra ID step by step](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/google-and-entra-id.md) |
 | Passkeys (Face ID, fingerprint, device PIN) | package `SlimIdentity.Passkeys` | [passkeys](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/passkeys.md) |
 | Business data at registration | `.AddRegistrationProfile<T>()` | [registration with business data](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/registration-profile.md) |
 | Invitations, start passwords, reset links, impersonation, sudo mode | `ISlimAuthManager` in your admin endpoints | [admin features](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/admin-features.md) |
@@ -136,6 +136,7 @@ All packages are released together with the same version.
   [2FA](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/two-factor.md) ·
   [passkeys](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/passkeys.md) ·
   [external login](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/external-login.md) ·
+  [Google and Entra ID](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/google-and-entra-id.md) ·
   [registration with business data](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/registration-profile.md) ·
   [the first administrator](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/seeding.md) ·
   [invitations](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/invitations.md) ·

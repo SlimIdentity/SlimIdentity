@@ -142,6 +142,9 @@ internal static partial class Log
     [LoggerMessage(5003, LogLevel.Information, "SlimIdentity: created user {UserId} from {Provider} login.")]
     public static partial void ExternalUserCreated(ILogger logger, string userId, string provider);
 
+    [LoggerMessage(5015, LogLevel.Information, "SlimIdentity: sign-in at {Provider} did not complete ({Error}) – sent back to the front end.")]
+    public static partial void ExternalLoginRemoteFailure(ILogger logger, string provider, string error);
+
     [LoggerMessage(5004, LogLevel.Warning, "SlimIdentity: unconfirmed account {UserId} claimed by the verified owner via {Provider} – password, 2FA and sessions of the registrant removed (possible pre-account hijacking).")]
     public static partial void UnverifiedAccountClaimed(ILogger logger, string provider, string userId);
 

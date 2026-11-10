@@ -372,6 +372,46 @@ function applyVirtualPasskey() {
   startAutofill();
 }
 
+// ------------------------------------------------------------------ external login (only with a configured provider)
+
+// a full-page navigation to the provider; bearer clients bind the one-time code to themselves with PKCE
+async function externalLogin(provider) {
+  const returnUrl = encodeURIComponent("/");   // a local path – always allowed, whatever port the demo runs on
+  sessionStorage.setItem("slim.mode", mode());   // the page reloads on the way back
+  if (mode() === "cookie") { location.href = `/auth/login/${provider}?useCookies=true&returnUrl=${returnUrl}`; return; }
+  const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
+  sessionStorage.setItem("slim.pkce", verifier);
+  const challenge = b64url(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)));
+  location.href = `/auth/login/${provider}?useCookies=false&returnUrl=${returnUrl}&code_challenge=${challenge}&code_challenge_method=S256`;
+}
+
+// back from the provider: an error in the query, secrets in the fragment (never sent to a server)
+async function handleExternalReturn() {
+  const error = new URLSearchParams(location.search).get("slim_error");
+  const fragment = new URLSearchParams(location.hash.slice(1));
+  if (!error && !fragment.size) return;
+  history.replaceState(null, "", "/");
+  const started = sessionStorage.getItem("slim.mode");
+  sessionStorage.removeItem("slim.mode");
+  if (started) { $("mode").value = started; document.body.classList.toggle("bearer", started === "bearer"); }
+  if (error) { log("GET", "external login", 0, `slim_error=${error}`); return; }
+  if (fragment.get("slim_status") === "requires_two_factor") {
+    state.preAuthToken = fragment.get("preAuthToken");
+    $("challengeMethod").textContent = fragment.get("method") === "totp" ? "authenticator app" : "code sent by e-mail";
+    $("challenge").hidden = false;
+    return;
+  }
+  if (fragment.get("code")) {
+    const r = await call("POST", "/auth/login/external/exchange", { code: fragment.get("code"), codeVerifier: sessionStorage.getItem("slim.pkce") });
+    sessionStorage.removeItem("slim.pkce");
+    if (r.status === 401 && r.json?.status === "requires_two_factor") {
+      state.preAuthToken = r.json.preAuthToken;
+      $("challengeMethod").textContent = r.json.twoFactorMethod === "totp" ? "authenticator app" : "code sent by e-mail";
+      $("challenge").hidden = false;
+    } else if (r.ok) storeSession(r.json);
+  }
+}
+
 // ------------------------------------------------------------------ links from mails
 
 async function handleLinkPage() {
@@ -430,6 +470,14 @@ $("virtualPasskey").addEventListener("change", applyVirtualPasskey);
 const info = await (await fetch("/api/playground/info")).json();
 $("breakme").hidden = !info.breakme;
 if (!info.jwtEnabled) { $("mode").querySelector("[value=bearer]").disabled = true; }
+for (const provider of info.providers ?? []) {
+  const b = document.createElement("button");
+  b.textContent = `Sign in with ${provider}`;
+  b.addEventListener("click", () => externalLogin(provider));
+  $("providers").append(b);
+  $("providers").hidden = false;
+}
+await handleExternalReturn();
 await handleLinkPage();
 await updateWho();
 applyVirtualPasskey();

@@ -350,6 +350,23 @@ internal sealed class SlimExternalLoginHandlers(
     }
 
     /// <summary>Open-redirect protection: local paths or trusted origins only.</summary>
+    /// <summary>
+    /// A failed provider round trip (see <see cref="SlimRemoteAuthenticationExtensions.UseSlimErrorRedirects{TOptions}"/>):
+    /// back to the returnUrl of the sign-in – it travels in the handler's protected state and is validated again – or,
+    /// when no sign-in can be recognized, to <c>ExternalLogin.DefaultReturnUrl</c>.
+    /// </summary>
+    internal static Task RedirectRemoteFailureAsync(HttpContext http, AuthenticationProperties? properties, string provider, string error) =>
+        http.RequestServices.GetRequiredService<SlimExternalLoginHandlers>().RedirectRemoteFailureAsync(properties, provider, error);
+
+    private async Task RedirectRemoteFailureAsync(AuthenticationProperties? properties, string provider, string error)
+    {
+        var started = properties?.Items.TryGetValue(ItemReturnUrl, out var url) == true ? url : null;
+        var target = ValidateReturnUrl(started) ?? ValidateReturnUrl(null) ?? "/";
+        Log.ExternalLoginRemoteFailure(logger, provider, error);
+        metrics.ExternalLogin(provider, error == "access_denied" ? "cancelled" : "failed");
+        await Redirect(target, "slim_error", error).ExecuteAsync(Http);
+    }
+
     private string? ValidateReturnUrl(string? returnUrl) =>
         SlimReturnUrl.Validate(returnUrl, O, origin => SlimLinks.IsTrustedOrigin(Http, origin));
 

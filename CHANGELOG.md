@@ -128,6 +128,12 @@ First public release (1.0.0) in preparation.
   template (`Enterprise/GroupEndpoints.cs`).
 - Forced password change: `SlimUser.PasswordChangeRequired` (new column for stores, checked by the conformance kit),
   `401 password_change_required` at `/login` and `POST /auth/login/password-change`; TypeScript client support.
+- `UseSlimErrorRedirects()` for remote handlers (Google, OpenID Connect, …): a sign-in cancelled at the provider
+  returns to the front end with `?slim_error=access_denied`, an answer that cannot be matched with
+  `?slim_error=external_login_failed` – instead of the back end's error page. Log 5015, metric results `cancelled` and
+  `failed`.
+- Guide "Google and Microsoft Entra ID" (step by step, including when to trust a provider's address), and an opt-in
+  "Sign in with Google" button in the playground.
 
 ### Security (external review round 1)
 
@@ -226,6 +232,8 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
 
 ### Fixed
 
+- The external-login guide trusted Google's addresses through `TrustedEmailProviders`; it now maps Google's own
+  `email_verified` (`ClaimActions.MapJsonKey`), which the ASP.NET Core handler drops by default.
 - `POST /auth/login/password-change` runs in the per-account attempt gate and answers `423` during a lockout, like
   `/login/2fa`; before, the forced change ignored a lockout that started after the token was issued and lifted it.
 - A correct password confirmation (`/change-email`, `/2fa/*`, `ConfirmPasswordAsync`) now resets the failed-attempt

@@ -7,7 +7,6 @@ external identity to your users.
 var slim = builder.Services.AddSlimIdentity(o =>
     {
         o.TrustedOrigins.Add("https://app.example.com");   // allowed returnUrl targets (besides local paths)
-        o.ExternalLogin.TrustedEmailProviders.Add("Google");
     })
     .AddUserStore<MyUserStore>()
     .AddEmailSender<MyEmailSender>()
@@ -18,11 +17,19 @@ slim.Authentication.AddGoogle("Google", o =>
 {
     o.ClientId = builder.Configuration["Google:ClientId"]!;
     o.ClientSecret = builder.Configuration["Google:ClientSecret"]!;
+    o.ClaimActions.MapJsonKey("email_verified", "email_verified");   // Google's verification of the address
+    o.UseSlimErrorRedirects();                                       // cancel / failure → ?slim_error= instead of an error page
 });
-slim.Authentication.AddOpenIdConnect("EntraId", o => { /* Authority, ClientId, … */ });
+slim.Authentication.AddOpenIdConnect("EntraId", o => { /* Authority, ClientId, … */ o.UseSlimErrorRedirects(); });
 ```
 
-Register the callback URL of the handler (e.g. `/signin-google`) at the provider as usual.
+Register the callback URL of the handler (e.g. `/signin-google`) at the provider as usual. Complete walkthroughs,
+including the provider consoles, the front end and the pitfalls: **[Google and Microsoft Entra ID](google-and-entra-id.md)**.
+
+`UseSlimErrorRedirects()` covers what happens before SlimIdentity sees a user: a *Cancel* at the provider returns to
+the `returnUrl` with `?slim_error=access_denied`, an answer that cannot be matched (state lost or forged, correlation
+cookie gone, provider error) with `?slim_error=external_login_failed`. Without it, ASP.NET Core throws and the user ends
+on the back end's error page.
 
 ## Flow
 
@@ -53,7 +60,8 @@ verifier – an intercepted code (deep link, history, another app) is worthless.
    - never confirmed (someone registered the address without proving the mailbox): the verified owner takes it over –
      the registrant's password, 2FA, sessions and external logins are removed;
    - confirmed and **without** a password of its own (created by another provider, LDAP): linked automatically if the
-     e-mail is **verified** (`email_verified=true`, or the provider is listed in `TrustedEmailProviders`) and
+     e-mail is **verified** (`email_verified=true`, or the provider is listed in `TrustedEmailProviders` – only for
+     providers whose addresses you control, e.g. your company's single-tenant Entra ID) and
      `AutoLinkVerifiedEmails` is on;
    - otherwise – in particular for every account **with** a password – `slim_error=account_conflict`: the user signs in
      with the password and links the provider ([below](#linking-while-signed-in)). A click on a verification link proves
