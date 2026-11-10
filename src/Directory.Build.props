@@ -26,12 +26,12 @@
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
 
     <!-- validates the package layout now; add <PackageValidationBaselineVersion>1.0.0</PackageValidationBaselineVersion>
-         after the first release to detect breaking API changes automatically -->
+         after the 1.0 release to detect breaking API changes automatically (0.x releases may still break the API) -->
     <EnablePackageValidation>true</EnablePackageValidation>
 
-    <!-- one version for all packages, from git tags (v1.0.0); untagged builds become 1.0.0-alpha.0.N -->
+    <!-- one version for all packages, from git tags (v0.9.0); untagged builds become 0.9.0-alpha.0.N -->
     <MinVerTagPrefix>v</MinVerTagPrefix>
-    <MinVerMinimumMajorMinor>1.0</MinVerMinimumMajorMinor>
+    <MinVerMinimumMajorMinor>0.9</MinVerMinimumMajorMinor>
   </PropertyGroup>
 
   <ItemGroup>

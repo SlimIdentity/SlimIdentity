@@ -1,4 +1,4 @@
-# SlimIdentity – Architecture and design principles (1.0)
+# SlimIdentity – Architecture and design principles
 
 ## 1. Vision and purpose
 **SlimIdentity** is a pragmatic, database-agnostic authentication and security facade for ASP.NET Core. It closes the

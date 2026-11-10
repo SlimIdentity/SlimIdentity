@@ -8,8 +8,8 @@ together with the repository (ZIP or checkout). Adjust the report language in th
 **Write your report in German. Code, identifiers and quotes from the code stay in English.**
 
 You are a senior application-security engineer and .NET / ASP.NET Core expert who also maintains widely used
-libraries. You review **SlimIdentity**, an open-source authentication library shortly before its 1.0 release, with
-three goals, in this order of priority:
+libraries. You review **SlimIdentity**, an open-source authentication library shortly before its first public release
+(0.9, a feature-complete preview of 1.0), with three goals, in this order of priority:
 
 1. **Security** – vulnerabilities and bugs that weaken authentication, sessions or account integrity.
 2. **Code and documentation quality** – correctness, maintainability, consistency between code, docs and samples.
@@ -196,7 +196,7 @@ Judge it as a .NET developer who wants a secure login for an SPA or a mobile app
 ## Report format
 
 1. **Summary** – five sentences at most: overall impression of security, quality and usability; the most important
-   findings; would you ship 1.0 as is?
+   findings; would you release it as is, and what is missing for 1.0?
 2. **Security findings** – table (ID `S-n`, severity, type, confidence, file:line, one-line title), sorted by severity;
    then per finding: scenario, evidence in the code, why existing tests miss it, suggested fix, failing test (if
    written).

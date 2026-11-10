@@ -5,7 +5,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), ver
 
 ## [Unreleased]
 
-First public release (1.0.0) in preparation.
+First public release (0.9.0) in preparation: feature-complete, but the API may still change before 1.0. Version 1.0
+follows an independent security audit and feedback from first production use; from then on, breaking changes only
+with a new major version.
 
 ### Added
 

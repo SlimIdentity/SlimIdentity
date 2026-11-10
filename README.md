@@ -19,8 +19,8 @@ the provided samples and verify your stores with the
 [`SlimIdentity.Testing`](https://www.nuget.org/packages/SlimIdentity.Testing) conformance checks
 ([how it works](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/how-it-works.md)).
 
-> **Status: pre-release.** Working towards 1.0 – the API may still change until then, and the code has not been
-> independently audited yet. Please report security issues privately – see
+> **Status: 0.9 – feature-complete preview.** The API may still change until 1.0, and the code has not been
+> independently audited yet; 1.0 follows the audit and feedback from first production use. Please report security issues privately – see
 > [SECURITY.md](https://github.com/SlimIdentity/SlimIdentity/blob/main/SECURITY.md).
 
 ## In the box – the five-minute setup
