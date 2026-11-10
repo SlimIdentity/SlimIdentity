@@ -303,6 +303,8 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
   part of it and may wait for its locks. It now throws at once on SQLite (instead of waiting until it times out) and
   logs a warning once (event id 8101) on other providers; the package README explains it (commit first).
 - Tests: the EF Core conformance runs also cover `long` and `string` keys (SQLite, PostgreSQL, SQL Server).
+- Docs: the Data Protection guide and template warn that the database and Redis variants store the key ring
+  unencrypted – with EF Core next to the TOTP secrets it protects – and show `ProtectKeysWithCertificate` for production.
 - Docs: the Entra ID guide no longer trusts every address of a single tenant (`TrustedEmailProviders`) – only members'
   (optional claim `acct` = `0`); B2B guests bring addresses from other directories and are matched by `sub` only.
 - Docs: getting-started starts with the null mail sender and without a refresh-token store; minimal-setup installs

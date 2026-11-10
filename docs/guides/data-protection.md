@@ -36,6 +36,14 @@ builder.Services.AddDataProtection()
     .ProtectKeysWithCertificate(certificate);
 ```
 
+> [!WARNING]
+> The EF Core and Redis variants store the keys **unencrypted**. With EF Core they sit in the same database as the
+> TOTP secrets they protect: a database dump or backup alone is enough to decrypt every 2FA secret and to forge
+> cookies. For production add `.ProtectKeysWithCertificate(certificate)` (or Azure Key Vault, or DPAPI on a single
+> Windows server). Keep the old certificate available after renewal (`UnprotectKeysWithAnyCertificate`), otherwise
+> existing keys can no longer be read. Without encryption at rest, at least keep the key table out of shared dumps
+> and restrict who can read backups.
+
 ## Rules
 
 - **Same application name everywhere** (`SetApplicationName`) – otherwise instances or deployment slots cannot read
