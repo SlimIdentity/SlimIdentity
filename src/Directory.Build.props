@@ -13,11 +13,11 @@
     <Authors>Timm Kautz</Authors>
     <Copyright>Copyright (c) 2026 Timm Kautz</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/timmkautz/slimidentity</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/timmkautz/slimidentity</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/SlimIdentity/SlimIdentity</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/SlimIdentity/SlimIdentity</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageIcon>icon.png</PackageIcon>
-    <PackageReleaseNotes>See https://github.com/timmkautz/slimidentity/blob/main/CHANGELOG.md</PackageReleaseNotes>
+    <PackageReleaseNotes>See https://github.com/SlimIdentity/SlimIdentity/blob/main/CHANGELOG.md</PackageReleaseNotes>
 
     <!-- debugging into the package: SourceLink (built into the SDK) + symbol package -->
     <PublishRepositoryUrl>true</PublishRepositoryUrl>

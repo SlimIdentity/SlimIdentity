@@ -18,7 +18,7 @@ dotnet add package SlimIdentity --prerelease
 
 SlimIdentity's core never touches a database. You implement `ISlimUserStore` against whatever you use
 (Dapper, another ORM, a REST service, …). Complete Dapper and EF Core versions are in
-[`samples/`](https://github.com/timmkautz/slimidentity/tree/main/samples); the contract is small:
+[`samples/`](https://github.com/SlimIdentity/SlimIdentity/tree/main/samples); the contract is small:
 
 ```csharp
 public interface ISlimUserStore

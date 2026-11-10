@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         **Security vulnerabilities must not be reported here.** Please use
-        [private vulnerability reporting](https://github.com/timmkautz/slimidentity/security/advisories/new) instead.
+        [private vulnerability reporting](https://github.com/SlimIdentity/SlimIdentity/security/advisories/new) instead.
   - type: input
     id: version
     attributes:

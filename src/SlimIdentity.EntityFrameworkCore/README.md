@@ -63,7 +63,7 @@ changes or detaches your entities.
   activates its endpoints) or drop user agent / IP address of sessions (personal data).
 - `ISlimUserClaimsProvider<AppUser>` (register it in DI) – roles, tenant id or other claims for cookies and tokens.
 - `ISlimUserFactory<AppUser>` – creates new users (registration, external login): tenant, defaults and the
-  [registration profile](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/registration-profile.md)
+  [registration profile](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/registration-profile.md)
   (`SlimNewUser.Profile`) – related entities are inserted in the same `SaveChanges` as the account.
 - Expired sessions and refresh tokens are not deleted automatically: run
   `DELETE FROM "SlimSessions" WHERE "ExpiresUtc" < now()` (and the same for `SlimRefreshTokens."ExpiresAt"`) periodically.

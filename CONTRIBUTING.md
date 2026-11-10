@@ -44,7 +44,8 @@ dotnet publish samples/SlimIdentity.Demo -c Release -r linux-x64   # or win-x64 
 
 CI builds with warnings as errors, runs all tests (templates against PostgreSQL and SQL Server service containers),
 publishes the demo – with passkeys – as Native AOT, type-checks the TypeScript client, checks for vulnerable packages
-and packs; pull requests also get a dependency review. CodeQL runs on every push and weekly.
+and packs; pull requests also get a dependency review. CodeQL runs on every push and weekly, OpenSSF Scorecard weekly;
+releases attest the build provenance of every package.
 
 Optional local runs:
 
@@ -59,6 +60,8 @@ SLIMIDENTITY_TEST_SQLSERVER="Server=localhost,51433;User Id=sa;Password=Slim-Ide
 npx --yes -p typescript@5.8.3 tsc -p samples/templates/Frontend
 # timing measurement of attack scenario A3 (before a release, ~30 s)
 SLIMIDENTITY_TIMING=1 dotnet test tests/SlimIdentity.Tests --filter TimingTests
+# long fuzzing run of the WebAuthn parsers (before a release, ~2 min; CI runs 4,000 rounds)
+SLIMIDENTITY_FUZZ_ROUNDS=150000 SLIMIDENTITY_FUZZ_SEED=$RANDOM dotnet test tests/SlimIdentity.Tests --filter WebAuthnFuzzTests
 ```
 
 ## Pull requests
@@ -87,8 +90,8 @@ One-time setup before the first release (repository settings, not code):
 - [ ] Environment `nuget` with a required reviewer – a pushed tag then waits for an approval before anything is published.
 - [ ] Repository topics for discoverability, e.g. `aspnetcore`, `authentication`, `identity`, `passkeys`, `webauthn`,
       `jwt`, `2fa`, `dotnet`, `security`; the description from the README.
-- [ ] nuget.org: Trusted Publishing policy (owner `timmkautz`, repository `slimidentity`, workflow `release.yml`,
-      environment `nuget`) and reserved ID prefix `SlimIdentity.*` (covers all four packages, `SlimIdentity.Passkeys`
-      included).
-- [ ] GitHub environment `nuget` with the variable `NUGET_USER`.
+- [ ] nuget.org: Trusted Publishing policy owned by the organization `SlimIdentity` (repository owner `SlimIdentity`,
+      repository `SlimIdentity`, workflow `release.yml`, environment `nuget`) and the ID prefix `SlimIdentity.*`
+      reserved for the organization (covers all four packages, `SlimIdentity.Passkeys` included).
+- [ ] GitHub environment `nuget` with the variable `NUGET_USER` (the nuget.org user name of a member of the organization).
 - [ ] After the first release: `PackageValidationBaselineVersion` in `src/Directory.Build.props`.

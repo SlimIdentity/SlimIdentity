@@ -4,7 +4,8 @@ name: Release
 #
 # One-time setup on nuget.org (Trusted Publishing – no long-lived API key in the repository):
 #   nuget.org → your account → Trusted Publishing → Add policy
-#     Repository owner: timmkautz   Repository: slimidentity   Workflow file: release.yml   Environment: nuget
+#     Policy owner: the organization SlimIdentity
+#     Repository owner: SlimIdentity   Repository: SlimIdentity   Workflow file: release.yml   Environment: nuget
 # and in GitHub: Settings → Environments → "nuget" (optionally with required reviewers),
 # plus the repository/environment variable NUGET_USER = your nuget.org user name (not the e-mail).
 # Recommended: reserve the ID prefix "SlimIdentity.*" on nuget.org, so all packages of this repository carry the
@@ -15,8 +16,9 @@ on:
     tags: ['v*']
 
 permissions:
-  contents: write  # create the GitHub release
-  id-token: write  # OIDC token for nuget.org Trusted Publishing
+  contents: write      # create the GitHub release
+  id-token: write      # OIDC token for nuget.org Trusted Publishing and for signing the attestations
+  attestations: write  # build provenance of the packages
 
 env:
   DOTNET_NOLOGO: true
@@ -44,6 +46,13 @@ jobs:
       # every package in src/, all with the same version
       - name: Pack
         run: for p in src/*/*.csproj; do dotnet pack "$p" --configuration Release --no-build --output artifacts || exit 1; done
+
+      # build provenance (SLSA): a signed statement that exactly these packages were built from this commit by this
+      # workflow – anyone can check a downloaded package: gh attestation verify <file>.nupkg --owner SlimIdentity
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: 'artifacts/*.nupkg'
 
       - name: Log in to nuget.org (Trusted Publishing)
         id: nuget

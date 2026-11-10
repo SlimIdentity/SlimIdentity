@@ -12,7 +12,7 @@ Please upgrade before reporting an issue that may already be fixed.
 **Please do not open a public issue, discussion or pull request for security problems.**
 
 Report vulnerabilities privately through GitHub:
-**[Report a vulnerability](https://github.com/timmkautz/slimidentity/security/advisories/new)**
+**[Report a vulnerability](https://github.com/SlimIdentity/SlimIdentity/security/advisories/new)**
 (repository → *Security* → *Advisories* → *Report a vulnerability*).
 
 Please include as much as you can:
@@ -28,9 +28,18 @@ Please include as much as you can:
 - For accepted reports: a fix and a coordinated release, published together with a GitHub security advisory
   (and a CVE where appropriate). You will be credited unless you prefer not to be.
 
+## Verifying a package
+
+Every package on nuget.org is built by the release workflow of this repository, which attests its build provenance.
+Check that a package you downloaded comes from this repository and commit:
+
+```bash
+gh attestation verify SlimIdentity.1.0.0.nupkg --owner SlimIdentity
+```
+
 ## Scope
 
-In scope: the packages in `src/` (`SlimIdentity`, `SlimIdentity.EntityFrameworkCore`, `SlimIdentity.Testing`). Findings
+In scope: the packages in `src/` (`SlimIdentity`, `SlimIdentity.EntityFrameworkCore`, `SlimIdentity.Passkeys`, `SlimIdentity.Testing`). Findings
 made with the local [Breakme playground](BREAKME.md) that affect these packages are very welcome – a failing test is
 the ideal proof of concept.
 

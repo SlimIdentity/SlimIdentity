@@ -84,6 +84,9 @@ First public release (1.0.0) in preparation.
 - Tenants with own domains: `ISlimOriginPolicy` (`AddOriginPolicy<T>()`) decides trusted origins per request for the
   CSRF check, `returnUrl` and CORS; `ISlimLinkBuilder` (`AddLinkBuilder<T>()`) builds mail, reset and invitation links
   per request. `AddCorsPolicy()` derives CORS from the same origins (`SlimIdentityDefaults.CorsPolicy`).
+- Releases attest their build provenance (`gh attestation verify <package>.nupkg --owner SlimIdentity`, SECURITY.md);
+  OpenSSF Scorecard workflow and badge. The repository moved to the organization `SlimIdentity`
+  (`https://github.com/SlimIdentity/SlimIdentity`).
 - Playground: passkeys – add, sign in, autofill, sign-in methods with sync status, rename, remove – with a virtual
   passkey (ES256 in WebCrypto) that answers like a real authenticator, so no phone or security key is needed. The demo
   references `SlimIdentity.Passkeys`, so the Native AOT publish in CI checks the passkey package as well.
@@ -210,6 +213,9 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
 - A forced password change (start password set by an administrator) is no longer skipped with a passkey or an
   external login: both answer `password_change_required` without a session until the start password is replaced, and
   the session issuance refuses new sign-ins with a pending change as a backstop.
+- Mutation fuzzing of the WebAuthn parsers (`WebAuthnFuzzTests`, several million inputs before the release) found three
+  inputs that ended in an exception – HTTP 500 instead of "invalid": client data with invalid UTF-8, an EC point off the
+  curve, CBOR integers beyond 32 bits. All are answered as invalid now.
 - An authenticator can be enabled right after a sign-in with an e-mail code (both share the "last code" marker).
 - LDAP template: password reset and registration are switched off as in the guide; the legacy-migration example handles
   accounts without a hash.
@@ -238,4 +244,4 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
 All packages of the repository (`SlimIdentity`, `SlimIdentity.EntityFrameworkCore`, `SlimIdentity.Testing`) are released
 together with the same version.
 
-[Unreleased]: https://github.com/timmkautz/slimidentity/commits/main
+[Unreleased]: https://github.com/SlimIdentity/SlimIdentity/commits/main

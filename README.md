@@ -1,8 +1,9 @@
 # SlimIdentity
 
-[![CI](https://github.com/timmkautz/slimidentity/actions/workflows/ci.yml/badge.svg)](https://github.com/timmkautz/slimidentity/actions/workflows/ci.yml)
+[![CI](https://github.com/SlimIdentity/SlimIdentity/actions/workflows/ci.yml/badge.svg)](https://github.com/SlimIdentity/SlimIdentity/actions/workflows/ci.yml)
 [![NuGet](https://img.shields.io/nuget/vpre/SlimIdentity.svg)](https://www.nuget.org/packages/SlimIdentity)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/timmkautz/slimidentity/blob/main/LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/SlimIdentity/SlimIdentity/blob/main/LICENSE)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/SlimIdentity/SlimIdentity/badge)](https://scorecard.dev/viewer/?uri=github.com/SlimIdentity/SlimIdentity)
 
 **Hardened authentication endpoints for ASP.NET Core – without Identity tables, generics or base classes.**
 
@@ -16,11 +17,11 @@ the order of checks, uniform answers, single-use tokens, safe behaviour under pa
 your database, behind small interfaces you implement; a few of their methods carry security guarantees, so start from
 the provided samples and verify your stores with the
 [`SlimIdentity.Testing`](https://www.nuget.org/packages/SlimIdentity.Testing) conformance checks
-([how it works](https://github.com/timmkautz/slimidentity/blob/main/docs/how-it-works.md)).
+([how it works](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/how-it-works.md)).
 
 > **Status: pre-release.** Working towards 1.0 – the API may still change until then, and the code has not been
 > independently audited yet. Please report security issues privately – see
-> [SECURITY.md](https://github.com/timmkautz/slimidentity/blob/main/SECURITY.md).
+> [SECURITY.md](https://github.com/SlimIdentity/SlimIdentity/blob/main/SECURITY.md).
 
 ## In the box – the five-minute setup
 
@@ -50,24 +51,24 @@ Each one is a line of configuration – nothing of it runs, or has to be underst
 
 | Capability | Add | Guide |
 | :--- | :--- | :--- |
-| Sign-in with Google, Entra ID, Keycloak, … | an OAuth/OIDC handler on `.Authentication` | [external login](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/external-login.md) |
-| Passkeys (Face ID, fingerprint, device PIN) | package `SlimIdentity.Passkeys` | [passkeys](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/passkeys.md) |
-| Business data at registration | `.AddRegistrationProfile<T>()` | [registration with business data](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/registration-profile.md) |
-| Invitations, start passwords, reset links, impersonation, sudo mode | `ISlimAuthManager` in your admin endpoints | [admin features](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/admin-features.md) |
-| Internal services without a mail server | `.WithoutEmail()` | [without e-mail](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/without-email.md) |
-| Tenants with their own domains | `.AddOriginPolicy<T>()`, `.AddLinkBuilder<T>()`, `.AddCorsPolicy()` | [multi-tenancy](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/multi-tenancy.md) |
-| Vetoes and an audit trail (tenants, IP allow-lists, company domains) | `.AddSignInGuard<T>()`, `.AddEventObserver<T>()` | [hooks](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/hooks.md) |
-| Sessions ended by the company's identity provider | `.AddBackChannelLogout(…)` | [external login](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/external-login.md) |
-| API keys for machine-to-machine calls | `.AddApiKeyStore<T>()` | [admin features](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/admin-features.md) |
-| LDAP / Active Directory, legacy password hashes | `.AddCustomPasswordValidator<T>()` | [LDAP](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/ldap-and-legacy-passwords.md) |
-| Smart cards and client certificates | a template to copy | [client certificates](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/client-certificates.md) |
+| Sign-in with Google, Entra ID, Keycloak, … | an OAuth/OIDC handler on `.Authentication` | [external login](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/external-login.md) |
+| Passkeys (Face ID, fingerprint, device PIN) | package `SlimIdentity.Passkeys` | [passkeys](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/passkeys.md) |
+| Business data at registration | `.AddRegistrationProfile<T>()` | [registration with business data](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/registration-profile.md) |
+| Invitations, start passwords, reset links, impersonation, sudo mode | `ISlimAuthManager` in your admin endpoints | [admin features](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/admin-features.md) |
+| Internal services without a mail server | `.WithoutEmail()` | [without e-mail](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/without-email.md) |
+| Tenants with their own domains | `.AddOriginPolicy<T>()`, `.AddLinkBuilder<T>()`, `.AddCorsPolicy()` | [multi-tenancy](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/multi-tenancy.md) |
+| Vetoes and an audit trail (tenants, IP allow-lists, company domains) | `.AddSignInGuard<T>()`, `.AddEventObserver<T>()` | [hooks](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/hooks.md) |
+| Sessions ended by the company's identity provider | `.AddBackChannelLogout(…)` | [external login](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/external-login.md) |
+| API keys for machine-to-machine calls | `.AddApiKeyStore<T>()` | [admin features](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/admin-features.md) |
+| LDAP / Active Directory, legacy password hashes | `.AddCustomPasswordValidator<T>()` | [LDAP](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/ldap-and-legacy-passwords.md) |
+| Smart cards and client certificates | a template to copy | [client certificates](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/client-certificates.md) |
 
 Hooks can only tighten the flow: a guard can refuse, an observer can only watch – none of them can skip a check.
 
 **Not an identity provider.** SlimIdentity signs users in to *your* application. It issues no tokens for other
 applications and has no consent screens, client registration or discovery document. For single sign-on across several
 applications, run an identity provider (Keycloak, Microsoft Entra ID, Duende IdentityServer, OpenIddict, …) and connect
-it through [external login](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/external-login.md).
+it through [external login](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/external-login.md).
 
 ## Quickstart
 
@@ -93,10 +94,10 @@ app.MapSlimIdentityApi();   // /auth/register, /auth/login, /auth/me, …
 ```
 
 That is a complete cookie-based setup. Add `Tokens.JwtSecret` for bearer tokens, and further capabilities – refresh
-tokens, sessions, 2FA, external login – with one line each. Step by step: **[minimal setup](https://github.com/timmkautz/slimidentity/blob/main/docs/minimal-setup.md)**.
+tokens, sessions, 2FA, external login – with one line each. Step by step: **[minimal setup](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/minimal-setup.md)**.
 
 Ready-to-copy stores for **Dapper** (and EF Core, if you need full control), mail senders (**MailKit**, **SendGrid**,
-outbox), LDAP, admin endpoints and a **TypeScript client** are in [`samples/`](https://github.com/timmkautz/slimidentity/tree/main/samples).
+outbox), LDAP, admin endpoints and a **TypeScript client** are in [`samples/`](https://github.com/SlimIdentity/SlimIdentity/tree/main/samples).
 
 ## Try it
 
@@ -106,7 +107,7 @@ docker compose up --build      # → http://localhost:8080
 
 A playground for every flow – cookies and bearer tokens, 2FA with a virtual authenticator, passkeys with a virtual
 passkey (sign-in, autofill, sign-in methods), sessions, password reset, impersonation – with a fake mailbox and a request
-log. Want to attack it? [`BREAKME.md`](https://github.com/timmkautz/slimidentity/blob/main/BREAKME.md).
+log. Want to attack it? [`BREAKME.md`](https://github.com/SlimIdentity/SlimIdentity/blob/main/BREAKME.md).
 Without Docker: `dotnet run --project samples/SlimIdentity.Demo` → <http://localhost:5209> (seeded users
 `admin@demo.local` / `Admin123!` and `user@demo.local` / `User1234!`; requests in `SlimIdentity.Demo.http`).
 
@@ -123,35 +124,35 @@ All packages are released together with the same version.
 
 ## Documentation
 
-- [Minimal setup](https://github.com/timmkautz/slimidentity/blob/main/docs/minimal-setup.md) ·
-  [Getting started](https://github.com/timmkautz/slimidentity/blob/main/docs/getting-started.md) ·
-  [How it works](https://github.com/timmkautz/slimidentity/blob/main/docs/how-it-works.md)
-- [Configuration reference](https://github.com/timmkautz/slimidentity/blob/main/docs/configuration.md) ·
-  [Endpoint reference](https://github.com/timmkautz/slimidentity/blob/main/docs/endpoints.md) ·
-  [Security model](https://github.com/timmkautz/slimidentity/blob/main/docs/security.md)
-- Guides: [SPA with cookies](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/spa-cookies.md) ·
-  [mobile / bearer](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/mobile-bearer.md) ·
-  [sessions](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/sessions-and-logout.md) ·
-  [2FA](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/two-factor.md) ·
-  [passkeys](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/passkeys.md) ·
-  [external login](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/external-login.md) ·
-  [registration with business data](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/registration-profile.md) ·
-  [the first administrator](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/seeding.md) ·
-  [invitations](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/invitations.md) ·
-  [admin features](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/admin-features.md) ·
-  [without e-mail](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/without-email.md) ·
-  [hooks](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/hooks.md) ·
-  [roles and permissions](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/roles-and-permissions.md) ·
-  [multi-tenancy](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/multi-tenancy.md) ·
-  [LDAP](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/ldap-and-legacy-passwords.md) ·
-  [client certificates](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/client-certificates.md) ·
-  [Data Protection](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/data-protection.md) ·
-  [reverse proxy](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/reverse-proxy.md) ·
-  [several instances](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/multiple-instances.md) ·
-  [observability](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/observability.md) ·
-  [Native AOT](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/native-aot.md) ·
-  [migrating from ASP.NET Core Identity](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/migrating-from-aspnet-identity.md)
-- [Architecture and design principles](https://github.com/timmkautz/slimidentity/blob/main/docs/architecture-manifest.md)
+- [Minimal setup](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/minimal-setup.md) ·
+  [Getting started](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/getting-started.md) ·
+  [How it works](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/how-it-works.md)
+- [Configuration reference](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/configuration.md) ·
+  [Endpoint reference](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/endpoints.md) ·
+  [Security model](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/security.md)
+- Guides: [SPA with cookies](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/spa-cookies.md) ·
+  [mobile / bearer](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/mobile-bearer.md) ·
+  [sessions](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/sessions-and-logout.md) ·
+  [2FA](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/two-factor.md) ·
+  [passkeys](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/passkeys.md) ·
+  [external login](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/external-login.md) ·
+  [registration with business data](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/registration-profile.md) ·
+  [the first administrator](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/seeding.md) ·
+  [invitations](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/invitations.md) ·
+  [admin features](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/admin-features.md) ·
+  [without e-mail](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/without-email.md) ·
+  [hooks](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/hooks.md) ·
+  [roles and permissions](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/roles-and-permissions.md) ·
+  [multi-tenancy](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/multi-tenancy.md) ·
+  [LDAP](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/ldap-and-legacy-passwords.md) ·
+  [client certificates](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/client-certificates.md) ·
+  [Data Protection](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/data-protection.md) ·
+  [reverse proxy](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/reverse-proxy.md) ·
+  [several instances](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/multiple-instances.md) ·
+  [observability](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/observability.md) ·
+  [Native AOT](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/native-aot.md) ·
+  [migrating from ASP.NET Core Identity](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/migrating-from-aspnet-identity.md)
+- [Architecture and design principles](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/architecture-manifest.md)
 
 ## Roadmap
 
@@ -163,8 +164,8 @@ After 1.0, roughly in this order – nothing here needs a breaking change:
 
 ## Contributing
 
-Issues and pull requests are welcome – see [CONTRIBUTING.md](https://github.com/timmkautz/slimidentity/blob/main/CONTRIBUTING.md).
+Issues and pull requests are welcome – see [CONTRIBUTING.md](https://github.com/SlimIdentity/SlimIdentity/blob/main/CONTRIBUTING.md).
 
 ## License
 
-[MIT](https://github.com/timmkautz/slimidentity/blob/main/LICENSE) © Timm Kautz
+[MIT](https://github.com/SlimIdentity/SlimIdentity/blob/main/LICENSE) © Timm Kautz

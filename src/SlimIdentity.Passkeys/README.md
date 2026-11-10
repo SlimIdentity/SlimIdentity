@@ -20,4 +20,4 @@ builder.Services.AddSlimIdentity(o => o.Links.BaseUrl = "https://app.example.com
 - No third-party dependency (`System.Formats.Cbor` is part of ASP.NET Core), Native AOT compatible.
 - Your own store: implement `ISlimPasskeyStore` and verify it with `SlimIdentity.Testing`.
 
-Guide: [passkeys](https://github.com/timmkautz/slimidentity/blob/main/docs/guides/passkeys.md).
+Guide: [passkeys](https://github.com/SlimIdentity/SlimIdentity/blob/main/docs/guides/passkeys.md).

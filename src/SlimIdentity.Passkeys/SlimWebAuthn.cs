@@ -48,10 +48,8 @@ internal static class SlimWebAuthn
             var crossOrigin = root.TryGetProperty("crossOrigin", out var co) && co.ValueKind == JsonValueKind.True;
             return new ClientData(type.GetString()!, challenge.GetString()!, origin.GetString()!, crossOrigin);
         }
-        catch (JsonException)
-        {
-            return null;
-        }
+        catch (JsonException) { return null; }
+        catch (InvalidOperationException) { return null; }   // a string that is no valid UTF-8 (GetString)
     }
 
     /// <summary>The <c>authData</c> of an attestation object (CBOR map with fmt, attStmt, authData).</summary>
@@ -113,6 +111,9 @@ internal static class SlimWebAuthn
         catch (CborContentException) { return null; }
         catch (InvalidOperationException) { return null; }
         catch (CryptographicException) { return null; }
+        catch (PlatformNotSupportedException) { return null; }   // e.g. an EC point that is not on the curve (CNG)
+        catch (ArgumentException) { return null; }
+        catch (OverflowException) { return null; }   // a CBOR integer beyond 32 bits (ReadInt32)
     }
 
     /// <summary>Verifies an assertion signature over <c>authenticatorData || SHA-256(clientDataJSON)</c> (§7.2 step 20).</summary>
@@ -135,6 +136,9 @@ internal static class SlimWebAuthn
         catch (CborContentException) { return false; }
         catch (InvalidOperationException) { return false; }
         catch (CryptographicException) { return false; }
+        catch (PlatformNotSupportedException) { return false; }   // e.g. an EC point that is not on the curve (CNG)
+        catch (ArgumentException) { return false; }
+        catch (OverflowException) { return false; }   // a CBOR integer beyond 32 bits (ReadInt32)
     }
 
     /// <summary>A COSE_Key (RFC 9052/9053) as .NET key: EC2 / P-256 / ES256 or RSA / RS256.</summary>
