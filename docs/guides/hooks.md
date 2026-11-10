@@ -34,7 +34,8 @@ builder.Services.AddSlimIdentity(…).AddSignInGuard<TenantGuard>();
 ```
 
 `SlimSignInContext` carries the user, the authentication method (`pwd`, `mfa`, `mfa_remembered`, `ext`,
-`impersonation`, …), the impersonating administrator if any, the `HttpContext` (client IP, host name) and the
+`impersonation`, …), the impersonating administrator if any, the `HttpContext` (client IP, host name; `null` outside a
+request – see [calls without a request](#calls-without-a-request)) and the
 `Stage`:
 
 | Stage | When | A veto means |
@@ -72,6 +73,19 @@ invitation code) – never from whether the address already has an account, or t
 
 Business data for the new account (company, name, terms) is not a guard's job: `ISlimRegistrationProfile` validates
 it and your store writes it with the account – see [registration with business data](registration-profile.md).
+
+## Calls without a request
+
+Guards also run when your own code calls `ISlimAuthManager` outside a request – a background job, an import, a queue
+worker. They are then resolved from a scope of their own and `context.HttpContext` is `null`. A guard that reads the
+request must handle that; whether such a call is trusted is your decision:
+
+```csharp
+public ValueTask<SlimVeto?> CheckAsync(SlimRegistrationContext context, CancellationToken ct) =>
+    ValueTask.FromResult(context.HttpContext is null   // our own import – trusted
+        ? null
+        : new SlimVeto("registration_not_allowed"));
+```
 
 ## Events
 

@@ -171,6 +171,42 @@ public sealed class HookTests
         Assert.Null(await app.Users.FindByEmailAsync("private@gmail.test", default));
     }
 
+    [Fact]
+    public async Task Registration_guards_also_run_without_a_request()
+    {
+        await using var app = await TestApp.StartAsync(With(b => b.AddRegistrationGuard<CompanyDomainGuard>()));
+        await using var job = app.App.Services.CreateAsyncScope();   // a background job: no HttpContext
+        var auth = job.ServiceProvider.GetRequiredService<ISlimAuthManager>();
+
+        var refused = await auth.RegisterAsync("imported@gmail.test", "Some-Long-Pass-1");
+        var allowed = await auth.RegisterAsync("imported@firma.test", "Some-Long-Pass-1");
+
+        Assert.Null(refused.User);
+        Assert.Null(await app.Users.FindByEmailAsync("imported@gmail.test", default));
+        Assert.NotNull(allowed.User);
+    }
+
+    [Fact]
+    public async Task A_guard_can_trust_calls_without_a_request()
+    {
+        await using var app = await TestApp.StartAsync(With(b => b.AddRegistrationGuard<RequestsOnlyGuard>()));
+        await using var job = app.App.Services.CreateAsyncScope();
+
+        var imported = await job.ServiceProvider.GetRequiredService<ISlimAuthManager>().RegisterAsync("imported@gmail.test", "Some-Long-Pass-1");
+        var refused = await app.CreateClient().PostJsonAsync("/auth/register",
+            new { email = "someone@gmail.test", password = "Some-Long-Pass-1" }, HttpStatusCode.Forbidden);
+
+        Assert.NotNull(imported.User);
+        Assert.Equal("registration_not_allowed", refused.Str("status"));
+    }
+
+    /// <summary>Self-service registration is closed; the host's own import (no request) is trusted.</summary>
+    private sealed class RequestsOnlyGuard : ISlimRegistrationGuard
+    {
+        public ValueTask<SlimVeto?> CheckAsync(SlimRegistrationContext context, CancellationToken ct) =>
+            ValueTask.FromResult(context.HttpContext is null ? null : new SlimVeto("registration_not_allowed"));
+    }
+
     // ------------------------------------------------------------------ events
 
     [Fact]
