@@ -29,7 +29,7 @@
     <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.14" />
     <!-- transitive via Microsoft.Data.SqlClient; 9.0.x has known vulnerabilities (GHSA-846f-f764-76mx) -->
     <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="10.0.14" />
-    <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.1" />
+    <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
     <PackageVersion Include="Microsoft.AspNetCore.DataProtection.EntityFrameworkCore" Version="10.0.14" />
     <PackageVersion Include="Microsoft.AspNetCore.DataProtection.StackExchangeRedis" Version="10.0.14" />
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.Certificate" Version="10.0.14" />
