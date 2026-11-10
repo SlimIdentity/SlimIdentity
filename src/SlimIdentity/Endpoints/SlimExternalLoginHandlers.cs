@@ -201,6 +201,7 @@ internal sealed class SlimExternalLoginHandlers(
         var rejection = !user.IsActive ? "account_disabled"
             : user.IsLockedOut(now) ? "account_locked"
             : O.SignIn.RequireConfirmedEmail && !user.EmailConfirmed ? "email_not_confirmed"
+            : user.PasswordChangeRequired ? "password_change_required"   // the start password is replaced first
             : null;
         if (rejection is not null)
         {
@@ -268,6 +269,9 @@ internal sealed class SlimExternalLoginHandlers(
         var user = await store.FindByIdAsync(payload.Uid, ct);
         if (user is null || !user.IsActive || !SlimUser.IsSameSecurityState(user.SecurityStamp, payload.Stamp))
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
+        if (user.PasswordChangeRequired)
+            return SlimResults.Status("password_change_required",
+                "The password was set by an administrator. Sign in with it once and choose your own password.", StatusCodes.Status403Forbidden);
 
         if (!SlimModes.TryResolve(O, false, out _, out var modeError)) return modeError!;
 

@@ -82,6 +82,10 @@ administrator sets another password. A lockout that starts in between holds (`42
 it. The TypeScript client handles it as `{ kind: "password_change" }` and
 `completePasswordChange(token, newPassword)`.
 
+Every other way in waits as well: a passkey or an external login of the account answers `password_change_required`
+without a session until the start password has been replaced – it stays known to whoever set or read it, so it must
+not outlive the first sign-in.
+
 ## Second factor without mail
 
 Authenticator apps need no mail. Recovery codes cover a lost phone; `ResetTwoFactorAsync` covers lost recovery codes.

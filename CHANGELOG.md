@@ -201,6 +201,9 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
   fresh session chain.
 - Without `ISlimSessionStore`, refreshes and other renewals were reported as new sign-ins (guard stage `SignIn`, event
   `signed_in`); the stage now follows the original sign-in time.
+- A forced password change (start password set by an administrator) is no longer skipped with a passkey or an
+  external login: both answer `password_change_required` without a session until the start password is replaced, and
+  the session issuance refuses new sign-ins with a pending change as a backstop.
 - An authenticator can be enabled right after a sign-in with an e-mail code (both share the "last code" marker).
 - LDAP template: password reset and registration are switched off as in the guide; the legacy-migration example handles
   accounts without a hash.

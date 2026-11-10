@@ -178,6 +178,13 @@ internal sealed class SlimPasskeyHandlers(
         if (user is not { IsActive: true }) return Failed("account");
         if (O.SignIn.RequireConfirmedEmail && !user.EmailConfirmed)
             return SlimResults.Status("email_not_confirmed", "The e-mail address has not been confirmed yet.", StatusCodes.Status403Forbidden);
+        // a start password set by an administrator is replaced first – no sign-in method gets around it
+        if (user.PasswordChangeRequired)
+        {
+            metrics.Login("password_change_required", cookies);
+            return SlimResults.Status("password_change_required",
+                "The password was set by an administrator. Sign in with it once and choose your own password.", StatusCodes.Status403Forbidden);
+        }
 
         // single use, atomically: this challenge must be newer than the last one used with this passkey
         if (!await passkeys.TryRecordUseAsync(credentialId, passkey.SignCount, authData.SignCount, state.IssuedAt, time.GetUtcNow(), authData.BackedUp, ct))

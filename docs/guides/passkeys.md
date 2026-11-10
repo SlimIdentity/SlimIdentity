@@ -54,7 +54,8 @@ POST /auth/passkeys/login/options                                   → { "optio
 POST /auth/passkeys/login?useCookies=true|false   { "state", "credential", "rememberMe" }   → session
 ```
 
-The session has `amr: passkey`. Sign-in guards, inactive accounts and `RequireConfirmedEmail` apply as for every
+The session has `amr: passkey`. Sign-in guards, inactive accounts, `RequireConfirmedEmail` and a forced password
+change (`403 password_change_required` – sign in with the start password once) apply as for every
 sign-in; a running password lockout does not block passkeys (there is nothing to guess).
 
 **Autofill** (conditional UI) – the browser offers the passkeys of the site right in the e-mail field, no extra button:

@@ -129,6 +129,7 @@ Test names refer to `tests/SlimIdentity.Tests` (`Integration/…`, `Unit/Propert
 | G8 | User-bound API key acts as the user on `/auth/*` (mints a session, signs out everywhere) | covered – `ReviewRound1.R5_an_api_key_cannot_act_as_the_user_on_the_account_endpoints`. **Fixed** (review round 1): account endpoints accept cookies and bearer tokens only |
 | G9 | A host endpoint signs a user in with `ISlimAuthManager.SignInAsync` after its own first factor (client certificate): locked, unconfirmed, forced password change, 2FA skipped | covered – `ReviewRound3.S2_SignInAsync_refuses_accounts_that_may_not_sign_in`, `…S2_SignInAsync_asks_for_the_second_factor_and_the_built_in_flow_completes_it`. **Fixed** (external review round 3) |
 | G10 | Ending an impersonation starts a fresh session chain for the administrator (new `auth_time`, new absolute lifetime) | covered – `ReviewRound4.S4_ending_an_impersonation_keeps_the_administrators_sign_in_time`. **Fixed** (external review round 4) |
+| G11 | A forced password change (start password set by an administrator) skipped with a passkey or an external login – the known start password stays valid | covered – `Passkey.A_forced_password_change_is_not_skipped_with_a_passkey`, `ReviewRound4.A_forced_password_change_is_not_skipped_with_an_external_login`; backstop in the session issuance. **Fixed** (after review round 4) |
 
 ## H. Stores and infrastructure
 

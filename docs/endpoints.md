@@ -42,7 +42,7 @@ with `ISlimTwoFactorStore`.
 | :--- | :--- |
 | `GET /login/{provider}?returnUrl=…&useCookies=…&code_challenge=…&code_challenge_method=S256` ⏱ | Browser navigation (not `fetch`). Redirects to the identity provider. Bearer mode requires the PKCE challenge. `404 unknown_provider`, `400 invalid_return_url`, `400 code_challenge_required`, `400 invalid_code_challenge`. |
 | `GET /login/{provider}/callback` | Handled internally; redirects to `returnUrl`. |
-| `POST /login/external/exchange` ⏱ | Bearer clients: `{ "code", "codeVerifier", "twoFactorRememberToken"? }` – `code` from the redirect's fragment, `codeVerifier` from the PKCE challenge → token pair, or `401 requires_two_factor` with `preAuthToken`. `401 invalid_token`. |
+| `POST /login/external/exchange` ⏱ | Bearer clients: `{ "code", "codeVerifier", "twoFactorRememberToken"? }` – `code` from the redirect's fragment, `codeVerifier` from the PKCE challenge → token pair, or `401 requires_two_factor` with `preAuthToken`. `401 invalid_token`, `403 password_change_required`. |
 | `POST /link/external` ⏱ 🔒 | Links the identity of a link flow (`GET /login/{provider}?link=true&code_challenge=…`, code in `#slim_link_code=…`) to the signed-in account: `{ "code", "codeVerifier", "password" }` → `200 external_login_linked`. `400 invalid_password`, `401 invalid_token`, `403 email_not_confirmed`, `409 external_login_taken`, `423`. |
 | `GET /sign-in-methods` 🔒 | `200` `hasPassword`, `externalLogins` (`provider`, `providerKey`). |
 | `POST /sign-in-methods/external/remove` ⏱ 🔒 | `{ "provider", "providerKey", "password" }` (password if the account has one) → `200 external_login_removed`. `400 invalid_password`, `403` during impersonation, `404 external_login_not_found`, `409 last_sign_in_method`, `423`. |
@@ -50,7 +50,7 @@ with `ISlimTwoFactorStore`.
 
 Redirect results on `returnUrl`: cookie mode – cookie set, no parameters; bearer mode – `#code=…` (fragment); 2FA
 required in cookie mode – `#slim_status=requires_two_factor&preAuthToken=…&method=…`; errors – `?slim_error=` one of
-`account_conflict`, `email_not_verified`, `registration_disabled`, `email_required`, `account_disabled`, `account_locked`, `email_not_confirmed`,
+`account_conflict`, `email_not_verified`, `registration_disabled`, `email_required`, `account_disabled`, `account_locked`, `email_not_confirmed`, `password_change_required`,
 `provider_mismatch`, `missing_provider_key`, `two_factor_unavailable`.
 
 ## Account
@@ -95,7 +95,7 @@ Links are created by the host with `ISlimAuthManager.CreateInvitationAsync` – 
 | `POST /passkeys/register/options` ⏱ 🔒 | `password` (if the account has one) | `200` `options` (creation options, base64url), `state` | `400 invalid_password`, `403 email_not_confirmed`, `403` during impersonation, `423` |
 | `POST /passkeys/register` ⏱ 🔒 | `state`, `credential` (result of `navigator.credentials.create`), `name` | `200` `id`, `name`, `createdUtc`, `backupEligible`, `backedUp` | `400 invalid_passkey`, `409 passkey_exists` |
 | `POST /passkeys/login/options` ⏱ | – | `200` `options` (request options), `state` | – |
-| `POST /passkeys/login?useCookies=…` ⏱ | `state`, `credential` (result of `navigator.credentials.get`), `rememberMe` | `200` session (`amr: passkey`, no second factor) | `401 invalid_passkey`, `403 email_not_confirmed`, `403 <veto>` |
+| `POST /passkeys/login?useCookies=…` ⏱ | `state`, `credential` (result of `navigator.credentials.get`), `rememberMe` | `200` session (`amr: passkey`, no second factor) | `401 invalid_passkey`, `403 email_not_confirmed`, `403 password_change_required`, `403 <veto>` |
 | `POST /sign-in-methods/passkeys/rename` 🔒 | `id`, `name` (1–64 characters) | `200 passkey_renamed` | `400 invalid_name`, `404 passkey_not_found` |
 | `POST /sign-in-methods/passkeys/remove` ⏱ 🔒 | `id`, `password` (if the account has one) | `200 passkey_removed` | `400 invalid_password`, `404 passkey_not_found`, `409 last_sign_in_method` |
 

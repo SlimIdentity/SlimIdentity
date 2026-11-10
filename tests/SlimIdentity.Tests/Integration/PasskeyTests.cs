@@ -297,6 +297,32 @@ public sealed class PasskeyTests
         Assert.Equal(HttpStatusCode.Unauthorized, (await LoginAsync(app, deviceBound)).Status);
     }
 
+    /// <summary>
+    /// A start password set by an administrator must be replaced before any session – a passkey is no way around it
+    /// (the start password stays known to whoever set or read it).
+    /// </summary>
+    [Fact]
+    public async Task A_forced_password_change_is_not_skipped_with_a_passkey()
+    {
+        await using var app = await TestApp.StartAsync(WithPasskeys());
+        using var key = new SoftwarePasskey();
+        await RegisterAsync(app, await SignedInAsync(app), key);
+        await using (var scope = app.App.Services.CreateAsyncScope())
+            await scope.ServiceProvider.GetRequiredService<ISlimAuthManager>()
+                .SetPasswordAsync(app.Users.Get(TestApp.UserEmail), "Start-Password-123", mustChange: true);
+
+        var (status, body) = await LoginAsync(app, key);
+
+        Assert.Equal(HttpStatusCode.Forbidden, status);
+        Assert.Equal("password_change_required", body.Str("status"));
+
+        // the way out: the start password, then an own one – afterwards the passkey works again
+        var client = app.CreateClient();
+        var change = await client.PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = "Start-Password-123" }, HttpStatusCode.Unauthorized);
+        await client.PostJsonAsync("/auth/login/password-change", new { token = change.Str("passwordChangeToken"), newPassword = "Own-Password-456" });
+        Assert.Equal(HttpStatusCode.OK, (await LoginAsync(app, key)).Status);
+    }
+
     // ------------------------------------------------------------------ pre-account hijacking
 
     /// <summary>

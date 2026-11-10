@@ -340,6 +340,11 @@ internal sealed class SlimAuthManager(
         // with or without a session store; a new sign-in never does
         var signInStage = stage ?? (sessionId is null && authTime is null ? SlimSignInStage.SignIn : SlimSignInStage.Renewal);
         var impersonatorId = SlimClaims.ParseActorClaim(actorJson)?.UserId;
+        // backstop: no new session while a start password set by an administrator waits to be replaced – every sign-in
+        // path checks it with its own answer, this keeps a forgotten one from issuing a session (impersonation is the
+        // administrator's own act)
+        if (signInStage == SlimSignInStage.SignIn && user.PasswordChangeRequired && authMethod != MethodImpersonation)
+            return SlimAuthResult.Failed("password_change_required");
         if (user.IsActive && checkGuards && await Hooks.CheckSignInAsync(user, authMethod, signInStage, impersonatorId, ct) is { } veto)
         {
             await Hooks.RaiseAsync(SlimEventTypes.SignInFailed, user.Id, authMethod, veto.Error, impersonatorId, ct);

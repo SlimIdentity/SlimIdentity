@@ -93,6 +93,26 @@ public sealed class ReviewRound4Tests
         Assert.Single(await app.App.Services.GetRequiredService<ISlimPasskeyStore>().GetPasskeysAsync(user.Id, default));
     }
 
+    // ------------------------------------------------------------------ forced password change (finding after round 4)
+
+    /// <summary>An external sign-in does not get around a start password the administrator set (mustChange).</summary>
+    [Fact]
+    public async Task A_forced_password_change_is_not_skipped_with_an_external_login()
+    {
+        await using var app = await TestApp.StartAsync(WithProviderAndPasskeys());
+        await SocialOnlySessionAsync(app);   // creates the account with its linked provider
+        await using (var scope = app.App.Services.CreateAsyncScope())
+            await scope.ServiceProvider.GetRequiredService<ISlimAuthManager>()
+                .SetPasswordAsync(app.Users.Get(SocialEmail), "Start-Password-123", mustChange: true);
+
+        var browser = app.CreateClient();
+        var start = await browser.GetAsync("/auth/login/Fake?useCookies=true&returnUrl=/done");
+        var callback = await browser.GetAsync(start.Headers.Location!.OriginalString);
+
+        Assert.Contains("slim_error=password_change_required", callback.Headers.Location!.OriginalString);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await browser.GetAsync("/auth/me")).StatusCode);
+    }
+
     // ------------------------------------------------------------------ Q: renewals reported as new sign-ins
 
     private sealed class Recorder : ISlimEventObserver
