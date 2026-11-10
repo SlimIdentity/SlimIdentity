@@ -33,6 +33,19 @@ public interface ISlimUserStore
     Task UpdateSecurityStateAsync(SlimUser user, CancellationToken ct);
 
     /// <summary>
+    /// Replaces <b>only</b> the security stamp, and <b>only if</b> it still equals <paramref name="expectedStamp"/>;
+    /// returns whether it was replaced, e.g.
+    /// <c>UPDATE users SET security_stamp = @newStamp WHERE id = @id AND security_stamp = @expectedStamp</c>
+    /// (affected rows = 1).
+    /// </summary>
+    /// <remarks>
+    /// Used where SlimIdentity only ends sessions or refreshes claims – sign-out everywhere, <c>RefreshClaimsAsync</c>,
+    /// forgetting all remembered devices. A password or 2FA change that happened in the meantime is never written back
+    /// over; SlimIdentity reads the user again and retries.
+    /// </remarks>
+    Task<bool> UpdateSecurityStampAsync(SlimUser user, string expectedStamp, string newStamp, CancellationToken ct);
+
+    /// <summary>
     /// Adds one failed sign-in attempt <b>atomically</b> and returns the new count; touches no other field, e.g.
     /// <c>UPDATE users SET failed_login_attempts = failed_login_attempts + 1 WHERE id = @id RETURNING failed_login_attempts</c>.
     /// </summary>

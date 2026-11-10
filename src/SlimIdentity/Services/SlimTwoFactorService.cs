@@ -47,15 +47,15 @@ internal sealed class SlimTwoFactorService(
             new SlimRememberDevicePayload(user.Id, user.SecurityStamp, expires.ToUnixTimeSeconds()), lifetime);
         if (!cookieMode) return token;
 
-        http.Response.Cookies.Append(RememberCookieName, token, RememberCookieOptions(expires));
+        http.Response.Cookies.Append(RememberCookieName, token, RememberCookieOptions(http, expires));
         return null;
     }
 
     /// <summary>Deletes the remember cookie of this browser.</summary>
     public void ForgetDevice(HttpContext http) =>
-        http.Response.Cookies.Delete(RememberCookieName, RememberCookieOptions(null));
+        http.Response.Cookies.Delete(RememberCookieName, RememberCookieOptions(http, null));
 
-    private CookieOptions RememberCookieOptions(DateTimeOffset? expires)
+    private CookieOptions RememberCookieOptions(HttpContext http, DateTimeOffset? expires)
     {
         var o = options.Value;
         return new CookieOptions
@@ -64,7 +64,7 @@ internal sealed class SlimTwoFactorService(
             Secure = true,
             SameSite = o.Cookies.SameSite,
             Domain = o.Cookies.Domain,
-            Path = o.RoutePrefix,   // only sent to the auth endpoints
+            Path = http.Request.PathBase.Add(o.RoutePrefix).Value,   // only sent to the auth endpoints (behind UsePathBase too)
             Expires = expires,
             IsEssential = true,
         };

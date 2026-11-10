@@ -85,7 +85,9 @@ internal sealed class SlimCredentialService(
         var now = time.GetUtcNow();
         if (!await HasPasswordAsync(user, ct))
         {
-            return long.TryParse(http.User.FindFirst(SlimClaimTypes.AuthTime)?.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var signedIn)
+            // the fresh sign-in of an impersonation is the administrator's, not the owner's
+            return !http.User.IsImpersonating()
+                && long.TryParse(http.User.FindFirst(SlimClaimTypes.AuthTime)?.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var signedIn)
                 && now - DateTimeOffset.FromUnixTimeSeconds(signedIn) <= RecentSignInWindow
                 ? null
                 : Http.SlimResults.Status("reauthentication_required",

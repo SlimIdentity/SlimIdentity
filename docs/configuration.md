@@ -159,6 +159,7 @@ If the old secret leaked, do not list it in `PreviousJwtSecrets` – every token
 | `AddEventObserver<T>()` | Security events for audit trails and alerts. |
 | `AddRegistrationProfile<T>()` | Business data at `/register`, written with the account – [guide](guides/registration-profile.md). |
 | `UseRateLimitPartitionKey(Func<HttpContext, string?>)` | Custom rate-limit client key. |
+| `UseTenantKey(Func<HttpContext, string?>)` | Binds cookies and access tokens to the request's tenant ([multi-tenancy](guides/multi-tenancy.md#2-sessions-usetenantkey)). |
 | `.Authentication` | The `AuthenticationBuilder` – add OAuth/OIDC handlers here. |
 
 All store methods take an optional `ServiceLifetime` (default `Scoped`).

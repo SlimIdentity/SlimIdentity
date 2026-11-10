@@ -299,6 +299,22 @@ public sealed class SlimIdentityBuilder
         return this;
     }
 
+    /// <summary>
+    /// Binds every session to the tenant it was issued in. The key of the request (e.g. the tenant id resolved from the
+    /// host name) is written to the <see cref="SlimClaimTypes.Tenant"/> claim at sign-in and compared on every request –
+    /// before any validation interval and also for access tokens with
+    /// <see cref="SlimTokenOptions.ValidateSecurityStampOnEachRequest"/> = false. A cookie or token presented to another
+    /// tenant is rejected. Required with a store per tenant (see the multi-tenancy guide); keep the selector synchronous
+    /// and in memory.
+    /// </summary>
+    /// <param name="keySelector">Returns the tenant of a request; <c>null</c> for requests outside any tenant.</param>
+    public SlimIdentityBuilder UseTenantKey(Func<HttpContext, string?> keySelector)
+    {
+        ArgumentNullException.ThrowIfNull(keySelector);
+        Services.Replace(ServiceDescriptor.Singleton(new Authentication.SlimTenantBinding(keySelector)));
+        return this;
+    }
+
     internal sealed record SlimNullEmailSenderGuard(bool AllowInProduction);
 
     private SlimIdentityBuilder Register<TService,[DynamicallyAccessedMembers(Ctors)] TImplementation>(ServiceLifetime lifetime)

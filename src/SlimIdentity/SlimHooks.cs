@@ -30,8 +30,12 @@ public sealed class SlimSignInContext
     public required SlimSignInStage Stage { get; init; }
     /// <summary>The administrator during an impersonation, else <c>null</c>.</summary>
     public string? ImpersonatorId { get; init; }
-    /// <summary>The request (client IP, host name / tenant, headers).</summary>
-    public required HttpContext HttpContext { get; init; }
+    /// <summary>
+    /// The request (client IP, host name / tenant, headers); <c>null</c> when your own code calls
+    /// <see cref="ISlimAuthManager"/> outside a request (a background job, an import) – guards run there too, so decide
+    /// yourself whether such a call is trusted.
+    /// </summary>
+    public HttpContext? HttpContext { get; init; }
 }
 
 /// <summary>
@@ -58,8 +62,12 @@ public sealed class SlimRegistrationContext
     public required string Email { get; init; }
     /// <summary><c>null</c> for <c>/register</c>, the provider for an automatic registration through external login.</summary>
     public string? Provider { get; init; }
-    /// <summary>The request (client IP, captcha header, invitation code, …).</summary>
-    public required HttpContext HttpContext { get; init; }
+    /// <summary>
+    /// The request (client IP, captcha header, invitation code, …); <c>null</c> when your own code calls
+    /// <see cref="ISlimAuthManager.RegisterAsync"/> outside a request (a background job, an import) – guards run there
+    /// too, so decide yourself whether such a call is trusted.
+    /// </summary>
+    public HttpContext? HttpContext { get; init; }
 }
 
 /// <summary>

@@ -10,7 +10,7 @@ public interface ISlimAuthManager
 {
     /// <summary>
     /// Signs <paramref name="user"/> in after <b>your</b> first factor – a client certificate, a magic link, your own
-    /// password check – with every rule of <c>/login</c> that follows it: inactive (<c>account_inactive</c>), locked
+    /// password check – with every rule of <c>/login</c> that follows it: inactive (<c>account_disabled</c>), locked
     /// (<c>locked_out</c>), unconfirmed with <c>RequireConfirmedEmail</c> (<c>email_not_confirmed</c>) and
     /// administrator-set passwords (<c>password_change_required</c>) are refused, sign-in guards apply. If the account
     /// has 2FA, no session is issued: <see cref="SlimAuthResult.TwoFactorChallenge"/> holds the challenge – return it
@@ -32,17 +32,21 @@ public interface ISlimAuthManager
         bool secondFactorVerified = false, CancellationToken ct = default);
 
     /// <summary>
-    /// Admin impersonation: signs in as <paramref name="targetUser"/> but keeps <paramref name="impersonatorUserId"/>
-    /// in the standard <c>act</c> (actor) claim. Never persistent, never issues a refresh token.
-    /// The session is bound to the impersonator's security stamp: if the impersonator is deactivated or their
-    /// stamp rotates, the impersonation session becomes invalid. Fails with <c>impersonator_invalid</c>,
-    /// <c>already_impersonating</c> or <c>cannot_impersonate_self</c> (check <see cref="SlimAuthResult.Succeeded"/>).
+    /// Admin impersonation: the signed-in administrator of the current request signs in as <paramref name="targetUser"/>
+    /// – in the mode of their own session (cookie or JWT) – and stays in the standard <c>act</c> (actor) claim. Never
+    /// persistent, never issues a refresh token. The session is bound to the impersonator's security stamp and – with
+    /// <see cref="ISlimSessionStore"/> – to the administrator's session it was started from: deactivating the
+    /// impersonator, rotating their stamp or revoking that session ends it; <see cref="EndImpersonationAsync"/> resumes
+    /// that session. Fails with <c>impersonator_invalid</c>, <c>already_impersonating</c> or
+    /// <c>cannot_impersonate_self</c> (check <see cref="SlimAuthResult.Succeeded"/>); throws
+    /// <see cref="InvalidOperationException"/> on an anonymous request. Authorize the caller yourself.
     /// </summary>
-    Task<SlimAuthResult> ImpersonateAsync(SlimUser targetUser, string impersonatorUserId, bool useCookies, CancellationToken ct = default);
+    Task<SlimAuthResult> ImpersonateAsync(SlimUser targetUser, CancellationToken ct = default);
 
     /// <summary>
-    /// Ends the impersonation of the current request and signs the impersonator back in – only if they are still
-    /// active and their security stamp is unchanged. Otherwise the session is ended and the result fails with
+    /// Ends the impersonation of the current request and returns to the impersonator's session – only if they are still
+    /// active, their security stamp is unchanged and (with <see cref="ISlimSessionStore"/>) the session the impersonation
+    /// was started from still exists. Otherwise the session is ended and the result fails with
     /// <c>impersonator_invalid</c> (or <c>not_impersonating</c>).
     /// </summary>
     Task<SlimAuthResult> EndImpersonationAsync(CancellationToken ct = default);
@@ -54,18 +58,19 @@ public interface ISlimAuthManager
     /// </summary>
     /// <example><code>
     /// if (await auth.ConfirmPasswordAsync(user, request.Password, ct) is { } failure) return failure;
-    /// return Results.Ok((await auth.ElevateToSudoAsync(user, TimeSpan.FromMinutes(5), me.IsSlimCookieSession(), ct)).ToResponse());
+    /// var result = await auth.ElevateToSudoAsync(user, TimeSpan.FromMinutes(5), ct);
+    /// return result.Succeeded ? Results.Ok(result.ToResponse()) : Results.Json(new { status = result.Error }, statusCode: 403);
     /// </code></example>
-    Task<SlimAuthResult> ElevateToSudoAsync(SlimUser user, TimeSpan duration, bool useCookies, CancellationToken ct = default);
+    Task<SlimAuthResult> ElevateToSudoAsync(SlimUser user, TimeSpan duration, CancellationToken ct = default);
 
     /// <summary>
-    /// Step-up authentication: re-issues the current session with additional temporary claims (for the sudo window use
-    /// <see cref="ElevateToSudoAsync"/>). An active impersonation is preserved.
+    /// Step-up authentication: re-issues the current session – in its own mode (cookie or JWT) – with additional
+    /// temporary claims (for the sudo window use <see cref="ElevateToSudoAsync"/>). An active impersonation is preserved.
     /// <paramref name="user"/> must be the signed-in user of the current request – anything else throws
     /// <see cref="InvalidOperationException"/> (the session would otherwise switch to another account).
     /// Confirm the password first with <see cref="ConfirmPasswordAsync"/>.
     /// </summary>
-    Task<SlimAuthResult> ElevateSessionAsync(SlimUser user, IEnumerable<Claim> additionalClaims, bool useCookies, CancellationToken ct = default);
+    Task<SlimAuthResult> ElevateSessionAsync(SlimUser user, IEnumerable<Claim> additionalClaims, CancellationToken ct = default);
 
     /// <summary>
     /// Confirms that the owner is present before a sensitive change, with the rules of the built-in endpoints. Accounts
@@ -73,7 +78,8 @@ public interface ISlimAuthManager
     /// notification), parallel attempts are serialized and <see cref="ISlimCustomPasswordValidator"/> is used when
     /// registered; a correct password resets the failed-attempt counter and upgrades an outdated hash, like a sign-in
     /// (<paramref name="user"/> is updated accordingly). Accounts without a password (external login, passkeys) need a
-    /// sign-in of at most 5 minutes ago instead. Returns <c>null</c> when confirmed, otherwise the result to return
+    /// sign-in of at most 5 minutes ago instead (never during an impersonation – that sign-in is the administrator's).
+    /// Returns <c>null</c> when confirmed, otherwise the result to return
     /// as-is: <c>400 invalid_password</c>, <c>423</c> with <c>Retry-After</c>, or <c>403 reauthentication_required</c>.
     /// </summary>
     /// <example><code>

@@ -107,8 +107,12 @@ POST /auth/sign-in-methods/external/remove    { "provider": "Google", "providerK
 - Removing needs the current password – or, for accounts without one, a sign-in within the last 5 minutes: a stolen
   session alone must not cut the owner's ways in.
 - **The last way in is never removed:** an account without a password keeps at least one external login or passkey
-  (`409 last_sign_in_method` – link another provider or set a password via reset first). Parallel removals cannot get
-  around it.
+  (`409 last_sign_in_method` – link another provider first). Parallel removals cannot get around it.
+- **A pure SSO account stays without local credentials:** an account without a password but with an external login
+  gets no password via `/change-password` (`409 password_not_set`) or a self-service reset (`/forgot-password` sends
+  no link, `/reset-password` answers `409 external_sign_in_only`), and no passkey (`403 password_required`). An
+  administrator can still set one (`SetPasswordAsync`, `CreatePasswordResetAsync`). Linking a provider to an account
+  with a password changes nothing – password and passkeys stay.
 - Not during an impersonation (`403`). Event `external_login_removed`.
 
 TypeScript: `signInMethods()` and `removeExternalLogin(provider, providerKey, password)`.

@@ -91,7 +91,7 @@ Messages for the errors a user can actually run into:
 | `account_conflict` | "An account with this address already exists. Sign in with your password and link Google in your settings." |
 | `email_not_verified` | "Google has not verified this address. Verify it at Google or register with your e-mail." |
 | `registration_disabled` | "There is no account for this address." |
-| `account_disabled`, `account_locked` | as for a password sign-in |
+| `account_disabled`, `locked_out` | as for a password sign-in |
 | `password_change_required` | "Sign in with your password once – you have to change it." |
 
 The full list is in the [endpoint reference](../endpoints.md#external-login-islimexternalloginstore).
@@ -121,8 +121,9 @@ In the [Entra admin center](https://entra.microsoft.com) → **App registrations
    for development).
 3. **Certificates & secrets → New client secret.** Note the expiry date – the sign-in stops working the day it
    expires. A certificate or a managed identity (federated credential) avoids the secret altogether.
-4. **Token configuration → Add optional claim → ID → `email`.** Without it, the ID token carries no address and
-   SlimIdentity falls back to `preferred_username` (the sign-in name, often but not always a mailbox).
+4. **Token configuration → Add optional claim → ID → `email` and `acct`.** Without `email`, the ID token carries no
+   address and SlimIdentity falls back to `preferred_username` (the sign-in name, often but not always a mailbox).
+   `acct` tells members (`0`) from guests (`1`) – see [trusting the address](#trusting-the-address).
 5. Note the **tenant ID** and the **application (client) ID** from the overview.
 
 ### 2. The back end
@@ -135,7 +136,6 @@ var tenantId = builder.Configuration["EntraId:TenantId"];
 var slim = builder.Services.AddSlimIdentity(o =>
     {
         o.TrustedOrigins.Add("https://app.example.com");
-        o.ExternalLogin.TrustedEmailProviders.Add("EntraId");   // single tenant only – see below
     })
     // … stores …
     ;
@@ -149,6 +149,14 @@ slim.Authentication.AddOpenIdConnect("EntraId", "Microsoft", o =>
     o.CallbackPath = "/signin-entra";
     o.Scope.Add("email");                         // openid and profile are there by default
     o.UseSlimErrorRedirects();
+    o.Events.OnTokenValidated = context =>
+    {
+        // single tenant: members' addresses come from your directory – guests' do not (see below)
+        var identity = (ClaimsIdentity)context.Principal!.Identity!;
+        if (identity.FindFirst(ClaimTypes.Email) is not null && identity.FindFirst("acct")?.Value == "0")
+            identity.AddClaim(new Claim("email_verified", "true"));
+        return Task.CompletedTask;
+    };
 });
 ```
 
@@ -163,8 +171,14 @@ it, so renaming a user or changing their address does not hand the account to so
 Entra ID does not send `email_verified`. Whether SlimIdentity may create or link an account by the address depends on
 who controls the addresses in the tenant:
 
-- **Single tenant (your company):** your administrators assign the addresses, so the address is as trustworthy as
-  your directory – put the scheme into `TrustedEmailProviders`, as above.
+- **Single tenant (your company), members:** your administrators assign the addresses, so a member's address is as
+  trustworthy as your directory – the snippet above marks it verified when `acct` is `0`.
+- **Single tenant, guests (B2B, `acct` = `1`):** **never** trust the address. It comes from the guest's home tenant
+  (another organization's administrator) or a personal Microsoft account, and an invitation can be redeemed with
+  another account than the invited one – a guest could bring the address of one of your customers. Guests are matched
+  by `sub` only: they get no account by their address and are not linked to an existing one (`email_not_verified` /
+  `account_conflict`); a user links Entra to their existing account with the link flow. Do not put the scheme into
+  `TrustedEmailProviders` – that would trust guests too.
 - **Multi-tenant ("any organization"):** **never** trust the address. Any tenant's administrator can give a user any
   address, including one of your customers' – that is the *nOAuth* attack. Either match only by `sub` (no
   `TrustedEmailProviders`; users link Entra to their existing account themselves), or add the optional claim

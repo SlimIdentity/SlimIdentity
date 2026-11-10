@@ -14,7 +14,17 @@ namespace SlimIdentity.Contracts;
 /// Bearer mode: the token from a previous <c>/auth/login/2fa</c> with <c>rememberDevice</c>; skips the second factor on
 /// this device. (Cookie mode uses a cookie instead.)
 /// </param>
-public sealed record SlimLoginRequest(string Email, string Password, bool RememberMe = false, string? TwoFactorRememberToken = null);
+public sealed record SlimLoginRequest(string Email, string Password, bool RememberMe = false, string? TwoFactorRememberToken = null)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Email = ").Append(Email);
+        builder.Append(", Password = ").Append(SlimRedaction.Mask(Password));
+        builder.Append(", RememberMe = ").Append(RememberMe);
+        builder.Append(", TwoFactorRememberToken = ").Append(SlimRedaction.Mask(TwoFactorRememberToken));
+        return true;
+    }
+}
 
 /// <summary>Body of <c>POST /auth/login/2fa</c>: either <see cref="Code"/> (TOTP / e-mail code) or <see cref="RecoveryCode"/>.</summary>
 /// <param name="PreAuthToken">Token from the <c>requires_two_factor</c> answer of <c>/auth/login</c>.</param>
@@ -23,25 +33,65 @@ public sealed record SlimLoginRequest(string Email, string Password, bool Rememb
 /// <param name="RememberDevice">
 /// Skip the second factor on this device for <c>TwoFactor.RememberDeviceLifetime</c> (only if the feature is enabled).
 /// </param>
-public sealed record SlimTwoFactorLoginRequest(string PreAuthToken, string? Code = null, string? RecoveryCode = null, bool RememberDevice = false);
+public sealed record SlimTwoFactorLoginRequest(string PreAuthToken, string? Code = null, string? RecoveryCode = null, bool RememberDevice = false)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("PreAuthToken = ").Append(SlimRedaction.Mask(PreAuthToken));
+        builder.Append(", Code = ").Append(SlimRedaction.Mask(Code));
+        builder.Append(", RecoveryCode = ").Append(SlimRedaction.Mask(RecoveryCode));
+        builder.Append(", RememberDevice = ").Append(RememberDevice);
+        return true;
+    }
+}
 
 /// <summary>Body of <c>POST /auth/refresh</c>.</summary>
 /// <param name="RefreshToken">The current refresh token (single use).</param>
-public sealed record SlimRefreshRequest(string RefreshToken);
+public sealed record SlimRefreshRequest(string RefreshToken)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("RefreshToken = ").Append(SlimRedaction.Mask(RefreshToken));
+        return true;
+    }
+}
 
 /// <summary>Body of <c>POST /auth/logout</c>.</summary>
 /// <param name="RefreshToken">Bearer mode: the refresh token to invalidate.</param>
-public sealed record SlimLogoutRequest(string? RefreshToken = null);
+public sealed record SlimLogoutRequest(string? RefreshToken = null)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("RefreshToken = ").Append(SlimRedaction.Mask(RefreshToken));
+        return true;
+    }
+}
 
 /// <summary>Body of <c>POST /auth/register</c>.</summary>
 /// <param name="Email">E-mail address of the new account.</param>
 /// <param name="Password">Password according to the password policy.</param>
 /// <param name="Profile">Optional business data, validated by the host's <see cref="ISlimRegistrationProfile"/>.</param>
-public sealed record SlimRegisterRequest(string Email, string Password, JsonElement? Profile = null);
+public sealed record SlimRegisterRequest(string Email, string Password, JsonElement? Profile = null)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Email = ").Append(Email);
+        builder.Append(", Password = ").Append(SlimRedaction.Mask(Password));
+        builder.Append(", Profile = ").Append(Profile);
+        return true;
+    }
+}
 
 /// <summary>Body of <c>POST /auth/verify-email</c>.</summary>
 /// <param name="Token">Token from the verification mail.</param>
-public sealed record SlimVerifyEmailRequest(string Token);
+public sealed record SlimVerifyEmailRequest(string Token)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Token = ").Append(SlimRedaction.Mask(Token));
+        return true;
+    }
+}
 
 /// <summary>Body of <c>POST /auth/forgot-password</c> and <c>POST /auth/resend-verification</c>.</summary>
 /// <param name="Email">E-mail address of the account.</param>
@@ -50,33 +100,82 @@ public sealed record SlimEmailRequest(string Email);
 /// <summary>Body of <c>POST /auth/reset-password</c>.</summary>
 /// <param name="Token">Token from the reset mail.</param>
 /// <param name="NewPassword">New password according to the password policy.</param>
-public sealed record SlimResetPasswordRequest(string Token, string NewPassword);
+public sealed record SlimResetPasswordRequest(string Token, string NewPassword)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Token = ").Append(SlimRedaction.Mask(Token));
+        builder.Append(", NewPassword = ").Append(SlimRedaction.Mask(NewPassword));
+        return true;
+    }
+}
 
 /// <summary>Body of <c>POST /auth/login/password-change</c>: the forced change of a password set by an administrator.</summary>
 /// <param name="Token"><c>passwordChangeToken</c> from the <c>password_change_required</c> answer of <c>/auth/login</c>.</param>
 /// <param name="NewPassword">New password according to the password policy, different from the current one.</param>
-public sealed record SlimPasswordChangeLoginRequest(string Token, string NewPassword);
+public sealed record SlimPasswordChangeLoginRequest(string Token, string NewPassword)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Token = ").Append(SlimRedaction.Mask(Token));
+        builder.Append(", NewPassword = ").Append(SlimRedaction.Mask(NewPassword));
+        return true;
+    }
+}
 
 /// <summary>Body of <c>POST /auth/change-password</c>.</summary>
 /// <param name="CurrentPassword">The current password.</param>
 /// <param name="NewPassword">New password according to the password policy.</param>
-public sealed record SlimChangePasswordRequest(string CurrentPassword, string NewPassword);
+public sealed record SlimChangePasswordRequest(string CurrentPassword, string NewPassword)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("CurrentPassword = ").Append(SlimRedaction.Mask(CurrentPassword));
+        builder.Append(", NewPassword = ").Append(SlimRedaction.Mask(NewPassword));
+        return true;
+    }
+}
 
 /// <summary>Body of <c>POST /auth/2fa/enable</c>.</summary>
 /// <param name="SetupToken">Token from <c>POST /auth/2fa/setup</c>.</param>
 /// <param name="Code">First code from the authenticator app.</param>
 /// <param name="Password">The current password – a stolen session alone must not install or replace the second factor.</param>
-public sealed record SlimTwoFactorEnableRequest(string SetupToken, string Code, string? Password = null);
+public sealed record SlimTwoFactorEnableRequest(string SetupToken, string Code, string? Password = null)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("SetupToken = ").Append(SlimRedaction.Mask(SetupToken));
+        builder.Append(", Code = ").Append(SlimRedaction.Mask(Code));
+        builder.Append(", Password = ").Append(SlimRedaction.Mask(Password));
+        return true;
+    }
+}
 
 /// <summary>Body of endpoints that require the current password (<c>/auth/2fa/disable</c>, …).</summary>
 /// <param name="Password">The current password.</param>
-public sealed record SlimPasswordConfirmationRequest(string Password);
+public sealed record SlimPasswordConfirmationRequest(string Password)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Password = ").Append(SlimRedaction.Mask(Password));
+        return true;
+    }
+}
 
 /// <summary>Body of <c>POST /auth/login/external/exchange</c>.</summary>
 /// <param name="Code">One-time code from the external-login redirect (fragment <c>#code=</c>).</param>
 /// <param name="CodeVerifier">PKCE verifier whose S256 hash was sent as <c>code_challenge</c> when the login started.</param>
 /// <param name="TwoFactorRememberToken">"Remember this device" token of a bearer client – skips the second factor like at <c>/auth/login</c>.</param>
-public sealed record SlimExternalExchangeRequest(string Code, string? CodeVerifier = null, string? TwoFactorRememberToken = null);
+public sealed record SlimExternalExchangeRequest(string Code, string? CodeVerifier = null, string? TwoFactorRememberToken = null)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Code = ").Append(SlimRedaction.Mask(Code));
+        builder.Append(", CodeVerifier = ").Append(SlimRedaction.Mask(CodeVerifier));
+        builder.Append(", TwoFactorRememberToken = ").Append(SlimRedaction.Mask(TwoFactorRememberToken));
+        return true;
+    }
+}
 
 /// <summary>Body of <c>GET /auth/sign-in-methods</c>.</summary>
 /// <param name="HasPassword">The account has a password (or the host validates passwords externally, e.g. LDAP).</param>
@@ -98,31 +197,79 @@ public sealed record SlimPasskeyInfo(string Id, string Name, DateTimeOffset Crea
 /// <param name="Provider">Provider of the link, as listed.</param>
 /// <param name="ProviderKey">Subject at the provider, as listed.</param>
 /// <param name="Password">The current password – required for accounts that have one.</param>
-public sealed record SlimRemoveExternalLoginRequest(string Provider, string ProviderKey, string? Password = null);
+public sealed record SlimRemoveExternalLoginRequest(string Provider, string ProviderKey, string? Password = null)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Provider = ").Append(Provider);
+        builder.Append(", ProviderKey = ").Append(ProviderKey);
+        builder.Append(", Password = ").Append(SlimRedaction.Mask(Password));
+        return true;
+    }
+}
 
 /// <summary>Body of <c>POST /auth/link/external</c>: links the external identity of a link flow to the signed-in account.</summary>
 /// <param name="Code">The one-time code from the redirect's fragment (<c>#slim_link_code=…</c>).</param>
 /// <param name="CodeVerifier">The PKCE verifier of the link flow – a planted code from someone else's flow fails here.</param>
 /// <param name="Password">The current password (not needed for accounts without one).</param>
-public sealed record SlimExternalLinkRequest(string Code, string? CodeVerifier = null, string? Password = null);
+public sealed record SlimExternalLinkRequest(string Code, string? CodeVerifier = null, string? Password = null)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Code = ").Append(SlimRedaction.Mask(Code));
+        builder.Append(", CodeVerifier = ").Append(SlimRedaction.Mask(CodeVerifier));
+        builder.Append(", Password = ").Append(SlimRedaction.Mask(Password));
+        return true;
+    }
+}
 
 /// <summary>Body of <c>POST /auth/invitation/info</c>.</summary>
 /// <param name="Token">Token from the invitation link.</param>
-public sealed record SlimInvitationInfoRequest(string Token);
+public sealed record SlimInvitationInfoRequest(string Token)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Token = ").Append(SlimRedaction.Mask(Token));
+        return true;
+    }
+}
 
 /// <summary>Body of <c>POST /auth/invitation/accept</c>.</summary>
 /// <param name="Token">Token from the invitation link.</param>
 /// <param name="Password">The password to set, according to the password policy.</param>
-public sealed record SlimAcceptInvitationRequest(string Token, string Password);
+public sealed record SlimAcceptInvitationRequest(string Token, string Password)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Token = ").Append(SlimRedaction.Mask(Token));
+        builder.Append(", Password = ").Append(SlimRedaction.Mask(Password));
+        return true;
+    }
+}
 
 /// <summary>Body of <c>POST /auth/change-email</c>.</summary>
 /// <param name="NewEmail">The new e-mail address (receives the confirmation link).</param>
 /// <param name="Password">The current password.</param>
-public sealed record SlimChangeEmailRequest(string NewEmail, string Password);
+public sealed record SlimChangeEmailRequest(string NewEmail, string Password)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("NewEmail = ").Append(NewEmail);
+        builder.Append(", Password = ").Append(SlimRedaction.Mask(Password));
+        return true;
+    }
+}
 
 /// <summary>Body of <c>POST /auth/confirm-email-change</c>.</summary>
 /// <param name="Token">Token from the confirmation mail sent to the new address.</param>
-public sealed record SlimConfirmEmailChangeRequest(string Token);
+public sealed record SlimConfirmEmailChangeRequest(string Token)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Token = ").Append(SlimRedaction.Mask(Token));
+        return true;
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Responses
@@ -228,7 +375,16 @@ public sealed record SlimTwoFactorStatusResponse(bool Enabled, string? Method, b
 /// <param name="SharedKey">Base32 secret, formatted for manual entry.</param>
 /// <param name="AuthenticatorUri"><c>otpauth://</c> URI for a QR code.</param>
 /// <param name="SetupToken">Pass to <c>POST /auth/2fa/enable</c> together with the first code.</param>
-public sealed record SlimTwoFactorSetupResponse(string SharedKey, string AuthenticatorUri, string SetupToken);
+public sealed record SlimTwoFactorSetupResponse(string SharedKey, string AuthenticatorUri, string SetupToken)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("SharedKey = ").Append(SlimRedaction.Mask(SharedKey));
+        builder.Append(", AuthenticatorUri = ").Append(SlimRedaction.Mask(AuthenticatorUri));
+        builder.Append(", SetupToken = ").Append(SlimRedaction.Mask(SetupToken));
+        return true;
+    }
+}
 
 /// <summary>
 /// Body of <c>GET /auth/password-policy</c>: the rules for new passwords, so a front end can show them and validate
@@ -274,5 +430,22 @@ public sealed record SlimSessionDto(
 
 /// <summary>Recovery codes – shown exactly once.</summary>
 /// <param name="RecoveryCodes">The new codes.</param>
-/// <param name="Session">Refreshed session (bearer mode: new tokens, because the security stamp rotated).</param>
-public sealed record SlimRecoveryCodesResponse(IReadOnlyList<string> RecoveryCodes, SlimAuthResponse? Session);
+/// <param name="Session">
+/// Refreshed session (bearer mode: new tokens, because the security stamp rotated); <c>null</c> if no session was
+/// re-issued – after a 2FA change that means it could not be renewed: sign in again.
+/// </param>
+public sealed record SlimRecoveryCodesResponse(IReadOnlyList<string> RecoveryCodes, SlimAuthResponse? Session)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("RecoveryCodes = ").Append(SlimRedaction.Mask(RecoveryCodes));
+        builder.Append(", Session = ").Append(Session);
+        return true;
+    }
+}
+
+/// <summary><c>ToString()</c> of the public records: secrets (passwords, tokens, codes) never reach a log.</summary>
+internal static class SlimRedaction
+{
+    public static string Mask(object? secret) => secret is null ? "null" : "***";
+}

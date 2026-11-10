@@ -1,7 +1,7 @@
 # Multi-tenancy
 
 SlimIdentity has no tenant concept of its own – and needs none. Tenants live where your data lives: in your stores.
-SlimIdentity adds three per-request decisions for tenants with their own domains, so one deployment can serve
+SlimIdentity adds four per-request decisions for tenants with their own domains, so one deployment can serve
 `https://a.example.com` and `https://b.example.com` without trusting one tenant's front end on the other's API.
 
 ## 1. Data: scoped stores
@@ -25,13 +25,30 @@ same for all stores.
 
 What follows from it:
 
-- **Tokens stay in their tenant.** Cookies, access and refresh tokens, reset and invitation links carry the user id;
-  looked up in another tenant's scope the user does not exist, so they are rejected like a deleted account.
 - **Unique per tenant or globally** – your choice, expressed by the unique index: `(TenantId, NormalizedEmail)` lets
   the same address have an account in each tenant; `NormalizedEmail` alone makes it global.
 - **Claims:** add the tenant as a claim in `GetClaimsAsync`, so your endpoints can authorize by it.
 
-## 2. Origins: `ISlimOriginPolicy`
+## 2. Sessions: `UseTenantKey`
+
+Scoped stores keep the *data* apart – not the *credentials*. Every tenant shares the cookie key ring, the JWT secret
+and the audience, so a cookie or access token of tenant A also decrypts and validates at tenant B. With ids that
+collide across tenants (`1`, `2`, … in each tenant database) or with an interval between security-stamp checks
+(cookies: `SecurityStampValidationInterval`, default 1 minute; bearer: `ValidateSecurityStampOnEachRequest = false`)
+it would be accepted there. Tell SlimIdentity how a request names its tenant:
+
+```csharp
+builder.Services.AddSlimIdentity(…)
+    .AddUserStore<TenantUserStore>(ServiceLifetime.Scoped)
+    .UseTenantKey(http => http.Request.Host.Host);   // or the tenant id your resolver puts on the request
+```
+
+Every cookie and access token then carries the tenant (`slim_tenant` claim). A credential presented to another tenant
+is rejected on every request – before any interval or per-request switch applies – and a cookie is signed out. With
+`UseTenantKey` the tokens stay in their tenant regardless of id collisions, intervals or validation switches. Keep the
+key stable (a tenant id rather than an alias host name), or a renamed host signs its users out.
+
+## 3. Origins: `ISlimOriginPolicy`
 
 Which browser origins are trusted decides three things: the `Origin` check of cookie requests (CSRF), the `returnUrl`
 after external login (open redirect) and – with `AddCorsPolicy()` – credentialed cross-origin calls. By default that
@@ -54,7 +71,7 @@ app.UseCors(SlimIdentityDefaults.CorsPolicy);    // before the endpoints
 The policy runs on every cookie request – keep it synchronous and in memory (a dictionary refreshed in the
 background, not a database query).
 
-## 3. Links: `ISlimLinkBuilder`
+## 4. Links: `ISlimLinkBuilder`
 
 Mails, administrator reset links and invitations must lead to the tenant's own front end:
 
@@ -85,15 +102,13 @@ domain's owner. Mails carry the tenant in their [context](../configuration.md#bu
 
 ## What stays global
 
-- **A store per tenant with colliding ids** (`1`, `2`, … in every tenant database) is supported: links, codes, refresh
-  tokens and sessions carry the user's security stamp, so a reset link or token of tenant A is refused by user `1` of
-  tenant B (`TenantStoreTests`). One exception: with `Tokens.ValidateSecurityStampOnEachRequest = false` an access token
-  is checked by its signature alone – all tenants share the signing key and audience, so it works at the other tenant
-  until it expires (15 minutes). Keep the default, or use ids that are unique across tenants (GUIDs).
+- **A store per tenant with colliding ids** (`1`, `2`, … in every tenant database) is supported: links, codes and
+  refresh tokens carry the user's security stamp, so a reset link or token of tenant A is refused by user `1` of
+  tenant B (`TenantStoreTests`); cookies and access tokens are kept apart by `UseTenantKey` (section 2).
 - **The mail limit per recipient** (3 mails per kind and 15 minutes, 5 for 2FA codes) counts per address across tenants – it protects
   the mailbox, which is the same.
 - **Rate limiting** is per client IP. For a limit per tenant, use `.UseRateLimitPartitionKey(…)` with the tenant.
-- **Signing keys** (`JwtSecret`, Data Protection) are shared; tokens are kept apart by the scoped stores, not by keys.
-  Separate keys per tenant need separate deployments.
+- **Signing keys** (`JwtSecret`, Data Protection) are shared; credentials are kept apart by `UseTenantKey` and the
+  scoped stores, not by keys. Separate keys per tenant need separate deployments.
 - **Options** (lockout, lifetimes, password rules) are the same for all tenants. A sign-in guard
   ([hooks](hooks.md)) can still refuse per tenant – e.g. a suspended tenant or an IP allow-list.

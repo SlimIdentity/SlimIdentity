@@ -55,6 +55,19 @@ internal static class SlimEf
     }
 
     private sealed record Holder<TValue>(TValue Value);
+
+    /// <summary>Saves and clears the change tracker – also when saving fails, so nothing leaks into the next call.</summary>
+    public static async Task SaveAndClearAsync(DbContext db, CancellationToken ct)
+    {
+        try
+        {
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            db.ChangeTracker.Clear();
+        }
+    }
 }
 
 /// <summary><see cref="ISlimUserStore"/> on your user entity.</summary>
@@ -106,6 +119,7 @@ public class SlimEfUserStore<TContext, TUser, TKey>(SlimEfContext<TContext> cont
         user.PasswordHash = newUser.PasswordHash ?? string.Empty;
         user.SecurityStamp = SlimUser.NewSecurityStamp();
         user.IsActive = true;
+        context.BeforeWrite();
         Users.Add(user);   // with whatever the factory attached (profile entities): one SaveChanges, one transaction
         try
         {
@@ -119,7 +133,10 @@ public class SlimEfUserStore<TContext, TUser, TKey>(SlimEfContext<TContext> cont
             if (await IsEmailTakenAsync(user.NormalizedEmail, default, ct).ConfigureAwait(false)) return null;
             throw;
         }
-        db.ChangeTracker.Clear();
+        finally
+        {
+            db.ChangeTracker.Clear();   // also after any other error: nothing leaks into the next call on this context
+        }
         return Map(user);
     }
 
@@ -170,6 +187,12 @@ public class SlimEfUserStore<TContext, TUser, TKey>(SlimEfContext<TContext> cont
             .ExecuteUpdateAsync(s => s.SetProperty(u => EF.Property<string>(u, nameof(ISlimUserEntity<TKey>.PasswordHash)), newHash), ct);
 
     /// <inheritdoc />
+    public async Task<bool> UpdateSecurityStampAsync(SlimUser user, string expectedStamp, string newStamp, CancellationToken ct) =>
+        await Update(user).Where(u => EF.Property<string>(u, nameof(ISlimUserEntity<TKey>.SecurityStamp)) == expectedStamp)
+            .ExecuteUpdateAsync(s => s.SetProperty(u => EF.Property<string>(u, nameof(ISlimUserEntity<TKey>.SecurityStamp)), newStamp), ct)
+            .ConfigureAwait(false) == 1;
+
+    /// <inheritdoc />
     public async Task<bool> UpdateEmailAsync(SlimUser user, string newEmail, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(newEmail);
@@ -217,7 +240,7 @@ public class SlimEfUserStore<TContext, TUser, TKey>(SlimEfContext<TContext> cont
     private static TKey Key(SlimUser user) =>
         SlimEf.TryParseKey<TKey>(user?.Id, out var key) ? key : throw new ArgumentException($"'{user?.Id}' is not a valid user id.", nameof(user));
 
-    private IQueryable<TUser> Update(SlimUser user) => Users.Where(ById(Key(user)));
+    private IQueryable<TUser> Update(SlimUser user) => context.Writing(Users).Where(ById(Key(user)));
 
     private async Task<bool> IsEmailTakenAsync(string normalized, TKey? exceptId, CancellationToken ct)
     {
@@ -247,17 +270,17 @@ public class SlimEfTwoFactorStore<TContext, TUser, TKey>(SlimEfContext<TContext>
 
     /// <inheritdoc />
     public Task SetTotpSecretAsync(SlimUser user, string protectedSecret, CancellationToken ct) =>
-        User(user).ExecuteUpdateAsync(s => s.SetProperty(u => EF.Property<string?>(u, Secret),
+        context.Writing(User(user)).ExecuteUpdateAsync(s => s.SetProperty(u => EF.Property<string?>(u, Secret),
             string.IsNullOrEmpty(protectedSecret) ? null : protectedSecret), ct);
 
     /// <inheritdoc />
     public async Task<bool> TryMarkCodeUsedAsync(SlimUser user, long usedAt, CancellationToken ct) =>
-        await User(user).Where(u => EF.Property<long?>(u, CodeAt) == null || EF.Property<long?>(u, CodeAt) < usedAt)
+        await context.Writing(User(user)).Where(u => EF.Property<long?>(u, CodeAt) == null || EF.Property<long?>(u, CodeAt) < usedAt)
             .ExecuteUpdateAsync(s => s.SetProperty(u => EF.Property<long?>(u, CodeAt), usedAt), ct).ConfigureAwait(false) == 1;
 
     /// <inheritdoc />
     public async Task<bool> TryMarkChallengeUsedAsync(SlimUser user, long issuedAt, CancellationToken ct) =>
-        await User(user).Where(u => EF.Property<long?>(u, ChallengeAt) == null || EF.Property<long?>(u, ChallengeAt) < issuedAt)
+        await context.Writing(User(user)).Where(u => EF.Property<long?>(u, ChallengeAt) == null || EF.Property<long?>(u, ChallengeAt) < issuedAt)
             .ExecuteUpdateAsync(s => s.SetProperty(u => EF.Property<long?>(u, ChallengeAt), issuedAt), ct).ConfigureAwait(false) == 1;
 
     /// <inheritdoc />
@@ -265,22 +288,29 @@ public class SlimEfTwoFactorStore<TContext, TUser, TKey>(SlimEfContext<TContext>
     {
         var key = Key(user);
         var hashes = hashedCodes?.ToList() ?? [];
+        context.BeforeWrite();
         // one transaction; through the execution strategy, so it also works with retrying strategies (EnableRetryOnFailure)
         return db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
         {
-            await using var tx = await db.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
-            await Codes.Where(SlimEf.Equal<SlimRecoveryCodeEntity<TKey>, TKey>(nameof(SlimRecoveryCodeEntity<TKey>.UserId), key))
-                .ExecuteDeleteAsync(ct).ConfigureAwait(false);
-            Codes.AddRange(hashes.Select(h => new SlimRecoveryCodeEntity<TKey> { UserId = key, CodeHash = h }));
-            await db.SaveChangesAsync(ct).ConfigureAwait(false);
-            await tx.CommitAsync(ct).ConfigureAwait(false);
-            db.ChangeTracker.Clear();
+            try
+            {
+                await using var tx = await db.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
+                await Codes.Where(SlimEf.Equal<SlimRecoveryCodeEntity<TKey>, TKey>(nameof(SlimRecoveryCodeEntity<TKey>.UserId), key))
+                    .ExecuteDeleteAsync(ct).ConfigureAwait(false);
+                Codes.AddRange(hashes.Select(h => new SlimRecoveryCodeEntity<TKey> { UserId = key, CodeHash = h }));
+                await db.SaveChangesAsync(ct).ConfigureAwait(false);
+                await tx.CommitAsync(ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                db.ChangeTracker.Clear();   // a retry starts clean; a failure leaves nothing behind
+            }
         });
     }
 
     /// <inheritdoc />
     public async Task<bool> ValidateAndConsumeRecoveryCodeAsync(SlimUser user, string hashedCode, CancellationToken ct) =>
-        await Codes.Where(SlimEf.Equal<SlimRecoveryCodeEntity<TKey>, TKey>(nameof(SlimRecoveryCodeEntity<TKey>.UserId), Key(user)))
+        await context.Writing(Codes).Where(SlimEf.Equal<SlimRecoveryCodeEntity<TKey>, TKey>(nameof(SlimRecoveryCodeEntity<TKey>.UserId), Key(user)))
             .Where(c => c.CodeHash == hashedCode)
             .ExecuteDeleteAsync(ct).ConfigureAwait(false) == 1;
 
@@ -304,9 +334,9 @@ public class SlimEfRefreshTokenStore<TContext, TKey>(SlimEfContext<TContext> con
     public async Task StoreRefreshTokenAsync(string userId, string tokenHash, DateTimeOffset expiresAt, CancellationToken ct)
     {
         if (!SlimEf.TryParseKey<TKey>(userId, out var key)) throw new ArgumentException($"'{userId}' is not a valid user id.", nameof(userId));
+        context.BeforeWrite();
         Tokens.Add(new SlimRefreshTokenEntity<TKey> { TokenHash = tokenHash, UserId = key, ExpiresAt = expiresAt });
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-        db.ChangeTracker.Clear();
+        await SlimEf.SaveAndClearAsync(db, ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -316,7 +346,7 @@ public class SlimEfRefreshTokenStore<TContext, TKey>(SlimEfContext<TContext> con
         if (token is null) return null;
 
         // atomic: only the request that actually deletes the row wins (parallel replays lose)
-        var deleted = await Tokens.Where(t => t.TokenHash == tokenHash).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        var deleted = await context.Writing(Tokens).Where(t => t.TokenHash == tokenHash).ExecuteDeleteAsync(ct).ConfigureAwait(false);
         return deleted == 1 && token.ExpiresAt > time.GetUtcNow() ? SlimEf.KeyToString(token.UserId) : null;
     }
 }
@@ -335,6 +365,7 @@ public class SlimEfSessionStore<TContext, TKey>(SlimEfContext<TContext> context,
     {
         ArgumentNullException.ThrowIfNull(session);
         if (!SlimEf.TryParseKey<TKey>(session.UserId, out var key)) throw new ArgumentException("Invalid user id.", nameof(session));
+        context.BeforeWrite();
         Sessions.Add(new SlimSessionEntity<TKey>
         {
             Id = session.Id, UserId = key, Mode = session.Mode, AuthenticationMethod = session.AuthenticationMethod,
@@ -343,8 +374,7 @@ public class SlimEfSessionStore<TContext, TKey>(SlimEfContext<TContext> context,
             UserAgent = options.StoreClientInfo ? session.UserAgent : null,
             IpAddress = options.StoreClientInfo ? session.IpAddress : null,
         });
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-        db.ChangeTracker.Clear();
+        await SlimEf.SaveAndClearAsync(db, ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
@@ -359,19 +389,19 @@ public class SlimEfSessionStore<TContext, TKey>(SlimEfContext<TContext> context,
 
     /// <inheritdoc />
     public Task TouchAsync(string sessionId, DateTimeOffset lastSeenUtc, DateTimeOffset expiresUtc, CancellationToken ct) =>
-        Sessions.Where(s => s.Id == sessionId).ExecuteUpdateAsync(s => s
+        context.Writing(Sessions).Where(s => s.Id == sessionId).ExecuteUpdateAsync(s => s
             .SetProperty(x => x.LastSeenUtc, lastSeenUtc)
             .SetProperty(x => x.ExpiresUtc, expiresUtc), ct);
 
     /// <inheritdoc />
     public Task RevokeAsync(string sessionId, CancellationToken ct) =>
-        Sessions.Where(s => s.Id == sessionId).ExecuteDeleteAsync(ct);
+        context.Writing(Sessions).Where(s => s.Id == sessionId).ExecuteDeleteAsync(ct);
 
     /// <inheritdoc />
     public Task RevokeAllAsync(string userId, string? exceptSessionId, CancellationToken ct)
     {
         if (!SlimEf.TryParseKey<TKey>(userId, out var key)) return Task.CompletedTask;
-        var query = Sessions.Where(ByUser(key));
+        var query = context.Writing(Sessions).Where(ByUser(key));
         if (exceptSessionId is not null) query = query.Where(s => s.Id != exceptSessionId);
         return query.ExecuteDeleteAsync(ct);
     }
@@ -411,15 +441,15 @@ public class SlimEfExternalLoginStore<TContext, TKey>(SlimEfContext<TContext> co
     public async Task LinkExternalLoginAsync(string userId, string provider, string providerKey, CancellationToken ct)
     {
         if (!SlimEf.TryParseKey<TKey>(userId, out var key)) throw new ArgumentException($"'{userId}' is not a valid user id.", nameof(userId));
+        context.BeforeWrite();
         Logins.Add(new SlimExternalLoginEntity<TKey> { UserId = key, Provider = provider, ProviderKey = providerKey });
-        await db.SaveChangesAsync(ct).ConfigureAwait(false);
-        db.ChangeTracker.Clear();
+        await SlimEf.SaveAndClearAsync(db, ct).ConfigureAwait(false);
     }
 
     /// <inheritdoc />
     public Task RemoveExternalLoginsAsync(string userId, CancellationToken ct) =>
         SlimEf.TryParseKey<TKey>(userId, out var key)
-            ? Logins.Where(SlimEf.Equal<SlimExternalLoginEntity<TKey>, TKey>(nameof(SlimExternalLoginEntity<TKey>.UserId), key)).ExecuteDeleteAsync(ct)
+            ? context.Writing(Logins).Where(SlimEf.Equal<SlimExternalLoginEntity<TKey>, TKey>(nameof(SlimExternalLoginEntity<TKey>.UserId), key)).ExecuteDeleteAsync(ct)
             : Task.CompletedTask;
 
     /// <inheritdoc />
@@ -445,7 +475,7 @@ public class SlimEfExternalLoginStore<TContext, TKey>(SlimEfContext<TContext> co
             .ToListAsync(ct).ConfigureAwait(false);
         if (!candidates.Contains(providerKey, StringComparer.Ordinal)) return false;
 
-        return await Logins
+        return await context.Writing(Logins)
             .Where(SlimEf.Equal<SlimExternalLoginEntity<TKey>, TKey>(nameof(SlimExternalLoginEntity<TKey>.UserId), key))
             .Where(l => l.Provider == provider && l.ProviderKey == providerKey)
             .ExecuteDeleteAsync(ct).ConfigureAwait(false) > 0;
@@ -498,6 +528,7 @@ public class SlimEfPasskeyStore<TContext, TKey>(SlimEfContext<TContext> context)
             BackupEligible = passkey.BackupEligible, BackedUp = passkey.BackedUp,
             CreatedUtc = passkey.CreatedUtc, LastUsedUtc = passkey.LastUsedUtc,
         };
+        context.BeforeWrite();
         Passkeys.Add(entity);
         try
         {
@@ -522,7 +553,7 @@ public class SlimEfPasskeyStore<TContext, TKey>(SlimEfContext<TContext> context)
     {
         var hash = Hash(credentialId);
         long expected = expectedSignCount, next = signCount;
-        return await Passkeys
+        return await context.Writing(Passkeys)
             .Where(p => p.CredentialIdHash == hash && p.SignCount == expected && (p.LastChallengeAt == null || p.LastChallengeAt < challengeIssuedAt))
             .ExecuteUpdateAsync(s => s
                 .SetProperty(p => p.SignCount, next)
@@ -536,7 +567,7 @@ public class SlimEfPasskeyStore<TContext, TKey>(SlimEfContext<TContext> context)
     {
         if (!SlimEf.TryParseKey<TKey>(userId, out var key)) return false;
         var hash = Hash(credentialId);
-        return await Passkeys.Where(OfUser(key)).Where(p => p.CredentialIdHash == hash)
+        return await context.Writing(Passkeys).Where(OfUser(key)).Where(p => p.CredentialIdHash == hash)
             .ExecuteUpdateAsync(s => s.SetProperty(p => p.Name, name), ct).ConfigureAwait(false) == 1;
     }
 
@@ -545,14 +576,14 @@ public class SlimEfPasskeyStore<TContext, TKey>(SlimEfContext<TContext> context)
     {
         if (!SlimEf.TryParseKey<TKey>(userId, out var key)) return false;
         var hash = Hash(credentialId);
-        return await Passkeys.Where(OfUser(key)).Where(p => p.CredentialIdHash == hash).ExecuteDeleteAsync(ct).ConfigureAwait(false) == 1;
+        return await context.Writing(Passkeys).Where(OfUser(key)).Where(p => p.CredentialIdHash == hash).ExecuteDeleteAsync(ct).ConfigureAwait(false) == 1;
     }
 
     /// <inheritdoc />
     public async Task RemovePasskeysAsync(string userId, CancellationToken ct)
     {
         if (!SlimEf.TryParseKey<TKey>(userId, out var key)) return;
-        await Passkeys.Where(OfUser(key)).ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        await context.Writing(Passkeys).Where(OfUser(key)).ExecuteDeleteAsync(ct).ConfigureAwait(false);
     }
 
     private static SlimPasskey Map(SlimPasskeyEntity<TKey> p) => new()

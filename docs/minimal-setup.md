@@ -22,9 +22,14 @@ limiting, account lockout, CSRF protection and enumeration resistance already ac
 ```bash
 dotnet add package SlimIdentity --prerelease
 dotnet add package SlimIdentity.EntityFrameworkCore --prerelease
+dotnet add package Microsoft.EntityFrameworkCore.Sqlite      # your database provider (Npgsql, SqlServer, …)
+dotnet add package Microsoft.EntityFrameworkCore.Design      # for the migration in step 3
+dotnet tool install --global dotnet-ef                       # once per machine
 ```
 
 ## 2. Program.cs
+
+`AppUser` and `AppDbContext` are your own classes – they follow in [step 3](#3-the-user-entity-and-the-model).
 
 ```csharp
 using System.Security.Claims;
@@ -113,7 +118,15 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
 ```
 
 `ApplySlimIdentity` adds the unique index on the normalized address and five small tables (refresh tokens, sessions,
-recovery codes, external logins, passkeys – the last one stays empty unless you opt in). Create the migration: `dotnet ef migrations add SlimIdentity`. Roles or other claims
+recovery codes, external logins, passkeys – the last one stays empty unless you opt in). Create the migration and the
+database:
+
+```bash
+dotnet ef migrations add SlimIdentity
+dotnet ef database update
+```
+
+(Or call `db.Database.Migrate()` at start-up, e.g. in development.) Roles or other claims
 for cookies and tokens come from an `ISlimUserClaimsProvider<AppUser>` you register – see the
 [package README](../src/SlimIdentity.EntityFrameworkCore/README.md).
 
@@ -131,7 +144,9 @@ X-CSRF: 1
 { "email": "me@example.com", "password": "correct horse battery staple" }
 ```
 
-The verification link appears in the log (null sender). Then sign in – the response sets the `HttpOnly` cookie:
+The verification link appears in the log (null sender). It points to `/verify-email` of your front end; until that page
+exists, send its `token` to `POST /auth/verify-email` yourself – signing in does not wait for it unless
+`SignIn.RequireConfirmedEmail` is set. Then sign in – the response sets the `HttpOnly` cookie:
 
 ```http
 POST https://localhost:5001/auth/login

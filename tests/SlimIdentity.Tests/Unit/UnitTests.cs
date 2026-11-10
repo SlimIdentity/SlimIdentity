@@ -127,6 +127,11 @@ public sealed class OptionsValidatorTests
         Assert.Contains(Validate(o => o.Tokens.JwtSecret = "short-secret"), f => f.Contains("JwtSecret"));
 
     [Fact]
+    public void The_placeholder_of_the_documentation_is_not_a_jwt_secret() =>
+        Assert.Contains(Validate(o => o.Tokens.JwtSecret = "<at least 32 random bytes – use user secrets / a key vault, never commit it>"),
+            f => f.Contains("placeholder"));
+
+    [Fact]
     public void Without_a_jwt_secret_the_setup_is_cookie_only()
     {
         var options = new SlimIdentityOptions();

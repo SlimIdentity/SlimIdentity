@@ -165,7 +165,7 @@ public sealed class HostEndpointTests
                     var user = await store.FindByIdAsync(me.GetSlimUserId()!, ct);
                     if (user is null) return Results.Unauthorized();
                     if (await auth.ConfirmPasswordAsync(user, req.Password, ct) is { } failure) return failure;   // lockout like the built-in endpoints
-                    var result = await auth.ElevateToSudoAsync(user, TimeSpan.FromMinutes(5), me.IsSlimCookieSession(), ct);
+                    var result = await auth.ElevateToSudoAsync(user, TimeSpan.FromMinutes(5), ct);
                     return Results.Ok(result.ToResponse());
                 })
                 .RequireAuthorization();
@@ -176,7 +176,7 @@ public sealed class HostEndpointTests
                     var other = (await store.FindByEmailAsync(TestApp.AdminEmail, ct))!;
                     try
                     {
-                        await auth.ElevateToSudoAsync(other, TimeSpan.FromMinutes(5), me.IsSlimCookieSession(), ct);
+                        await auth.ElevateToSudoAsync(other, TimeSpan.FromMinutes(5), ct);
                         return Results.Ok("elevated");
                     }
                     catch (InvalidOperationException) { return Results.Ok("refused"); }
@@ -301,7 +301,9 @@ public sealed class TestExternalLoginStore(ISlimUserStore users) : ISlimExternal
 
     public Task LinkExternalLoginAsync(string userId, string provider, string providerKey, CancellationToken ct)
     {
-        _links[(provider, providerKey)] = userId;
+        // unique per provider + key, like a unique index: a taken identity is never moved to another account
+        if (!_links.TryAdd((provider, providerKey), userId) && _links[(provider, providerKey)] != userId)
+            throw new InvalidOperationException("This external identity is already linked to another account.");
         return Task.CompletedTask;
     }
 

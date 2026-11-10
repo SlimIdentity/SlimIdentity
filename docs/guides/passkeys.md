@@ -42,8 +42,8 @@ POST /auth/passkeys/register/options   { "password": "…" }        → { "optio
 POST /auth/passkeys/register            { "state", "credential", "name": "Laptop" }   → { "id", "name", "createdUtc", "backupEligible", "backedUp" }
 ```
 
-The password is required for accounts that have one, a sign-in within the last 5 minutes for accounts without one
-(`403 reauthentication_required`) – a stolen session must not add a permanent way in; the address
+A passkey adds to a password: the account needs one (`403 password_required` otherwise – a pure SSO account gets no
+local sign-in method), and the password is asked – a stolen session must not add a permanent way in; the address
 must be confirmed, and not during an impersonation – the same rules as for 2FA and linking.
 
 **Sign in** (anonymous, no e-mail needed – discoverable credentials):

@@ -24,7 +24,7 @@ public sealed class PreReleaseApiTests
             app.MapPost("/api/sudo", async (ClaimsPrincipal me, ISlimUserStore store, ISlimAuthManager auth, CancellationToken ct) =>
                 {
                     var user = (await store.FindByIdAsync(me.GetSlimUserId()!, ct))!;
-                    return Results.Ok((await auth.ElevateToSudoAsync(user, TimeSpan.FromMinutes(5), useCookies: false, ct)).ToResponse());
+                    return Results.Ok((await auth.ElevateToSudoAsync(user, TimeSpan.FromMinutes(5), ct)).ToResponse());
                 })
                 .RequireAuthorization();
 

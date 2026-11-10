@@ -209,6 +209,11 @@ internal static class SessionStoreChecks
                 var found = await Find(session.Id) ?? throw new ConformanceFailure("FindAsync returned null after TouchAsync.");
                 Expect.SameInstant(lastSeen, found.LastSeenUtc, "LastSeenUtc");
                 Expect.SameInstant(expires, found.ExpiresUtc, "ExpiresUtc");
+
+                await stores.UseAsync<ISlimSessionStore>(s => s.RevokeAsync(session.Id, ct));
+                await stores.UseAsync<ISlimSessionStore>(s => s.TouchAsync(session.Id, lastSeen, expires, ct));
+                Expect.True(await Find(session.Id) is null,
+                    "TouchAsync brought a revoked session back – update existing rows only, never upsert (a refresh racing a logout would revive the session).");
             });
 
         await run.CheckAsync(Store, "revoked sessions are gone – one, all, or all but the current",
@@ -289,6 +294,28 @@ internal static class ExternalLoginStoreChecks
                     "A provider key differing only in case found the user.");
             });
 
+        await run.CheckAsync(Store, "an external identity stays linked to its first user",
+            "Unique index on (provider, provider_key): linking a taken identity to another user must fail (throw) or do nothing – never move it to the other account.",
+            async () =>
+            {
+                var owner = await run.NewUserAsync();
+                var intruder = await run.NewUserAsync();
+                var key = Guid.NewGuid().ToString("N");
+                await stores.UseAsync<ISlimExternalLoginStore>(s => s.LinkExternalLoginAsync(owner.Id, "SlimConformance", key, ct));
+                try
+                {
+                    await stores.UseAsync<ISlimExternalLoginStore>(s => s.LinkExternalLoginAsync(intruder.Id, "SlimConformance", key, ct));
+                }
+#pragma warning disable CA1031 // a unique violation is the expected outcome
+                catch (Exception ex) when (ex is not ConformanceFailure && !ct.IsCancellationRequested) { }
+#pragma warning restore CA1031
+
+                Expect.Equal(owner.Id, (await stores.UseAsync<ISlimExternalLoginStore, SlimUser?>(s => s.FindByExternalLoginAsync("SlimConformance", key, ct)))?.Id,
+                    "FindByExternalLoginAsync after linking the same identity to a second user");
+                var intruderLinks = await stores.UseAsync<ISlimExternalLoginStore, IReadOnlyList<SlimExternalLogin>>(s => s.GetExternalLoginsAsync(intruder.Id, ct));
+                Expect.Equal(0, intruderLinks.Count, "links of the second user");
+            });
+
         await run.CheckAsync(Store, "RemoveExternalLoginsAsync removes all links of one user only",
             "DELETE … WHERE user_id = @userId.",
             async () =>
@@ -350,6 +377,47 @@ internal static class ExternalLoginStoreChecks
                     "the user's other link (must stay)");
                 Expect.Equal(other.Id, (await stores.UseAsync<ISlimExternalLoginStore, SlimUser?>(s => s.FindByExternalLoginAsync("SlimConformanceA", c, ct)))?.Id,
                     "the link of another user (must stay)");
+            });
+    }
+}
+
+internal static class ApiKeyStoreChecks
+{
+    private const string Store = nameof(ISlimApiKeyStore);
+
+    public static async Task RunAsync(ConformanceRun run)
+    {
+        var ct = run.Ct;
+        var stores = run.Stores;
+
+        await run.CheckAsync(Store, "unknown and malformed key hashes are rejected",
+            "ValidateApiKeyAsync looks the hash up with '=' in a parameterized statement and returns null – never throws, never matches a prefix or pattern.",
+            async () =>
+            {
+                foreach (var hash in new[] { ConformanceRun.NewSha256Hex(), "", "%", "_", "' OR 1=1 --", new string('f', 200) })
+                {
+                    var claims = await stores.UseAsync<ISlimApiKeyStore, IReadOnlyCollection<System.Security.Claims.Claim>?>(s => s.ValidateApiKeyAsync(hash, ct));
+                    Expect.True(claims is null, $"ValidateApiKeyAsync returned claims for the unknown hash '{hash}'.");
+                }
+            });
+
+        if (run.Options.ApiKey is not { Length: > 0 } key) return;
+
+        await run.CheckAsync(Store, "a valid key returns its owner – and only for its exact hash",
+            "Store only SlimApiKeys.Hash(key) and compare it exactly; return at least the user id claim (e.g. client:<id>) of the owner.",
+            async () =>
+            {
+                var hash = SlimApiKeys.Hash(key);
+                var claims = await stores.UseAsync<ISlimApiKeyStore, IReadOnlyCollection<System.Security.Claims.Claim>?>(s => s.ValidateApiKeyAsync(hash, ct));
+                Expect.True(claims is not null, "ValidateApiKeyAsync returned null for SlimConformanceOptions.ApiKey.");
+                Expect.True(claims!.Any(c => c.Type == SlimClaimTypes.UserId && !string.IsNullOrEmpty(c.Value)),
+                    $"The claims of a valid key contain no {SlimClaimTypes.UserId} claim – the handler cannot tell who called.");
+
+                foreach (var near in new[] { hash[..^1], hash + "0", hash[..^1] + (hash[^1] == '0' ? '1' : '0') })
+                {
+                    var other = await stores.UseAsync<ISlimApiKeyStore, IReadOnlyCollection<System.Security.Claims.Claim>?>(s => s.ValidateApiKeyAsync(near, ct));
+                    Expect.True(other is null, $"ValidateApiKeyAsync accepted the hash '{near}', which differs from the key's hash.");
+                }
             });
     }
 }

@@ -105,11 +105,11 @@ public sealed class TestApp : IAsyncDisposable
         app.MapGet("/api/hello", (ClaimsPrincipal user) => new { email = user.GetSlimEmail(), impersonatedBy = user.GetImpersonatorId() })
             .RequireAuthorization();
 
-        app.MapPost("/api/impersonate/{userId}", async (string userId, ClaimsPrincipal admin, ISlimUserStore store, ISlimAuthManager auth, CancellationToken ct) =>
+        app.MapPost("/api/impersonate/{userId}", async (string userId, ISlimUserStore store, ISlimAuthManager auth, CancellationToken ct) =>
             {
                 var target = await store.FindByIdAsync(userId, ct);
                 if (target is null) return Results.NotFound();
-                var result = await auth.ImpersonateAsync(target, admin.GetSlimUserId()!, admin.IsSlimCookieSession(), ct);
+                var result = await auth.ImpersonateAsync(target, ct);
                 return result.Succeeded ? Results.Ok(result.ToResponse()) : Results.BadRequest(new { status = result.Error });
             })
             .RequireAuthorization(p => p.RequireRole("Admin"))

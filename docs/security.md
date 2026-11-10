@@ -49,7 +49,7 @@ reviewing an integration, focus on [assumptions](#assumptions), [host responsibi
 | Revoked roles and permissions | Claims are a snapshot of the sign-in or refresh. After `RefreshClaimsAsync` running sessions reload them at their next validation (bearer: next request, cookies: within the validation interval) without a sign-out; `SignOutEverywhereAsync` ends them. Without either, cookies keep old claims until the next sign-in – see [roles and permissions](guides/roles-and-permissions.md). |
 | Replay of reset / verification / invitation / e-mail-change links | Links are bound to the security stamp and expire; reset, invitation and e-mail change rotate the stamp, so they work once. |
 | Account takeover via e-mail change | Requires the current password; the new address must confirm; the old address is notified; all sessions end. |
-| Taking over or locking out an account with a stolen session | Adding or removing a sign-in method (passkey, external login), every 2FA change and an e-mail change need the password – accounts without one (external login, passkeys) a sign-in within the last 5 minutes instead (`403 reauthentication_required`): an older stolen cookie can neither add the attacker's way in nor cut the owner's. Removing never removes the last way in – checked and removed as one step per account, so parallel requests cannot get around it. |
+| Taking over or locking out an account with a stolen session | Adding or removing a sign-in method (passkey, external login), every 2FA change and an e-mail change need the password – accounts without one (external login, passkeys) a sign-in within the last 5 minutes instead (`403 reauthentication_required`): an older stolen cookie can neither add the attacker's way in nor cut the owner's. Removing never removes the last way in – checked and removed as one step per account, so parallel requests cannot get around it. A pure SSO account gets no local credential by self-service at all – no passkey (passkeys need a password), no first password via `/change-password` or a self-service reset – so even a fresh stolen session cannot add a way in the provider does not control. |
 | Credentialed CORS for any origin | `AddCorsPolicy()` builds CORS from the same trusted origins as the CSRF check and the redirect rule: exactly the requesting origin, never `*` with credentials. |
 | Tenants trusting each other's front ends | With `AddOriginPolicy<T>()` every request decides its trusted origins (CSRF, `returnUrl`, CORS); `AddLinkBuilder<T>()` keeps mail links on the tenant's domain – built from your tenant directory, never from an unchecked `Host` header. |
 | Open redirect in external login | `returnUrl` must be a local path or a trusted origin; control characters and surrounding whitespace (which browsers strip, turning `/\t/evil` into `//evil`), user info and non-HTTP schemes are rejected, and the redirect uses the URL as parsed by .NET. Covered by property-based tests. |
@@ -100,6 +100,9 @@ reviewing an integration, focus on [assumptions](#assumptions), [host responsibi
 - Cookie revocation takes effect at the next validation (`Cookies.SecurityStampValidationInterval`, default 1 min).
 - The external-login exchange code is made single use through `ISlimRefreshTokenStore` (shared, atomic). Without a
   refresh-token store an in-memory registry is used, which is per instance – run several instances only with a store.
+- Back-channel logout tokens (`jti`) and link codes are single use per instance only. A replay on another instance
+  within their lifetime (5 minutes / 1 minute) can only sign the user out again or link the same identity to the same
+  account again ([several instances](guides/multiple-instances.md#limits-that-are-per-instance)).
 - `/register` performs one database write for new addresses only; this can make the response measurably slower than
   for existing addresses.
 - Rate limiting is per client IP (or your custom key) and per instance (in-memory); a hard global limit belongs in the
@@ -109,9 +112,11 @@ reviewing an integration, focus on [assumptions](#assumptions), [host responsibi
 - Credential attempts of one account are serialized per instance. With several instances, attempts that arrive on
   different instances at the very moment the threshold is reached can each still be evaluated – at most one extra
   guess per additional instance and lockout cycle.
-- E-mail verification, e-mail change confirmation and claiming an account via external login write the security
-  fields of a user read at the start of the request. A password change that completes in the same instant can be
-  overwritten (the narrow-update store methods protect sign-in bookkeeping, not these rare flows).
+- E-mail verification, e-mail change confirmation, claiming an account via external login and the user's own 2FA
+  changes (enable, disable) write the security fields of a user read at the start of the request. A password change
+  that completes in the same instant can be overwritten (the narrow store methods protect sign-in bookkeeping and the
+  pure stamp rotations – sign-out everywhere, `RefreshClaimsAsync`, forgetting remembered devices – not these rare
+  flows).
 - With an `ISlimCustomPasswordValidator` (LDAP, legacy hashes) unknown accounts burn a local dummy hash while known
   accounts wait for the directory – the response time can reveal whether an account exists.
 - The code has not been independently audited yet. The [attack scenarios](attack-scenarios.md) list what is covered by

@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace MyApp.Enterprise;
 
@@ -36,7 +37,7 @@ public static class AdminEndpoints
 
         // Impersonate – requires a fresh sudo session
         admin.MapPost("/impersonate/{userId}", async (
-                string userId, [FromQuery] bool? useCookies, ClaimsPrincipal me,
+                string userId, ClaimsPrincipal me,
                 ISlimUserStore store, ISlimAuthManager auth, ILoggerFactory lf, CancellationToken ct) =>
             {
                 if (!me.IsInSudoMode()) return Results.Json(new { status = "sudo_required" }, statusCode: 403);
@@ -47,7 +48,8 @@ public static class AdminEndpoints
 
                 lf.CreateLogger("Audit").LogWarning("AUDIT impersonation {Admin} -> {Target}",
                     EscapeLogLineBreaks(me.GetSlimUserId() ?? ""), EscapeLogLineBreaks(target.Id));
-                var result = await auth.ImpersonateAsync(target, me.GetSlimUserId()!, useCookies ?? me.IsSlimCookieSession(), ct);
+                // the impersonation session takes the mode of the admin's session (cookie or JWT)
+                var result = await auth.ImpersonateAsync(target, ct);
                 return result.Succeeded
                     ? Results.Ok(result.ToResponse())
                     : Results.BadRequest(new { status = result.Error });
@@ -73,8 +75,10 @@ public static class AdminEndpoints
                 // lockout, notification mail and ISlimCustomPasswordValidator – exactly like the built-in endpoints
                 if (await auth.ConfirmPasswordAsync(user, req.Password, ct) is { } failure) return failure;
 
-                var result = await auth.ElevateToSudoAsync(user, TimeSpan.FromMinutes(10), me.IsSlimCookieSession(), ct);
-                return Results.Ok(result.ToResponse());
+                var result = await auth.ElevateToSudoAsync(user, TimeSpan.FromMinutes(10), ct);
+                return result.Succeeded
+                    ? Results.Ok(result.ToResponse())
+                    : Results.Json(new { status = result.Error }, statusCode: 403);   // e.g. vetoed by a sign-in guard
             })
             .RequireAuthorization()
             .RequireSlimCsrf()
@@ -96,12 +100,13 @@ public static class AdminEndpoints
         admin.MapPost("/invitations", async (InviteRequest req, ClaimsPrincipal me,
                 ISlimUserStore store, ISlimAuthManager auth, IInvitationMailer mailer, CancellationToken ct) =>
             {
+                if (SlimEmailAddress.Normalize(req.Email) is not { } email) return InvalidEmail();
                 // CreateAsync returns null if the address is taken (unique index) – no check-then-act race
                 // the profile is written by the store together with the account (EF Core package: ISlimUserFactory)
-                if (await store.CreateAsync(new SlimNewUser { Email = req.Email, Profile = req }, ct) is not { } user)
+                if (await store.CreateAsync(new SlimNewUser { Email = email, Profile = req }, ct) is not { } user)
                     return Results.Conflict(new { status = "already_exists" });
                 var invitation = await auth.CreateInvitationAsync(user, TimeSpan.FromDays(14), ct); // link from Links.BaseUrl (or Links.InvitationUrl)
-                await mailer.SendInvitationAsync(req.Email, req.DisplayName, me.GetSlimEmail(), invitation.Link, invitation.ExpiresAt, ct);
+                await mailer.SendInvitationAsync(email, req.DisplayName, me.GetSlimEmail(), invitation.Link, invitation.ExpiresAt, ct);
                 return Results.Ok(new { status = "invited", user.Id, invitation.ExpiresAt });
             });
 
@@ -109,20 +114,27 @@ public static class AdminEndpoints
         var accounts = admin.MapGroup("/users").RequireAuthorization(SlimIdentityDefaults.SudoPolicy);
 
         // Create an account without mail: the admin vouches for the address and hands over a reset link
-        accounts.MapPost("/", async (CreateUserRequest req, ISlimUserStore store, ISlimAuthManager auth, CancellationToken ct) =>
+        accounts.MapPost("/", async (CreateUserRequest req, ISlimUserStore store, ISlimAuthManager auth,
+                IOptions<SlimIdentityOptions> options, IEnumerable<ISlimPasswordRule> rules, CancellationToken ct) =>
             {
+                // the same canonical form as the built-in endpoints – otherwise look-alike duplicates slip past the unique index
+                if (SlimEmailAddress.Normalize(req.Email) is not { } email) return InvalidEmail();
+                // the start password is checked BEFORE the account exists: a rejected one must not leave an orphan
+                // account behind that answers the corrected retry with 409
+                if (req.StartPassword is { } candidate && await CheckPasswordAsync(candidate, email, options.Value, rules, ct) is { } rejected)
+                    return rejected;
+
                 // business data (DisplayName, roles …) as Profile – never the request itself, it holds the start password
-                if (await store.CreateAsync(new SlimNewUser { Email = req.Email }, ct) is not { } user)
+                if (await store.CreateAsync(new SlimNewUser { Email = email }, ct) is not { } user)
                     return Results.Conflict(new { status = "already_exists" });
                 user.EmailConfirmed = true;   // the administrator vouches for the address
                 await store.UpdateSecurityStateAsync(user, ct);
-                if (req.StartPassword is { } start)
-                {
-                    // read out on the phone – the user must choose an own password at the first sign-in
-                    if (await auth.SetPasswordAsync(user, start, mustChange: true, ct) is { } invalid) return invalid;
+                // read out on the phone – the user must choose an own password at the first sign-in
+                if (req.StartPassword is { } start && await auth.SetPasswordAsync(user, start, mustChange: true, ct) is null)
                     return Results.Ok(new { status = "created", user.Id });
-                }
-                var reset = await auth.CreatePasswordResetAsync(user, TimeSpan.FromDays(3), ct);   // the user sets the first password
+                // no start password – or a rule changed its mind since the check (e.g. a breach lookup): never an
+                // account nobody can sign in to, the user sets the first password with the link
+                var reset = await auth.CreatePasswordResetAsync(user, TimeSpan.FromDays(3), ct);
                 return Results.Ok(new { status = "created", user.Id, resetLink = reset.Link, reset.ExpiresAt });
             });
 
@@ -164,6 +176,27 @@ public static class AdminEndpoints
             });
 
         return app;
+    }
+
+    private static IResult InvalidEmail() =>
+        Results.ValidationProblem(new Dictionary<string, string[]> { ["email"] = ["A valid e-mail address is required."] },
+            extensions: new Dictionary<string, object?> { ["code"] = "validation_failed" });
+
+    // the rules SetPasswordAsync applies (length limits + every ISlimPasswordRule), in the same validation format
+    private static async Task<IResult?> CheckPasswordAsync(string password, string email, SlimIdentityOptions options,
+        IEnumerable<ISlimPasswordRule> rules, CancellationToken ct)
+    {
+        var p = options.Password;
+        var errors = new List<string>();
+        if (password.Length < p.MinimumLength) errors.Add($"Password must be at least {p.MinimumLength} characters long.");
+        if (password.Length > p.MaximumLength) errors.Add($"Password must be at most {p.MaximumLength} characters long.");
+        if (errors.Count == 0)
+            foreach (var rule in rules)
+                errors.AddRange(await rule.ValidateAsync(password, email, ct));
+        return errors.Count == 0
+            ? null
+            : Results.ValidationProblem(new Dictionary<string, string[]> { ["password"] = [.. errors] },
+                extensions: new Dictionary<string, object?> { ["code"] = "validation_failed" });
     }
 
     private static string EscapeLogLineBreaks(string value) =>

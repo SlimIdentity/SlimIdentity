@@ -72,27 +72,56 @@ public sealed class ReviewRound4Tests
         Assert.Empty(await app.App.Services.GetRequiredService<ISlimPasskeyStore>().GetPasskeysAsync(owner.Id, default));
     }
 
-    /// <summary>The owner, right after signing in, still manages the sign-in methods without a password.</summary>
+    /// <summary>
+    /// Round 5, open question 1 (decided): a pure SSO account gets no local sign-in method – not right after a fresh
+    /// sign-in either. Neither a passkey (passkeys need a password) nor a first password via /change-password or a
+    /// self-service reset; an administrator's reset link still sets one.
+    /// </summary>
     [Fact]
-    public async Task S1_after_a_fresh_sign_in_a_passwordless_owner_adds_and_removes_methods()
+    public async Task A_pure_sso_account_gets_no_local_sign_in_method()
     {
         await using var app = await TestApp.StartAsync(WithProviderAndPasskeys());
-        var owner = await SocialOnlySessionAsync(app);
-        app.Time.Advance(TimeSpan.FromMinutes(10));
-        var stale = await owner.PostAsync("/auth/passkeys/register/options", new { });
-        Assert.Equal(HttpStatusCode.Forbidden, stale.StatusCode);
-        Assert.Equal("reauthentication_required", (await stale.Content.ReadFromJsonAsync<JsonElement>()).Str("status"));
+        var owner = await SocialOnlySessionAsync(app);   // fresh sign-in
 
-        owner = await SocialOnlySessionAsync(app);          // signs in again with the provider
-        using var key = new SoftwarePasskey();
-        var start = await owner.PostJsonAsync("/auth/passkeys/register/options", new { });
-        await owner.PostJsonAsync("/auth/passkeys/register", new { state = start.Str("state"), credential = key.Create(start.GetProperty("options"), Origin), name = "phone" });
-        await owner.PostJsonAsync("/auth/sign-in-methods/external/remove", new { provider = "Fake", providerKey = "google-1" });
+        var passkey = await owner.PostJsonAsync("/auth/passkeys/register/options", new { }, HttpStatusCode.Forbidden);
+        Assert.Equal("password_required", passkey.Str("status"));
+        var change = await owner.PostJsonAsync("/auth/change-password",
+            new { currentPassword = "anything", newPassword = "First-Password-123" }, HttpStatusCode.Conflict);
+        Assert.Equal("password_not_set", change.Str("status"));
+
+        await app.CreateClient().PostAsync("/auth/forgot-password", new { email = SocialEmail });
+        await Task.Delay(200);   // background queue
+        Assert.DoesNotContain(app.Mail.Mails, m => m.Kind == "password-reset" && m.To == SocialEmail);
 
         var user = app.Users.Get(SocialEmail);
-        Assert.Single(await app.App.Services.GetRequiredService<ISlimPasskeyStore>().GetPasskeysAsync(user.Id, default));
+        Assert.True(string.IsNullOrEmpty(user.PasswordHash));
+        Assert.Empty(await app.App.Services.GetRequiredService<ISlimPasskeyStore>().GetPasskeysAsync(user.Id, default));
+
+        SlimPasswordReset byAdministrator;
+        await using (var scope = app.App.Services.CreateAsyncScope())
+            byAdministrator = await scope.ServiceProvider.GetRequiredService<ISlimAuthManager>().CreatePasswordResetAsync(user);
+        await app.CreateClient().PostJsonAsync("/auth/reset-password", new { token = byAdministrator.Token, newPassword = "Set-By-Admin-123" });
+        await app.CreateClient().PostJsonAsync("/auth/login", new { email = SocialEmail, password = "Set-By-Admin-123" });
     }
 
+    /// <summary>An existing local account keeps its password and passkeys when Entra / a provider is linked in addition.</summary>
+    [Fact]
+    public async Task A_local_account_with_a_linked_provider_keeps_its_local_sign_in_methods()
+    {
+        await using var app = await TestApp.StartAsync(WithProviderAndPasskeys());
+        var me = app.CreateClient();
+        me.BearerToken = (await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword)).AccessToken;
+        var user = app.Users.Get(TestApp.UserEmail);
+        await app.App.Services.GetRequiredService<ISlimExternalLoginStore>().LinkExternalLoginAsync(user.Id, "Fake", "linked-1", default);
+
+        using var key = new SoftwarePasskey();
+        var start = await me.PostJsonAsync("/auth/passkeys/register/options", new { password = TestApp.UserPassword });
+        await me.PostJsonAsync("/auth/passkeys/register", new { state = start.Str("state"), credential = key.Create(start.GetProperty("options"), Origin), name = "phone" });
+        await me.PostJsonAsync("/auth/change-password", new { currentPassword = TestApp.UserPassword, newPassword = "Changed-Pass-456" });
+
+        await app.CreateClient().PostAsync("/auth/forgot-password", new { email = TestApp.UserEmail });
+        await app.Mail.WaitForAsync("password-reset", TestApp.UserEmail);
+    }
     // ------------------------------------------------------------------ forced password change (finding after round 4)
 
     /// <summary>An external sign-in does not get around a start password the administrator set (mustChange).</summary>
@@ -198,7 +227,7 @@ public sealed class ReviewRound4Tests
 
     /// <summary>
     /// A passwordless account is asked for "the password" by every 2FA endpoint; each attempt counts as a failed
-    /// password, and five of them lock the account – which then also blocks the external sign-in (account_locked).
+    /// password, and five of them lock the account – which then also blocks the external sign-in (locked_out).
     /// </summary>
     [Fact]
     public async Task U_a_passwordless_account_is_not_locked_out_by_the_2fa_settings_page()
@@ -212,7 +241,7 @@ public sealed class ReviewRound4Tests
         var fresh = app.CreateClient();
         var start = await fresh.GetAsync("/auth/login/Fake?useCookies=true&returnUrl=/done");
         var callback = await fresh.GetAsync(start.Headers.Location!.OriginalString);
-        Assert.DoesNotContain("account_locked", callback.Headers.Location!.OriginalString);
+        Assert.DoesNotContain("locked_out", callback.Headers.Location!.OriginalString);
     }
 }
 

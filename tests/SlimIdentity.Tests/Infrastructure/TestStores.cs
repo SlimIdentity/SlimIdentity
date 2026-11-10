@@ -113,6 +113,17 @@ public sealed class TestUserStore : ISlimUserStore
         return Task.CompletedTask;
     }
 
+    public Task<bool> UpdateSecurityStampAsync(SlimUser user, string expectedStamp, string newStamp, CancellationToken ct)
+    {
+        if (!_users.TryGetValue(user.Id, out var stored)) return Task.FromResult(false);
+        lock (stored)
+        {
+            if (stored.SecurityStamp != expectedStamp) return Task.FromResult(false);
+            stored.SecurityStamp = newStamp;
+            return Task.FromResult(true);
+        }
+    }
+
     public Task<bool> UpdateEmailAsync(SlimUser user, string newEmail, CancellationToken ct)
     {
         lock (_users)

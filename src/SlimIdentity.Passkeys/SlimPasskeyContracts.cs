@@ -7,7 +7,14 @@ namespace SlimIdentity.Contracts;
 
 /// <summary>Body of <c>POST /auth/passkeys/register/options</c>.</summary>
 /// <param name="Password">The current password – required for accounts that have one (a stolen session must not add a way in).</param>
-public sealed record SlimPasskeyRegistrationOptionsRequest(string? Password = null);
+public sealed record SlimPasskeyRegistrationOptionsRequest(string? Password = null)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Password = ").Append(SlimRedaction.Mask(Password));
+        return true;
+    }
+}
 
 /// <summary>WebAuthn relying party.</summary>
 public sealed record SlimPasskeyRelyingParty(string Id, string Name);
@@ -55,7 +62,15 @@ public sealed record SlimPasskeyLoginRequest(string State, SlimPasskeyCredential
 public sealed record SlimPasskeyRenameRequest(string Id, string Name);
 
 /// <summary>Body of <c>POST /auth/sign-in-methods/passkeys/remove</c>.</summary>
-public sealed record SlimRemovePasskeyRequest(string Id, string? Password = null);
+public sealed record SlimRemovePasskeyRequest(string Id, string? Password = null)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Id = ").Append(Id);
+        builder.Append(", Password = ").Append(SlimRedaction.Mask(Password));
+        return true;
+    }
+}
 
 /// <summary>System.Text.Json source generation for the passkey endpoints and their signed states (Native AOT).</summary>
 [JsonSourceGenerationOptions(JsonSerializerDefaults.Web)]

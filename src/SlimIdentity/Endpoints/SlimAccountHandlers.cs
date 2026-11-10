@@ -85,7 +85,8 @@ internal sealed class SlimAccountHandlers(
         if (!string.IsNullOrEmpty(email))
         {
             var user = await store.FindByEmailAsync(email, ct);
-            if (user is { IsActive: true })
+            // a pure SSO account gets no local password; an unconfirmed one still may (first proof of the mailbox)
+            if (user is { IsActive: true } && !(user.EmailConfirmed && await SignsInOnlyExternallyAsync(user, ct)))
             {
                 var token = workflow.Protect(SlimWorkflowTokens.PasswordResetPurpose,
                     new SlimResetTokenPayload(user.Id, user.SecurityStamp), O.Tokens.PasswordResetTokenLifetime);
@@ -107,6 +108,8 @@ internal sealed class SlimAccountHandlers(
         if (user is null || !user.IsActive || !SlimUser.IsSameSecurityState(user.SecurityStamp, payload.Stamp))
             return SlimResults.InvalidToken();
 
+        if (!payload.ByAdministrator && user.EmailConfirmed && await SignsInOnlyExternallyAsync(user, ct))
+            return ExternalSignInOnly();
         if (await passwordPolicy.ValidateAsync(request!.NewPassword, user.Email, ct, "newPassword") is { } errors)
             return SlimResults.Validation(errors);
 
@@ -303,6 +306,9 @@ internal sealed class SlimAccountHandlers(
         var (user, error) = await LoadCurrentUserAsync(forbidImpersonation: true, ct);
         if (user is null) return error!;
 
+        // changes an existing password only: an account without one (SSO, passkey) gets no local password this way
+        if (!await credentials.HasPasswordAsync(user, ct))
+            return SlimResults.Status("password_not_set", "The account has no password to change.", StatusCodes.Status409Conflict);
         if (request is null || string.IsNullOrEmpty(request.CurrentPassword))
             return SlimResults.BadRequest("invalid_request", "currentPassword is required.");
         if (await passwordPolicy.ValidateAsync(request.NewPassword, user.Email, ct, "newPassword") is { } errors)
@@ -318,7 +324,7 @@ internal sealed class SlimAccountHandlers(
 
         // keep the calling device signed in
         var session = await authManager.RefreshCurrentSessionAsync(user, ct);
-        return Results.Ok(session.ToResponse());
+        return SlimResults.ReissuedSession(session);
     }
 
     // ------------------------------------------------------------------ GET /me (authenticated)
@@ -346,6 +352,16 @@ internal sealed class SlimAccountHandlers(
     }
 
     // ------------------------------------------------------------------ helpers
+
+    /// <summary>No local password, but an external login: the account signs in through SSO only.</summary>
+    private async Task<bool> SignsInOnlyExternallyAsync(SlimUser user, CancellationToken ct) =>
+        !await credentials.HasPasswordAsync(user, ct)
+        && services.GetService<ISlimExternalLoginStore>() is { } externalLogins
+        && (await externalLogins.GetExternalLoginsAsync(user.Id, ct)).Count > 0;
+
+    private static IResult ExternalSignInOnly() =>
+        SlimResults.Status("external_sign_in_only",
+            "The account signs in with an external provider and has no local password.", StatusCodes.Status409Conflict);
 
     internal async Task<(SlimUser? User, IResult? Error)> LoadCurrentUserAsync(bool forbidImpersonation, CancellationToken ct)
     {

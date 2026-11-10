@@ -34,14 +34,18 @@ builder.Services.AddSlimIdentity(…).AddSignInGuard<TenantGuard>();
 ```
 
 `SlimSignInContext` carries the user, the authentication method (`pwd`, `mfa`, `mfa_remembered`, `ext`,
-`impersonation`, …), the impersonating administrator if any, the `HttpContext` (client IP, host name) and the
+`impersonation`, …), the impersonating administrator if any, the `HttpContext` (client IP, host name; `null` outside a
+request – see [calls without a request](#calls-without-a-request)) and the
 `Stage`:
 
 | Stage | When | A veto means |
 | :--- | :--- | :--- |
 | `SignIn` | password, second factor, external login, invitation, impersonation, end of an impersonation | `403` with your code and message (`slim_error` for an external cookie sign-in); no session |
-| `Renewal` | `/refresh`, step-up (`ElevateSessionAsync`), the new session after a password or 2FA change – with or without a session store | `403`; the client signs in again |
+| `Renewal` | `/refresh`, step-up (`ElevateSessionAsync`) – with or without a session store | `403`; the client signs in again |
 | `Revalidation` | every bearer request, cookies every `Cookies.SecurityStampValidationInterval` | the running session ends (`401`) |
+
+The session re-issued for the calling device after its own password or 2FA change is not asked again – the user has
+just proven the account; the next revalidation applies your guards to it like to every other session.
 
 Re-validation runs often – **keep the check cheap** and cache what you look up (a few seconds of cache are fine:
 re-validation is not the only gate). A guard that throws fails closed: no session.
@@ -70,6 +74,19 @@ invitation code) – never from whether the address already has an account, or t
 Business data for the new account (company, name, terms) is not a guard's job: `ISlimRegistrationProfile` validates
 it and your store writes it with the account – see [registration with business data](registration-profile.md).
 
+## Calls without a request
+
+Guards also run when your own code calls `ISlimAuthManager` outside a request – a background job, an import, a queue
+worker. They are then resolved from a scope of their own and `context.HttpContext` is `null`. A guard that reads the
+request must handle that; whether such a call is trusted is your decision:
+
+```csharp
+public ValueTask<SlimVeto?> CheckAsync(SlimRegistrationContext context, CancellationToken ct) =>
+    ValueTask.FromResult(context.HttpContext is null   // our own import – trusted
+        ? null
+        : new SlimVeto("registration_not_allowed"));
+```
+
 ## Events
 
 ```csharp
@@ -88,7 +105,7 @@ public sealed class AuditTrail(AppDbContext db) : ISlimEventObserver
 | :--- | :--- |
 | `claims_changed` | – (`RefreshClaimsAsync`) |
 | `signed_in` | method (`pwd`, `mfa`, `ext`, …); `ActorId` during an impersonation |
-| `sign_in_failed` | reason: `invalid_password`, `unknown_user` (no `UserId`), `locked_out`, `inactive`, `attempts_queued`, `invalid_two_factor_code`, a guard's veto code |
+| `sign_in_failed` | reason: `invalid_password`, `unknown_user` (no `UserId`), `locked_out`, `account_disabled`, `attempts_queued`, `invalid_two_factor_code`, a guard's veto code |
 | `locked_out`, `unlocked` | – |
 | `user_created` | reason `registration` or `external` (method = provider) |
 | `email_confirmed`, `email_changed` | – |

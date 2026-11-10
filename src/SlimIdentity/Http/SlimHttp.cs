@@ -94,6 +94,28 @@ internal sealed class SlimRateLimitPartitioner(Func<HttpContext, string?> keySel
     public string? GetKey(HttpContext context) => keySelector(context);
 }
 
+/// <summary>
+/// Fails closed when an endpoint protected by a SlimIdentity rate-limit policy is reached without the rate-limiting
+/// middleware: without <c>app.UseRateLimiter()</c> the brute-force limit would otherwise be off without any sign.
+/// </summary>
+internal static class SlimRateLimitGuard
+{
+    internal static readonly object Applied = new();
+
+    public static ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+    {
+        var http = context.HttpContext;
+        var metadata = http.GetEndpoint()?.Metadata;
+        if (metadata?.GetMetadata<DisableRateLimitingAttribute>() is null
+            && metadata?.GetMetadata<EnableRateLimitingAttribute>()?.PolicyName is SlimIdentityDefaults.BruteForcePolicy or SlimIdentityDefaults.RefreshPolicy
+            && !http.Items.ContainsKey(Applied))
+            throw new InvalidOperationException(
+                "SlimIdentity: the endpoint requires rate limiting, but the rate-limiting middleware did not run – the brute-force " +
+                "protection would be off. Call app.UseRateLimiter() after app.UseRouting() / before the SlimIdentity endpoints are reached.");
+        return next(context);
+    }
+}
+
 internal abstract class SlimClientRateLimiterPolicy(
     IOptions<SlimIdentityOptions> options,
     IServiceProvider services,
@@ -132,6 +154,7 @@ internal abstract class SlimClientRateLimiterPolicy(
 
     public RateLimitPartition<string> GetPartition(HttpContext httpContext)
     {
+        httpContext.Items[SlimRateLimitGuard.Applied] = true;   // proof that app.UseRateLimiter() runs, see SlimRateLimitGuard
         var o = options.Value.RateLimit;
         var (permitLimit, window) = limits(o);
         var custom = _custom?.GetKey(httpContext);
@@ -169,6 +192,14 @@ internal static class SlimResults
 
     public static IResult InvalidToken(int statusCode = StatusCodes.Status400BadRequest) =>
         Status("invalid_token", "The token is invalid or has expired.", statusCode);
+
+    /// <summary>
+    /// Answer after a change that re-issued the caller's session: the new session, or – if it could not be renewed (refresh
+    /// chain at its end) – <c>401</c> with the reason; the change itself is saved, the client signs in again.
+    /// </summary>
+    public static IResult ReissuedSession(SlimAuthResult session) => session.Succeeded
+        ? Results.Ok(session.ToResponse())
+        : Status(session.Error ?? "session_expired", "The change was saved, but this session could not be renewed; sign in again.", StatusCodes.Status401Unauthorized);
 
     public static IResult BadRequest(string status, string? message = null) =>
         Status(status, message, StatusCodes.Status400BadRequest);

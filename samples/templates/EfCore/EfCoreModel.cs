@@ -5,6 +5,7 @@
 // Your own AppUser stays YOUR domain model – SlimIdentity only sees the mapped SlimUser.
 
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 namespace MyApp.Data;
 
@@ -116,19 +117,22 @@ public class UserSession
     public string? IpAddress { get; set; }
 }
 
-/// <summary>Outbox row for guaranteed mail delivery (see samples/templates/Email/OutboxEmailSender.cs).</summary>
+/// <summary>Outbox row for at-least-once mail delivery with retries (see samples/templates/Email/OutboxEmailSender.cs).</summary>
 public class OutboxMail
 {
     public long Id { get; set; }
     public string Kind { get; set; } = "";         // verification, password-reset, …
     public string To { get; set; } = "";
-    public string Payload { get; set; } = "";      // link / code
+    public string Payload { get; set; } = "";      // link / code – erased once the mail is sent
     public string? UserId { get; set; }            // SlimEmailContext – persisted, the worker runs after the request
     public string Culture { get; set; } = "";
     public string ItemsJson { get; set; } = "{}";
     public DateTimeOffset CreatedUtc { get; set; }
     public DateTimeOffset? SentUtc { get; set; }
     public int Attempts { get; set; }
+    public long NextAttemptAt { get; set; }        // unix milliseconds – exponential backoff
+    public long? LockedUntil { get; set; }         // unix milliseconds – lease of the worker instance sending it
+    public string? LastError { get; set; }         // why the last attempt failed (rows with Attempts = MaxAttempts were given up)
 }
 
 public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
@@ -159,11 +163,19 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         });
         b.Entity<AppUserRole>().HasKey(x => new { x.UserId, x.Role });
         b.Entity<Group>(e => { e.HasKey(x => x.Id); e.HasMany(x => x.Permissions).WithOne().HasForeignKey(p => p.GroupId); });
-        b.Entity<GroupMember>(e => { e.HasKey(x => new { x.GroupId, x.UserId }); e.HasIndex(x => x.UserId); });
+        b.Entity<GroupMember>(e =>
+        {
+            e.HasKey(x => new { x.GroupId, x.UserId });
+            e.HasIndex(x => x.UserId);
+            e.HasOne<Group>().WithMany().HasForeignKey(x => x.GroupId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
         b.Entity<GroupPermission>().HasKey(x => new { x.GroupId, x.Permission });
-        b.Entity<RefreshToken>(e => { e.HasKey(x => x.TokenHash); e.HasIndex(x => x.UserId); });
-        b.Entity<RecoveryCode>().HasKey(x => new { x.UserId, x.CodeHash });
-        b.Entity<ExternalLogin>(e => { e.HasKey(x => new { x.Provider, x.ProviderKey }); e.HasIndex(x => x.UserId); });
+        // every identity row belongs to a user and goes with it: a deleted account leaves no external login behind
+        // that would otherwise block the person's next sign-in with that provider
+        b.Entity<RefreshToken>(e => { e.HasKey(x => x.TokenHash); e.HasIndex(x => x.UserId); OwnedByUser(e); });
+        b.Entity<RecoveryCode>(e => { e.HasKey(x => new { x.UserId, x.CodeHash }); OwnedByUser(e); });
+        b.Entity<ExternalLogin>(e => { e.HasKey(x => new { x.Provider, x.ProviderKey }); e.HasIndex(x => x.UserId); OwnedByUser(e); });
         b.Entity<UserPasskey>(e =>
         {
             e.HasKey(x => x.CredentialIdHash);
@@ -171,6 +183,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.CredentialId).HasMaxLength(1023);
             e.Property(x => x.Name).HasMaxLength(64);
             e.HasIndex(x => x.UserId);
+            OwnedByUser(e);
         });
         b.Entity<ApiKey>().HasKey(x => x.KeyHash);
         b.Entity<UserSession>(e =>
@@ -180,7 +193,16 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.UserAgent).HasMaxLength(256);
             e.HasIndex(x => x.UserId);
             e.HasIndex(x => x.ExpiresUtc); // cleanup job: DELETE WHERE ExpiresUtc < now
+            OwnedByUser(e);
         });
-        b.Entity<OutboxMail>(e => { e.HasKey(x => x.Id); e.HasIndex(x => x.SentUtc); });
+        b.Entity<OutboxMail>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.LastError).HasMaxLength(500);
+            e.HasIndex(x => new { x.SentUtc, x.NextAttemptAt });
+        });
     }
+
+    private static void OwnedByUser<T>(EntityTypeBuilder<T> e) where T : class =>
+        e.HasOne<AppUser>().WithMany().HasForeignKey("UserId").OnDelete(DeleteBehavior.Cascade);
 }

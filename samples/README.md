@@ -17,7 +17,7 @@ servers (see CONTRIBUTING).
 | :--- | :--- | :--- |
 | `EfCore/` | `AppDbContext` + all stores (user, refresh, 2FA, external login, passkeys, API key, sessions) – only if you need full control over the mapping; otherwise use the **`SlimIdentity.EntityFrameworkCore` package** | `Microsoft.EntityFrameworkCore` + provider |
 | `Dapper/` | `schema.sql` (PostgreSQL) + all stores | `Dapper`, `Npgsql` |
-| `Email/` | `MailKitEmailSender`, `SendGridEmailSender`, `LoggingEmailSender`, `OutboxEmailSender` + `OutboxMailWorker` (guaranteed delivery) | `MailKit` or `SendGrid`, EF Core |
+| `Email/` | `MailKitEmailSender`, `SendGridEmailSender`, `LoggingEmailSender`, `OutboxEmailSender` + `OutboxMailWorker` (durable, at-least-once delivery with retries) | `MailKit` or `SendGrid`, EF Core |
 | `Enterprise/` | `LdapPasswordValidator`, legacy hash migration, client certificates (mTLS), admin endpoints (impersonation, sudo, API keys, invitations, ban) | `System.DirectoryServices.Protocols`, `Microsoft.AspNetCore.Authentication.Certificate` |
 | `Security/` | `PwnedPasswordRule` – rejects breached passwords via Have I Been Pwned (k-anonymity) | – |
 | `DataProtection/` | Persisting the key ring: EF Core, Redis, file system + certificate | `Microsoft.AspNetCore.DataProtection.*` |

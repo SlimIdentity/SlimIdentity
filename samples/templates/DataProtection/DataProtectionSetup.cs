@@ -10,6 +10,11 @@
 //   builder.Services.AddDataProtectionInRedis(redisConnectionString);           // Redis (many instances)
 //   builder.Services.AddDataProtectionOnDisk("/keys", certificate);             // shared volume + certificate
 //
+// WARNING: the database and Redis variants store the keys UNENCRYPTED. With the database variant the keys sit next to
+// the TOTP secrets they protect – a database dump or backup alone is enough to decrypt every 2FA secret and to forge
+// cookies. For production add encryption at rest (.ProtectKeysWithCertificate(...), Azure Key Vault, or DPAPI on a
+// single Windows server) to the returned builder, or at least keep the key table out of shared dumps and backups.
+//
 // Packages: Microsoft.AspNetCore.DataProtection.EntityFrameworkCore or Microsoft.AspNetCore.DataProtection.StackExchangeRedis
 
 using System.Security.Cryptography.X509Certificates;
@@ -35,14 +40,21 @@ public static class DataProtectionSetup
     // The application name isolates your keys and must be identical on every instance / deployment slot.
     private const string ApplicationName = "MyApp";
 
-    /// <summary>Keys in your database. The rows are XML key material – restrict database access accordingly.</summary>
+    /// <summary>
+    /// Keys in your database, stored <b>unencrypted</b> next to the TOTP secrets they protect: a dump or backup of this
+    /// database alone decrypts every 2FA secret. In production chain <c>.ProtectKeysWithCertificate(certificate)</c>
+    /// (or Azure Key Vault / DPAPI) onto the result, and restrict database and backup access accordingly.
+    /// </summary>
     public static IDataProtectionBuilder AddDataProtectionInDatabase<TContext>(this IServiceCollection services)
         where TContext : DbContext, IDataProtectionKeyContext =>
         services.AddDataProtection()
             .SetApplicationName(ApplicationName)
             .PersistKeysToDbContext<TContext>();
 
-    /// <summary>Keys in Redis – for many instances. Protect the Redis instance (TLS, password, no public access).</summary>
+    /// <summary>
+    /// Keys in Redis – for many instances. Stored <b>unencrypted</b>: protect the Redis instance (TLS, password, no public
+    /// access) and, in production, chain <c>.ProtectKeysWithCertificate(certificate)</c> onto the result.
+    /// </summary>
     public static IDataProtectionBuilder AddDataProtectionInRedis(this IServiceCollection services, string redisConnectionString) =>
         services.AddDataProtection()
             .SetApplicationName(ApplicationName)

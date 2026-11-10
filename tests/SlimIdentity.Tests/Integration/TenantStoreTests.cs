@@ -36,6 +36,7 @@ public sealed class TenantStoreTests
         public Task<SlimUser?> FindByIdAsync(string userId, CancellationToken ct) => Current.FindByIdAsync(userId, ct);
         public Task<SlimUser?> CreateAsync(SlimNewUser newUser, CancellationToken ct) => Current.CreateAsync(newUser, ct);
         public Task UpdateSecurityStateAsync(SlimUser user, CancellationToken ct) => Current.UpdateSecurityStateAsync(user, ct);
+        public Task<bool> UpdateSecurityStampAsync(SlimUser user, string expectedStamp, string newStamp, CancellationToken ct) => Current.UpdateSecurityStampAsync(user, expectedStamp, newStamp, ct);
         public Task<int> IncrementFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct) => Current.IncrementFailedLoginAttemptsAsync(user, ct);
         public Task SetLockoutEndAsync(SlimUser user, DateTimeOffset? lockoutEndUtc, CancellationToken ct) => Current.SetLockoutEndAsync(user, lockoutEndUtc, ct);
         public Task ResetFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct) => Current.ResetFailedLoginAttemptsAsync(user, ct);

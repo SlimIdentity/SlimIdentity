@@ -232,6 +232,85 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
   `logoutAll`, `sessions`, `revokeSession`, `invitationInfo`, `acceptInvitation`, `forgetAllDevices`; the cookie flow
   `twoFactorStatus` and `enableEmailTwoFactor`.
 
+### Security (external review round 5)
+
+- Multi-tenancy: `UseTenantKey(http => …)` binds cookies and access tokens to the tenant they were issued in
+  (`slim_tenant` claim, checked on every request before any validation interval). Before, a cookie of tenant A was
+  accepted by tenant B within `SecurityStampValidationInterval` – with ids colliding across tenants even as B's user.
+  Required with a store per tenant; the multi-tenancy guide no longer claims cookies were rejected without it.
+- An impersonation is bound to the administrator's session it was started from (with `ISlimSessionStore`): revoking
+  that session ends the impersonation, and `EndImpersonationAsync` resumes it instead of issuing a fresh admin session.
+  `SlimActor.SessionId` names it.
+- **Breaking:** `ImpersonateAsync(target, ct)`, `ElevateToSudoAsync(user, duration, ct)` and
+  `ElevateSessionAsync(user, claims, ct)` take the administrator and the mode (cookie / bearer) from the current
+  session; the free `impersonatorId` and `useCookies` parameters are gone (a wrong value shortened cookie sessions or
+  set cookies for bearer clients).
+- Wrong passwords no longer count towards the lockout of accounts without a password, so a stranger cannot lock out
+  an external-login or passkey account; claiming an account through a verified external login clears a pending start
+  password (`PasswordChangeRequired`) and the lockout state.
+- An impersonation never counts as the owner's recent sign-in (`ConfirmPasswordAsync`, sudo, sign-in method changes).
+- **Breaking:** without `app.UseRateLimiter()` the rate-limited endpoints fail with an `InvalidOperationException`
+  naming the missing call, instead of running without brute-force protection.
+- `email_verified` of an external provider only vouches for a real `email` claim, not for fallback claims.
+- `PreviousJwtSecrets` work for real tokens: every secret gets its own key id (`kid`). Tokens issued before this
+  version (old common key id) are still accepted.
+- **Breaking:** `SlimAuthResult.ToResponse()` throws for a failed result instead of reporting `status: "success"` with
+  no token. `/change-password`, `/2fa/disable` and `/2fa/forget-all-devices` answer `401 session_expired` ("the change
+  was saved, sign in again") when the session cannot be renewed – e.g. at the end of the refresh chain; `/2fa/enable`
+  returns the recovery codes without a session then.
+- **Breaking:** records carrying passwords, tokens or codes (requests, `SlimAuthResult`, `SlimPasswordReset`,
+  `SlimInvitation`, 2FA setup and recovery-code responses, passkey requests) print `***` for them in `ToString()`, so
+  a logged request no longer leaks secrets.
+- **Breaking:** one name per account state: `account_disabled` and `locked_out` everywhere (`SlimAuthResult.Error`,
+  HTTP, external-login `slim_error`, event and metric reasons) – before also `account_inactive`, `inactive` and
+  `account_locked`. The error codes are documented in the endpoint reference.
+- **Breaking (store contract):** `ISlimUserStore.UpdateSecurityStampAsync(user, expectedStamp, newStamp, ct)` – a
+  compare-and-set on the stamp only. Sign out everywhere, `RefreshClaimsAsync` and `/2fa/forget-all-devices` use it
+  and no longer write back a whole user read earlier (a password change in the meantime could be undone, e.g. by
+  `RefreshClaimsAsync` in a loop over group members). The remaining whole-state writers are listed under known
+  limitations.
+- The `JwtSecret` placeholder of the getting-started guide (`<…>`) is rejected at startup.
+- The remember-device cookie includes `PathBase` (it was never sent back under `UsePathBase`).
+- `SlimEmailAddress` is public, so host endpoints (admin create-user) can normalize addresses like SlimIdentity.
+- Conformance kit: parallel registrations with different casings, the initial state of a new user, clearing values
+  in `UpdateSecurityStateAsync`, the new stamp compare-and-set, `TouchAsync` not reviving revoked sessions, external
+  identities staying with their first user, single-use challenges of synced passkeys (counter 0), and
+  `ISlimApiKeyStore` (with `SlimConformanceOptions.ApiKey` also a valid key).
+- EF Core package: the change tracker is cleared after failed saves too, so a failed operation cannot leak entities
+  into the next one.
+- EF Core template: recovery codes are stored inside the execution strategy (500 with `EnableRetryOnFailure` before);
+  foreign keys with cascade delete to the user (**migration needed**); API-key expiry works on SQLite.
+- Outbox template: delivery is at-least-once with retries, not "guaranteed" – exponential backoff for about 9 hours,
+  given-up rows stay with `LastError`, an atomic lease makes it safe with several instances, the link or code is
+  erased after sending, and worker errors no longer stop the host. **Breaking:** the worker is
+  `OutboxMailWorker<TTransport>`, `OutboxMail` gains `NextAttemptAt`, `LockedUntil` and `LastError` (migration).
+- Admin template: create-user normalizes the address and checks the start password before creating the account – no
+  orphan account on a retry.
+- TypeScript client: sends `X-CSRF` on anonymous requests (403 `csrf_validation_failed` on register, verification and
+  password reset before), `loginRecoveryCode`, and a failed refresh clears the token only on 400/401 (not on 429 or
+  5xx). **Breaking:** an invitation accepted without a session returns `sign_in_required`; `changeEmail` and
+  `confirmEmailChange` return a `FormResult`; the 2FA calls return a success-or-error result instead of `[]`.
+- **Breaking:** a pure SSO account (no password, an external login) gets no local sign-in method by self-service:
+  `/change-password` only changes an existing password (`409 password_not_set` – before, a fresh sign-in set a first
+  one), a self-service reset sends no link (`409 external_sign_in_only` for an older one), and a passkey needs a
+  password on the account (`403 password_required`). Accounts with a password keep password and passkeys when a
+  provider is linked; administrators can still set a password.
+- **Breaking:** sign-in and registration guards also run when `ISlimAuthManager` is called outside a request (a
+  background job, an import) – before, they were silently skipped. They are resolved from a scope of their own, and
+  `SlimSignInContext.HttpContext` / `SlimRegistrationContext.HttpContext` are now nullable: a guard that reads the
+  request must handle `null` and decides itself whether such a call is trusted.
+- EF Core stores: a write while the host holds an open transaction (on its context or a `TransactionScope`) is not
+  part of it and may wait for its locks. It now throws at once on SQLite (instead of waiting until it times out) and
+  logs a warning once (event id 8101) on other providers; the package README explains it (commit first).
+- Tests: the EF Core conformance runs also cover `long` and `string` keys (SQLite, PostgreSQL, SQL Server).
+- Docs: the Data Protection guide and template warn that the database and Redis variants store the key ring
+  unencrypted – with EF Core next to the TOTP secrets it protects – and show `ProtectKeysWithCertificate` for production.
+- Docs: the Entra ID guide no longer trusts every address of a single tenant (`TrustedEmailProviders`) – only members'
+  (optional claim `acct` = `0`); B2B guests bring addresses from other directories and are matched by `sub` only.
+- Docs: getting-started starts with the null mail sender and without a refresh-token store; minimal-setup installs
+  the EF provider and tooling and creates the database; hooks.md states that the session renewal after a password or
+  2FA change skips the guards.
+
 ### Fixed
 
 - The email sender templates no longer write recipient addresses, verification or reset links, or two-factor codes to

@@ -172,6 +172,7 @@ public static class SlimIdentityServiceExtensions
                         ? []
                         : [SlimJwtTokenFactory.CreateSigningKey(t.JwtSecret), .. t.PreviousJwtSecrets.Select(SlimJwtTokenFactory.CreateSigningKey)],
                     ValidAlgorithms = [SecurityAlgorithms.HmacSha256],
+                    TryAllIssuerSigningKeys = true, // tokens with the legacy shared key id "slim-hs256"
                     ClockSkew = t.ClockSkew,
                     // the clock the tokens were issued with (the registered TimeProvider) – not the system clock
                     LifetimeValidator = (notBefore, expires, _, p) =>

@@ -47,7 +47,10 @@ internal sealed class SlimPasskeyHandlers(
         // like 2FA and linking: never on an unconfirmed account (the registrant may not own the address)
         if (O.Email.Enabled && !user.EmailConfirmed)
             return SlimResults.Status("email_not_confirmed", "Confirm your e-mail address before adding a passkey.", StatusCodes.Status403Forbidden);
-        // a new way in: a stolen session alone must not add one – the password, or without one a fresh sign-in
+        // a passkey adds to a password, never replaces it: an SSO account gets no local sign-in method this way
+        if (!await credentials.HasPasswordAsync(user, ct))
+            return SlimResults.Status("password_required", "The account needs a password before a passkey can be added.", StatusCodes.Status403Forbidden);
+        // a new way in: a stolen session alone must not add one – the password
         if (await credentials.ConfirmPasswordAsync(user, request?.Password, Http, ct) is { } failure)
             return failure;
 
