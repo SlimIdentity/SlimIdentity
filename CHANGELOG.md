@@ -295,6 +295,8 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
   one), a self-service reset sends no link (`409 external_sign_in_only` for an older one), and a passkey needs a
   password on the account (`403 password_required`). Accounts with a password keep password and passkeys when a
   provider is linked; administrators can still set a password.
+- Docs: the Entra ID guide no longer trusts every address of a single tenant (`TrustedEmailProviders`) – only members'
+  (optional claim `acct` = `0`); B2B guests bring addresses from other directories and are matched by `sub` only.
 - Docs: getting-started starts with the null mail sender and without a refresh-token store; minimal-setup installs
   the EF provider and tooling and creates the database; hooks.md states that the session renewal after a password or
   2FA change skips the guards.
