@@ -39,3 +39,4 @@
 **Background**
 
 - [Architecture and design principles](architecture-manifest.md)
+- [Review prompt](review-prompt.md) – briefing for an independent (AI or human) review
