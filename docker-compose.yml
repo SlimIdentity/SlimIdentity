@@ -1,0 +1,17 @@
+# SlimIdentity playground: docker compose up --build  →  http://localhost:8080
+# Breakme mode (secret passwords for the seeded accounts, goals in BREAKME.md):
+#   BREAKME=true docker compose up --build        (PowerShell: $env:BREAKME="true"; docker compose up --build)
+
+services:
+  playground:
+    build:
+      context: .
+      dockerfile: samples/SlimIdentity.Demo/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      Demo__Breakme: ${BREAKME:-false}
+      SlimIdentity__Links__BaseUrl: http://localhost:8080
+      # local playground only – a real deployment takes the secret from a secret store
+      SlimIdentity__Tokens__JwtSecret: playground-only-secret-0123456789-abcdefghijklmnopqrstuvwxyz

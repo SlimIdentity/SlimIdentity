@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <!-- Native AOT check for the library: dotnet publish samples/SlimIdentity.Demo -r <rid> -->
+    <PublishAot>true</PublishAot>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <!-- optional "Sign in with Google" in the playground (only with Google:ClientId configured) -->
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.Google" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\SlimIdentity\SlimIdentity.csproj" />
+    <!-- passkeys in the playground; the AOT publish of the demo checks the passkey package as well -->
+    <ProjectReference Include="..\..\src\SlimIdentity.Passkeys\SlimIdentity.Passkeys.csproj" />
+  </ItemGroup>
+
+</Project>

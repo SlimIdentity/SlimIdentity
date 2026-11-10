@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# a new push to the same branch or pull request replaces the run in progress
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  # pull requests: new dependencies with known vulnerabilities or an incompatible license stop the merge
+  # (GitHub dependency graph – free for public repositories)
+  dependency-review:
+    if: ${{ github.event_name == 'pull_request' && !github.event.repository.private }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: moderate
+
+  build:
+    runs-on: ubuntu-latest
+    # disposable databases for the store conformance checks of the templates (tests/SlimIdentity.Samples.Tests):
+    # EF Core on PostgreSQL and SQL Server, Dapper on PostgreSQL (SQLite runs without a service)
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: slimidentity
+          POSTGRES_DB: conformance
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: Y
+          MSSQL_SA_PASSWORD: Slim-Identity-2026!
+        ports: ['1433:1433']
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P Slim-Identity-2026! -Q 'SELECT 1'"
+          --health-interval 10s --health-timeout 5s --health-retries 12
+    env:
+      SLIMIDENTITY_TEST_POSTGRES: Host=localhost;Port=5432;Database=conformance;Username=postgres;Password=slimidentity
+      SLIMIDENTITY_TEST_SQLSERVER: Server=localhost,1433;User Id=sa;Password=Slim-Identity-2026!;TrustServerCertificate=true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # MinVer needs the tags
+
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore SlimIdentity.slnx
+
+      - name: Build
+        run: dotnet build SlimIdentity.slnx --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test SlimIdentity.slnx --configuration Release --no-build --logger "trx;LogFileName=results.trx" --results-directory TestResults
+
+      # the demo is published as Native AOT: any trimming/AOT warning in the library (core and passkeys) fails the build
+      - name: Native AOT publish (demo)
+        run: dotnet publish samples/SlimIdentity.Demo --configuration Release --runtime linux-x64 --output aot
+
+      # the TypeScript client template is type-checked like the C# templates are compiled (Node is preinstalled)
+      - name: Type-check the TypeScript client
+        run: npx --yes -p typescript@5.8.3 tsc -p samples/templates/Frontend
+
+      - name: Check for vulnerable packages
+        run: dotnet list SlimIdentity.slnx package --vulnerable --include-transitive 2>&1 | tee vulnerable.txt && ! grep -q "has the following vulnerable packages" vulnerable.txt
+
+      - name: Pack
+        run: for p in src/*/*.csproj; do dotnet pack "$p" --configuration Release --no-build --output artifacts || exit 1; done
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: test-results
+          path: TestResults
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: nuget-package
+          path: artifacts/*

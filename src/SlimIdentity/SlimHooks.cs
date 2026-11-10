@@ -1,0 +1,214 @@
+namespace SlimIdentity;
+
+// Hooks only ever tighten: a guard can refuse, an event handler can only watch. None of them can skip a check, change
+// the order of the flow or issue tokens itself.
+
+/// <summary>The answer of a guard that refuses: a machine-readable code and an optional message for the user.</summary>
+/// <param name="Error">Snake-case code returned as <c>status</c> (403) or <c>slim_error</c>, e.g. <c>tenant_suspended</c>.</param>
+/// <param name="Message">Optional human-readable explanation, returned as <c>message</c>.</param>
+public sealed record SlimVeto(string Error, string? Message = null);
+
+/// <summary>When <see cref="ISlimSignInGuard"/> is asked.</summary>
+public enum SlimSignInStage
+{
+    /// <summary>A new session is about to be issued (password, second factor, external login, passkey, invitation, start or end of an impersonation, …).</summary>
+    SignIn,
+    /// <summary>An existing session is renewed (refresh token, step-up / sudo).</summary>
+    Renewal,
+    /// <summary>A running session is re-validated (every bearer request, cookies every <c>SecurityStampValidationInterval</c>).</summary>
+    Revalidation,
+}
+
+/// <summary>What <see cref="ISlimSignInGuard"/> decides about.</summary>
+public sealed class SlimSignInContext
+{
+    /// <summary>The account (current state from the store).</summary>
+    public required SlimUser User { get; init; }
+    /// <summary>How the session was authenticated (<c>amr</c>): <c>pwd</c>, <c>mfa</c>, <c>mfa_remembered</c>, <c>ext</c>, <c>impersonation</c>, <c>api_key</c>, …</summary>
+    public required string AuthenticationMethod { get; init; }
+    /// <summary>New session, renewal or re-validation.</summary>
+    public required SlimSignInStage Stage { get; init; }
+    /// <summary>The administrator during an impersonation, else <c>null</c>.</summary>
+    public string? ImpersonatorId { get; init; }
+    /// <summary>The request (client IP, host name / tenant, headers).</summary>
+    public required HttpContext HttpContext { get; init; }
+}
+
+/// <summary>
+/// Optional veto before any session exists and while it runs: suspended tenants, IP allow-lists, business hours,
+/// expired licences. Asked after all of SlimIdentity's own checks passed; can only refuse. Register with
+/// <c>AddSignInGuard&lt;T&gt;()</c> (several are allowed – each one can refuse).
+/// </summary>
+/// <remarks>
+/// Re-validation runs on every bearer request (<c>Tokens.ValidateSecurityStampOnEachRequest</c>) and for cookies every
+/// <c>Cookies.SecurityStampValidationInterval</c> – keep the check cheap (cache what you look up). A refused sign-in
+/// answers <c>403</c> with the veto's code and message (the password was correct, so nothing is revealed); a refused
+/// running session ends like a revoked one (<c>401</c>).
+/// </remarks>
+public interface ISlimSignInGuard
+{
+    /// <summary><c>null</c> to allow, a <see cref="SlimVeto"/> to refuse.</summary>
+    ValueTask<SlimVeto?> CheckAsync(SlimSignInContext context, CancellationToken ct);
+}
+
+/// <summary>What <see cref="ISlimRegistrationGuard"/> decides about.</summary>
+public sealed class SlimRegistrationContext
+{
+    /// <summary>The normalized address of the new account.</summary>
+    public required string Email { get; init; }
+    /// <summary><c>null</c> for <c>/register</c>, the provider for an automatic registration through external login.</summary>
+    public string? Provider { get; init; }
+    /// <summary>The request (client IP, captcha header, invitation code, …).</summary>
+    public required HttpContext HttpContext { get; init; }
+}
+
+/// <summary>
+/// Optional veto against new accounts: company domains only, invitation codes, captcha checks. Asked before anything is
+/// looked up or stored – decide from the request only, never from whether the address already has an account, or the
+/// answer reveals it. A refused <c>/register</c> answers <c>403</c> with the veto's code; a refused external
+/// auto-registration redirects with <c>slim_error</c>. Register with <c>AddRegistrationGuard&lt;T&gt;()</c>.
+/// </summary>
+public interface ISlimRegistrationGuard
+{
+    /// <summary><c>null</c> to allow, a <see cref="SlimVeto"/> to refuse.</summary>
+    ValueTask<SlimVeto?> CheckAsync(SlimRegistrationContext context, CancellationToken ct);
+}
+
+/// <summary>What <see cref="ISlimRegistrationProfile"/> validates.</summary>
+public sealed class SlimRegistrationProfileContext
+{
+    /// <summary>The normalized address of the new account.</summary>
+    public required string Email { get; init; }
+    /// <summary>The <c>profile</c> object of the request as sent; <c>null</c> if it is missing or JSON <c>null</c>.</summary>
+    public JsonElement? Profile { get; init; }
+    /// <summary>The request (client IP, host name / tenant, headers).</summary>
+    public required HttpContext HttpContext { get; init; }
+}
+
+/// <summary>The answer of <see cref="ISlimRegistrationProfile"/>: the validated profile or field errors.</summary>
+public sealed class SlimProfileValidation
+{
+    private SlimProfileValidation(object? profile, IReadOnlyDictionary<string, string[]>? errors) => (Profile, Errors) = (profile, errors);
+
+    /// <summary>The validated profile, passed on as <see cref="SlimNewUser.Profile"/>.</summary>
+    public object? Profile { get; }
+    /// <summary>Field errors, keyed by the field inside the profile (answered as <c>profile.&lt;field&gt;</c>); <c>null</c> if valid.</summary>
+    public IReadOnlyDictionary<string, string[]>? Errors { get; }
+
+    /// <summary>Accepts the registration with <paramref name="profile"/> (your typed object; <c>null</c> for none).</summary>
+    public static SlimProfileValidation Valid(object? profile) => new(profile, null);
+
+    /// <summary>Refuses the registration with field errors (<c>400</c>).</summary>
+    public static SlimProfileValidation Invalid(IReadOnlyDictionary<string, string[]> errors)
+    {
+        ArgumentNullException.ThrowIfNull(errors);
+        if (errors.Count == 0) throw new ArgumentException("SlimIdentity: at least one error is required.", nameof(errors));
+        return new(null, errors);
+    }
+
+    /// <summary>Refuses the registration with one field error (<c>400</c>).</summary>
+    public static SlimProfileValidation Invalid(string field, string message) =>
+        Invalid(new Dictionary<string, string[]> { [field] = [message] });
+}
+
+/// <summary>
+/// Registration with business data: validates the optional <c>profile</c> object of <c>POST /register</c> (company,
+/// name, terms accepted, …) and turns it into your typed profile, which reaches <see cref="ISlimUserStore.CreateAsync"/>
+/// as <see cref="SlimNewUser.Profile"/> – account and profile are created together, or not at all. Asked before
+/// anything is looked up: decide from the request only, never from whether the address already has an account. Errors
+/// answer <c>400</c> with <c>profile.&lt;field&gt;</c> keys. Without this hook a <c>profile</c> is refused. Register
+/// with <c>AddRegistrationProfile&lt;T&gt;()</c> (one per application).
+/// </summary>
+/// <example><code>
+/// public sealed class CompanyProfile : ISlimRegistrationProfile
+/// {
+///     public ValueTask&lt;SlimProfileValidation&gt; ValidateAsync(SlimRegistrationProfileContext context, CancellationToken ct)
+///     {
+///         var company = context.Profile is { ValueKind: JsonValueKind.Object } p &amp;&amp; p.TryGetProperty("company", out var c)
+///             ? c.GetString()?.Trim() : null;
+///         return ValueTask.FromResult(string.IsNullOrEmpty(company) || company.Length &gt; 100
+///             ? SlimProfileValidation.Invalid("company", "The company is required (at most 100 characters).")
+///             : SlimProfileValidation.Valid(new SignUpProfile(company)));
+///     }
+/// }
+/// </code></example>
+public interface ISlimRegistrationProfile
+{
+    /// <summary>Validates the profile; also called without one (<see cref="SlimRegistrationProfileContext.Profile"/> <c>null</c>).</summary>
+    ValueTask<SlimProfileValidation> ValidateAsync(SlimRegistrationProfileContext context, CancellationToken ct);
+}
+
+/// <summary>A security event – reported after it happened. Contains ids only: no passwords, tokens, codes or addresses.</summary>
+public sealed class SlimEvent
+{
+    /// <summary>One of <see cref="SlimEventTypes"/>.</summary>
+    public required string Type { get; init; }
+    /// <summary>The account concerned; <c>null</c> only for a failed sign-in with an unknown address.</summary>
+    public string? UserId { get; init; }
+    /// <summary>Who acted on behalf of or on the account: the impersonating administrator.</summary>
+    public string? ActorId { get; init; }
+    /// <summary>Authentication method (<c>amr</c>) or provider, where it applies.</summary>
+    public string? Method { get; init; }
+    /// <summary>Why / how, e.g. <c>invalid_password</c>, <c>registration</c>, <c>reset</c>, a guard's veto code.</summary>
+    public string? Reason { get; init; }
+    /// <summary>When it happened (the injected <see cref="TimeProvider"/>).</summary>
+    public required DateTimeOffset Timestamp { get; init; }
+    /// <summary>The request it happened in (client IP, user agent) – <c>null</c> outside a request.</summary>
+    public HttpContext? HttpContext { get; init; }
+}
+
+/// <summary>The event types of <see cref="SlimEvent.Type"/>.</summary>
+public static class SlimEventTypes
+{
+    /// <summary>A new session was issued. <c>Method</c> = amr (<c>pwd</c>, <c>mfa</c>, <c>ext</c>, <c>passkey</c>, …).</summary>
+    public const string SignedIn = "signed_in";
+    /// <summary>A sign-in failed. <c>Reason</c>: <c>invalid_password</c>, <c>unknown_user</c>, <c>locked_out</c>, <c>inactive</c>, <c>invalid_two_factor_code</c> or a guard's veto code.</summary>
+    public const string SignInFailed = "sign_in_failed";
+    /// <summary>The account was locked after repeated failures.</summary>
+    public const string LockedOut = "locked_out";
+    /// <summary>An administrator ended a lockout.</summary>
+    public const string Unlocked = "unlocked";
+    /// <summary>An account was created. <c>Reason</c>: <c>registration</c> or <c>external</c> (<c>Method</c> = provider).</summary>
+    public const string UserCreated = "user_created";
+    /// <summary>The e-mail address was confirmed.</summary>
+    public const string EmailConfirmed = "email_confirmed";
+    /// <summary>The e-mail address was changed.</summary>
+    public const string EmailChanged = "email_changed";
+    /// <summary>The password changed. <c>Reason</c>: <c>changed</c>, <c>reset</c>, <c>invitation</c>, <c>forced_change</c> or <c>set_by_administrator</c>.</summary>
+    public const string PasswordChanged = "password_changed";
+    /// <summary>Two-factor authentication was enabled. <c>Method</c>: <c>totp</c> or <c>email</c>.</summary>
+    public const string TwoFactorEnabled = "two_factor_enabled";
+    /// <summary>Two-factor authentication was disabled. <c>Reason</c>: <c>user</c> or <c>administrator</c>.</summary>
+    public const string TwoFactorDisabled = "two_factor_disabled";
+    /// <summary>An external login was linked to the account. <c>Method</c> = provider.</summary>
+    public const string ExternalLoginLinked = "external_login_linked";
+    /// <summary>The host's claims of the account changed (<c>RefreshClaimsAsync</c>); sessions reload them.</summary>
+    public const string ClaimsChanged = "claims_changed";
+    /// <summary>A passkey was registered.</summary>
+    public const string PasskeyAdded = "passkey_added";
+    /// <summary>A passkey was removed.</summary>
+    public const string PasskeyRemoved = "passkey_removed";
+    /// <summary>An external login was removed from the account. <c>Method</c> = provider.</summary>
+    public const string ExternalLoginRemoved = "external_login_removed";
+    /// <summary>All sessions of the account were ended (sign out everywhere, ban).</summary>
+    public const string SessionsRevoked = "sessions_revoked";
+    /// <summary>A used refresh token came back – treated as theft, sessions revoked.</summary>
+    public const string RefreshTokenReuse = "refresh_token_reuse";
+    /// <summary>An administrator (<c>ActorId</c>) started impersonating the account.</summary>
+    public const string ImpersonationStarted = "impersonation_started";
+    /// <summary>An impersonation ended (<c>ActorId</c> = administrator).</summary>
+    public const string ImpersonationEnded = "impersonation_ended";
+}
+
+/// <summary>
+/// Optional observer of security events – audit trail, alerts, follow-up jobs. Called after the
+/// event happened, in the request; it cannot change the outcome. Exceptions are logged and swallowed, so a failing
+/// audit sink never breaks a sign-in (write to a durable queue if you need guaranteed delivery). Register with
+/// <c>AddEventObserver&lt;T&gt;()</c>; several are allowed. Business data of a new account belongs in
+/// <see cref="ISlimRegistrationProfile"/>: it is written with the account, an observer only runs afterwards.
+/// </summary>
+public interface ISlimEventObserver
+{
+    /// <summary>Handles one event.</summary>
+    ValueTask HandleAsync(SlimEvent e, CancellationToken ct);
+}

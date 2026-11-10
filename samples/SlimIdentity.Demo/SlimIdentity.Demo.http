@@ -1,0 +1,185 @@
+@host = https://localhost:7069
+@auth = {{host}}/auth
+
+### ---------------------------------------------------------------- Bearer flow (default)
+
+# @name login
+POST {{auth}}/login
+Content-Type: application/json
+
+{ "email": "admin@demo.local", "password": "Admin123!" }
+
+###
+@accessToken = {{login.response.body.$.accessToken}}
+@refreshToken = {{login.response.body.$.refreshToken}}
+
+GET {{auth}}/me
+Authorization: Bearer {{accessToken}}
+
+###
+GET {{host}}/api/admin
+Authorization: Bearer {{accessToken}}
+
+###
+# @name refresh
+POST {{auth}}/refresh
+Content-Type: application/json
+
+{ "refreshToken": "{{refreshToken}}" }
+
+###
+# active devices (ISlimSessionStore)
+GET {{auth}}/sessions
+Authorization: Bearer {{accessToken}}
+
+###
+DELETE {{auth}}/sessions/<session id>
+Authorization: Bearer {{accessToken}}
+
+###
+# this device only (revokes the server-side session)
+POST {{auth}}/logout
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "refreshToken": "{{refreshToken}}" }
+
+###
+# all devices
+POST {{auth}}/logout-all
+Authorization: Bearer {{accessToken}}
+
+### ---------------------------------------------------------------- Cookie flow (needs X-CSRF header)
+
+POST {{auth}}/login?useCookies=true
+Content-Type: application/json
+X-CSRF: 1
+
+{ "email": "user@demo.local", "password": "User1234!", "rememberMe": true }
+
+###
+GET {{host}}/api/hello
+
+###
+POST {{auth}}/logout?useCookies=true
+Content-Type: application/json
+X-CSRF: 1
+
+{}
+
+### ---------------------------------------------------------------- Registration / mails (tokens are printed to the console)
+
+# rules for new passwords (anonymous) – for front-end hints
+GET {{auth}}/password-policy
+
+###
+
+POST {{auth}}/register
+Content-Type: application/json
+
+{ "email": "new@demo.local", "password": "NewUser123!" }
+
+###
+POST {{auth}}/verify-email
+Content-Type: application/json
+
+{ "token": "<token from console>" }
+
+###
+POST {{auth}}/forgot-password
+Content-Type: application/json
+
+{ "email": "user@demo.local" }
+
+###
+POST {{auth}}/reset-password
+Content-Type: application/json
+
+{ "token": "<token from console>", "newPassword": "Changed123!" }
+
+###
+POST {{auth}}/change-password
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "currentPassword": "Admin123!", "newPassword": "Admin456!" }
+
+### ---------------------------------------------------------------- Invitations
+
+# @name invite
+POST {{host}}/api/admin/invite
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "email": "invited@demo.local" }
+
+###
+POST {{auth}}/invitation/info
+Content-Type: application/json
+
+{ "token": "{{invite.response.body.$.token}}" }
+
+###
+POST {{auth}}/invitation/accept
+Content-Type: application/json
+
+{ "token": "{{invite.response.body.$.token}}", "password": "Invited123!" }
+
+### ---------------------------------------------------------------- E-mail change (link is printed to the console)
+
+POST {{auth}}/change-email
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "newEmail": "admin-new@demo.local", "password": "Admin123!" }
+
+###
+POST {{auth}}/confirm-email-change
+Content-Type: application/json
+
+{ "token": "<token from console>" }
+
+### ---------------------------------------------------------------- 2FA (TOTP)
+
+POST {{auth}}/2fa/setup
+Authorization: Bearer {{accessToken}}
+
+###
+# add the shared key to an authenticator app, then:
+POST {{auth}}/2fa/enable
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "setupToken": "<setupToken>", "code": "123456", "password": "User1234!" }
+
+###
+# login now answers 401 { status: "requires_two_factor", preAuthToken }
+POST {{auth}}/login/2fa
+Content-Type: application/json
+
+{ "preAuthToken": "<preAuthToken>", "code": "123456" }
+
+### ---------------------------------------------------------------- Sudo mode & impersonation
+
+POST {{host}}/api/sudo
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "password": "Admin123!" }
+
+###
+DELETE {{host}}/api/danger-zone
+Authorization: Bearer <elevated access token>
+
+###
+GET {{host}}/api/admin/users
+Authorization: Bearer {{accessToken}}
+
+###
+POST {{host}}/api/admin/impersonate/<userId>
+Authorization: Bearer {{accessToken}}
+
+### ---------------------------------------------------------------- M2M
+
+GET {{host}}/api/m2m/report
+X-API-Key: demo-key-123

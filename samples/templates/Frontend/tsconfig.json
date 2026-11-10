@@ -1,0 +1,20 @@
+{
+  // Type check of the TypeScript client template (CI: npx typescript tsc -p samples/templates/Frontend).
+  // The client has no dependencies; nothing is emitted.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "exactOptionalPropertyTypes": false,
+    "isolatedModules": true,
+    "noEmit": true,
+    "skipLibCheck": true
+  },
+  "files": ["slimIdentityClient.ts"]
+}

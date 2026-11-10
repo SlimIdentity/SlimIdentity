@@ -1,0 +1,202 @@
+using Microsoft.AspNetCore.Identity;
+
+namespace SlimIdentity.Services;
+
+internal enum SlimPasswordCheck { Failed, Success, SuccessRehashNeeded }
+
+/// <summary>
+/// Password verification (PasswordHasher or <see cref="ISlimCustomPasswordValidator"/>), timing-attack
+/// mitigation via dummy hashing, lockout bookkeeping and transparent rehashing.
+/// </summary>
+internal sealed class SlimCredentialService(
+    IPasswordHasher<SlimUser> hasher,
+    ISlimUserStore store,
+    SlimEmailDispatcher mail,
+    SlimMetrics metrics,
+    SlimAttemptGate gate,
+    SlimHookRunner hooks,
+    IOptions<SlimIdentityOptions> options,
+    TimeProvider time,
+    IServiceProvider services,
+    ILogger<SlimCredentialService> logger)
+{
+    /// <summary>How recent a sign-in must be to stand in for the password of an account that has none.</summary>
+    internal static readonly TimeSpan RecentSignInWindow = TimeSpan.FromMinutes(5);
+
+    private static readonly SlimUser DummyUser = new() { Id = "slim-dummy", Email = "dummy@invalid" };
+    private static string? s_dummyHash;
+
+    public string HashPassword(SlimUser user, string password) => hasher.HashPassword(user, password);
+
+    /// <summary>Burns the same CPU time as a real verification (unknown user, register with existing e-mail, …).</summary>
+    public void BurnDummyHash(string? password)
+    {
+        s_dummyHash ??= hasher.HashPassword(DummyUser, Convert.ToBase64String(RandomNumberGenerator.GetBytes(16)));
+        hasher.VerifyHashedPassword(DummyUser, s_dummyHash, password ?? string.Empty);
+    }
+
+    public async Task<SlimPasswordCheck> VerifyPasswordAsync(SlimUser user, string? password, CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(password) || password.Length > options.Value.Password.MaximumLength)
+            return SlimPasswordCheck.Failed;
+
+        var custom = services.GetService<ISlimCustomPasswordValidator>();
+        if (custom is not null)
+            return await custom.ValidateAsync(user, password, ct) ? SlimPasswordCheck.Success : SlimPasswordCheck.Failed;
+
+        if (string.IsNullOrEmpty(user.PasswordHash))
+        {
+            BurnDummyHash(password); // external-only user: keep timing constant
+            return SlimPasswordCheck.Failed;
+        }
+
+        try
+        {
+            return hasher.VerifyHashedPassword(user, user.PasswordHash, password) switch
+            {
+                PasswordVerificationResult.Success => SlimPasswordCheck.Success,
+                PasswordVerificationResult.SuccessRehashNeeded => SlimPasswordCheck.SuccessRehashNeeded,
+                _ => SlimPasswordCheck.Failed,
+            };
+        }
+        catch (FormatException ex)
+        {
+            Log.MalformedPasswordHash(logger, ex, user.Id);
+            return SlimPasswordCheck.Failed;
+        }
+    }
+
+    /// <summary>
+    /// A password to confirm: a local hash, or – with an <see cref="ISlimCustomPasswordValidator"/> – what it says.
+    /// </summary>
+    public async ValueTask<bool> HasPasswordAsync(SlimUser user, CancellationToken ct) =>
+        !string.IsNullOrEmpty(user.PasswordHash)
+        || (services.GetService<ISlimCustomPasswordValidator>() is { } custom && await custom.HasPasswordAsync(user, ct).ConfigureAwait(false));
+
+    /// <summary>
+    /// The owner confirms a sensitive change (a sign-in method, 2FA, the e-mail address) – a stolen session alone must
+    /// not do it. With a password: the password, with lockout bookkeeping (400 <c>invalid_password</c> or 423). Without
+    /// one: a sign-in of at most <see cref="RecentSignInWindow"/> ago – otherwise 403 <c>reauthentication_required</c>
+    /// (sign in again with the provider or a passkey, then repeat); nothing is counted as a failed attempt.
+    /// Returns <c>null</c> when confirmed.
+    /// </summary>
+    public async Task<IResult?> ConfirmPasswordAsync(SlimUser user, string? password, HttpContext http, CancellationToken ct)
+    {
+        var now = time.GetUtcNow();
+        if (!await HasPasswordAsync(user, ct))
+        {
+            return long.TryParse(http.User.FindFirst(SlimClaimTypes.AuthTime)?.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var signedIn)
+                && now - DateTimeOffset.FromUnixTimeSeconds(signedIn) <= RecentSignInWindow
+                ? null
+                : Http.SlimResults.Status("reauthentication_required",
+                    "Sign in again to confirm this change – your account has no password.", StatusCodes.Status403Forbidden);
+        }
+
+        using var attempt = await gate.TryEnterAsync(user.Id, ct);
+        if (attempt is null) return Http.SlimResults.BadRequest("invalid_password", "The password is incorrect.");   // queue full: not evaluated
+        // re-read inside the gate: a queued predecessor may just have locked the account
+        var current = await store.FindByIdAsync(user.Id, ct) ?? user;
+
+        if (current.IsLockedOut(now)) return Http.SlimResults.Locked(http, current.LockoutEndUtc!.Value, now);
+
+        var check = await VerifyPasswordAsync(current, password, ct);
+        if (check != SlimPasswordCheck.Failed)
+        {
+            // like a successful sign-in: the counter starts over and an outdated hash is upgraded. The session already
+            // passed the second factor, so the reset opens no way to guess codes.
+            await RegisterSuccessAsync(current, password, rehash: check == SlimPasswordCheck.SuccessRehashNeeded, resetLockout: true, ct);
+            if (!ReferenceEquals(user, current))
+            {
+                // the caller continues with its own copy and may write the whole security state afterwards
+                // (e.g. /2fa/disable) – it must not write the old counter or hash back
+                user.FailedLoginAttempts = current.FailedLoginAttempts;
+                user.LockoutEndUtc = current.LockoutEndUtc;
+                user.PasswordHash = current.PasswordHash;
+            }
+            return null;
+        }
+
+        var locked = await RegisterFailureAsync(current, ct);
+        return locked
+            ? Http.SlimResults.Locked(http, current.LockoutEndUtc!.Value, now)
+            : Http.SlimResults.BadRequest("invalid_password", "The password is incorrect.");
+    }
+
+    /// <summary>
+    /// Serializes the credential attempts of one account in this instance (see <see cref="SlimAttemptGate"/>);
+    /// <c>null</c> when too many attempts are queued - answer as for a failed attempt without evaluating it.
+    /// </summary>
+    public Task<SlimAttemptGate.Lease?> TryEnterAttemptAsync(string userId, CancellationToken ct) => gate.TryEnterAsync(userId, ct);
+
+    /// <summary>
+    /// Counts a failed attempt. Every <c>MaxFailedAttempts</c> consecutive failures lock the account; the duration
+    /// doubles with each lockout (<c>Duration</c>, 2×, 4×, … up to <c>MaxDuration</c>). The counter is only reset by
+    /// a successful sign-in. Returns true if the account is now locked.
+    /// </summary>
+    public async Task<bool> RegisterFailureAsync(SlimUser user, CancellationToken ct)
+    {
+        var lockout = options.Value.Lockout;
+        if (lockout.MaxFailedAttempts == 0) return false;   // lockout disabled
+
+        // atomic in the store: parallel failures are all counted, and exactly one of them reaches the next multiple
+        user.FailedLoginAttempts = await store.IncrementFailedLoginAttemptsAsync(user, ct);
+        if (user.FailedLoginAttempts <= 0 || user.FailedLoginAttempts % lockout.MaxFailedAttempts != 0) return false;
+
+        var lockoutNumber = user.FailedLoginAttempts / lockout.MaxFailedAttempts; // 1, 2, 3, …
+        var duration = LockoutDuration(lockout, lockoutNumber);
+        user.LockoutEndUtc = time.GetUtcNow() + duration;
+        await store.SetLockoutEndAsync(user, user.LockoutEndUtc, ct);
+        Log.LockedOut(logger, user.Id, user.LockoutEndUtc, lockoutNumber);
+        metrics.Lockout();
+        await hooks.RaiseAsync(SlimEventTypes.LockedOut, user.Id, ct: ct);
+
+        // inform the owner once per attack (first lockout since the last successful sign-in)
+        if (lockoutNumber == 1)
+        {
+            var email = user.Email;
+            var end = user.LockoutEndUtc.Value;
+            await mail.SendAsync(SlimEmailKinds.LockoutNotification, email, user.Id, (s, x, c) => s.SendLockoutNotificationEmailAsync(x, email, end, c), ct);
+        }
+        return true;
+    }
+
+    internal static TimeSpan LockoutDuration(SlimLockoutOptions lockout, int lockoutNumber)
+    {
+        // Duration * 2^(n-1), computed in ticks with an overflow-safe cap
+        var ticks = lockout.Duration.Ticks;
+        for (var i = 1; i < lockoutNumber && ticks < lockout.MaxDuration.Ticks; i++) ticks *= 2;
+        return TimeSpan.FromTicks(Math.Min(ticks, lockout.MaxDuration.Ticks));
+    }
+
+    /// <summary>
+    /// Resets lockout counters (unless <paramref name="resetLockout"/> is false) and rehashes outdated hashes.
+    /// Uses the narrow store methods only – <paramref name="user"/> may be outdated by the time the (slow) password
+    /// verification finished, and writing it back as a whole could undo a concurrent password change.
+    /// </summary>
+    public async Task RegisterSuccessAsync(SlimUser user, string? password, bool rehash, bool resetLockout, CancellationToken ct)
+    {
+        if (resetLockout && (user.FailedLoginAttempts != 0 || user.LockoutEndUtc is not null))
+        {
+            user.FailedLoginAttempts = 0;
+            user.LockoutEndUtc = null;
+            await store.ResetFailedLoginAttemptsAsync(user, ct);
+        }
+        if (rehash && !string.IsNullOrEmpty(password) && !string.IsNullOrEmpty(user.PasswordHash))
+        {
+            var newHash = hasher.HashPassword(user, password);
+            await store.UpdatePasswordHashAsync(user, user.PasswordHash, newHash, ct);
+            user.PasswordHash = newHash;
+            Log.PasswordRehashed(logger, user.Id);
+        }
+    }
+
+    /// <summary>Sets a new password, rotates the stamp, clears lockout state and a pending forced change (does not persist).</summary>
+    public void ApplyNewPassword(SlimUser user, string newPassword)
+    {
+        user.PasswordHash = hasher.HashPassword(user, newPassword);
+        user.SecurityStamp = SlimUser.NewSecurityStamp();
+        user.FailedLoginAttempts = 0;
+        user.LockoutEndUtc = null;
+        user.PasswordChangeRequired = false;
+    }
+}

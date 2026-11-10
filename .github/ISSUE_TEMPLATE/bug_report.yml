@@ -1,0 +1,40 @@
+name: Bug report
+description: Something does not work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Security vulnerabilities must not be reported here.** Please use
+        [private vulnerability reporting](https://github.com/SlimIdentity/SlimIdentity/security/advisories/new) instead.
+  - type: input
+    id: version
+    attributes:
+      label: SlimIdentity version
+      placeholder: e.g. 0.9.0
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: .NET version and hosting
+      placeholder: e.g. .NET 10.0.14, Kestrel behind nginx, Native AOT
+  - type: textarea
+    id: setup
+    attributes:
+      label: Configuration
+      description: Relevant parts of AddSlimIdentity(...), registered stores, cookie or JWT mode. Remove secrets!
+      render: csharp
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: Requests (method, path, body) and responses, ideally as .http snippets.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs. actual behaviour
+    validations:
+      required: true

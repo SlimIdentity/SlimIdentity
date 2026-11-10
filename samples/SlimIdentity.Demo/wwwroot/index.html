@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SlimIdentity Playground</title>
+  <link rel="stylesheet" href="playground.css">
+</head>
+<body>
+<header>
+  <h1>SlimIdentity <span>Playground</span></h1>
+  <div class="bar">
+    <label>Mode
+      <select id="mode">
+        <option value="cookie">Cookie (browser session)</option>
+        <option value="bearer">Bearer (JWT + refresh token)</option>
+      </select>
+    </label>
+    <span id="who" class="who">not signed in</span>
+  </div>
+  <p id="breakme" class="banner" hidden>
+    <strong>Breakme mode.</strong> The seeded accounts <code>admin@demo.local</code> and <code>user@demo.local</code> have
+    secret passwords. Get in anyway – rules and goals in <code>BREAKME.md</code>. Report findings privately (SECURITY.md).
+  </p>
+</header>
+
+<main>
+  <section>
+    <h2>Account</h2>
+    <label>E-mail <input id="email" type="email" autocomplete="username webauthn" placeholder="you@playground.local"></label>
+    <label>Password <input id="password" type="password" autocomplete="current-password" placeholder="at least 8 characters"></label>
+    <div class="row">
+      <label class="check"><input id="rememberMe" type="checkbox"> remember me</label>
+      <label class="check"><input id="rememberDevice" type="checkbox"> remember this device (2FA)</label>
+    </div>
+    <div class="row">
+      <button data-action="register">Register</button>
+      <button data-action="login" class="primary">Sign in</button>
+      <button data-action="me">Who am I?</button>
+      <button data-action="refresh" class="bearer-only">Refresh token</button>
+    </div>
+    <div id="providers" class="row" hidden></div>
+    <div class="row">
+      <button data-action="logout">Sign out</button>
+      <button data-action="logoutAll">Sign out everywhere</button>
+      <button data-action="resendVerification">Resend verification</button>
+    </div>
+
+    <div id="challenge" class="box" hidden>
+      <h3>Second factor required (<span id="challengeMethod"></span>)</h3>
+      <label>Code <input id="code" inputmode="numeric" autocomplete="one-time-code" placeholder="6 digits"></label>
+      <label>or recovery code <input id="recoveryCode" placeholder="xxxx-xxxx-xxxx-xxxx"></label>
+      <div class="row">
+        <button data-action="virtualCode">Use virtual authenticator</button>
+        <button data-action="secondFactor" class="primary">Continue</button>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Two-factor authentication</h2>
+    <div class="row">
+      <button data-action="setup2fa">Set up authenticator</button>
+      <button data-action="enable2fa">Enable with current code</button>
+      <button data-action="enableEmail2fa">Use e-mail codes</button>
+    </div>
+    <div id="authenticator" class="box" hidden>
+      <p>Shared key: <code id="sharedKey"></code></p>
+      <p class="small">otpauth URI (render as QR code in a real app): <code id="otpauth"></code></p>
+      <p><strong>Virtual authenticator:</strong> <code id="liveCode" class="big">––––––</code> <span id="liveTtl" class="small"></span></p>
+      <p class="small">Every code is accepted only once (replay protection) – after enabling 2FA, wait for the next code before you sign in again.</p>
+    </div>
+    <div class="row">
+      <button data-action="recoveryCodes">New recovery codes</button>
+      <button data-action="disable2fa">Disable 2FA</button>
+      <button data-action="forgetDevice">Forget this device</button>
+    </div>
+    <p class="small">Actions that change 2FA ask for the password in the field above.</p>
+  </section>
+
+  <section>
+    <h2>Passkeys</h2>
+    <label class="check"><input id="virtualPasskey" type="checkbox" checked> virtual passkey in this browser – no phone or security key needed</label>
+    <label>Name <input id="passkeyName" placeholder="e.g. Laptop"></label>
+    <div class="row">
+      <button data-action="addPasskey">Add passkey</button>
+      <button data-action="loginPasskey" class="primary">Sign in with passkey</button>
+      <button data-action="signInMethods">My sign-in methods</button>
+    </div>
+    <div id="autofillOffer" class="box" hidden>
+      <p>The e-mail field offers your passkey <strong id="autofillName"></strong> (autofill).</p>
+      <button data-action="pickAutofill">Pick it</button>
+    </div>
+    <ul id="methodList" class="list"></ul>
+    <p class="small">Adding or removing a passkey asks for the password above – accounts without one need a sign-in within
+      the last 5 minutes. A passkey is multi-factor on its own: no second factor follows.</p>
+  </section>
+
+  <section>
+    <h2>Sessions</h2>
+    <div class="row"><button data-action="sessions">List my devices</button></div>
+    <ul id="sessionList" class="list"></ul>
+  </section>
+
+  <section>
+    <h2>Password &amp; address</h2>
+    <label>New password / new e-mail <input id="newValue" placeholder="new password or new address"></label>
+    <div class="row">
+      <button data-action="forgot">Forgot password (mail)</button>
+      <button data-action="changePassword">Change password</button>
+      <button data-action="changeEmail">Change e-mail</button>
+    </div>
+    <div id="linkForm" class="box" hidden>
+      <h3 id="linkTitle"></h3>
+      <label id="linkPasswordLabel">New password <input id="linkPassword" type="password" autocomplete="new-password"></label>
+      <button data-action="completeLink" class="primary">Submit</button>
+    </div>
+  </section>
+
+  <section>
+    <h2>Fake mailbox</h2>
+    <p class="small">Mails to addresses you registered land here (mails of the seeded <code>@demo.local</code> accounts stay private).</p>
+    <div class="row">
+      <input id="mailboxAddress" placeholder="address">
+      <button data-action="mailbox">Open mailbox</button>
+    </div>
+    <ul id="mails" class="list"></ul>
+  </section>
+
+  <section class="admin">
+    <h2>Admin</h2>
+    <p class="small">Needs a session with the role <code>Admin</code>.</p>
+    <div class="row">
+      <button data-action="users">List users</button>
+      <button data-action="stopImpersonation">End impersonation</button>
+      <button data-action="adminOnly">Call /api/admin</button>
+    </div>
+    <ul id="userList" class="list"></ul>
+  </section>
+
+  <section class="log">
+    <h2>Requests <button data-action="clearLog" class="link">clear</button></h2>
+    <ol id="log"></ol>
+  </section>
+</main>
+
+<script type="module" src="playground.js"></script>
+</body>
+</html>
