@@ -73,7 +73,7 @@ separate HTTP requests – and runs with any test framework. In-memory database 
 indexes nor locks, so a green run there proves nothing; the checks create test users under `@conformance.invalid`
 and never belong anywhere near production data. Details: [package README](../src/SlimIdentity.Testing/README.md).
 
-The checks are not theory: run against the EF Core sample on SQLite, they found two bugs before 1.0 – a unique
+The checks are not theory: run against the EF Core sample on SQLite, they found two bugs before the first release – a unique
 violation from `ExecuteUpdate` that escaped as an exception, and GUIDs converted to upper-case text by the database,
 which would have invalidated every session on SQL Server. Since then CI runs them against the EF Core samples on
 SQLite, PostgreSQL and SQL Server and against the Dapper sample on PostgreSQL.

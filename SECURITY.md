@@ -34,7 +34,7 @@ Every package on nuget.org is built by the release workflow of this repository, 
 Check that a package you downloaded comes from this repository and commit:
 
 ```bash
-gh attestation verify SlimIdentity.1.0.0.nupkg --owner SlimIdentity
+gh attestation verify SlimIdentity.0.9.0.nupkg --owner SlimIdentity
 ```
 
 ## Scope
