@@ -31,7 +31,7 @@ internal sealed class SlimAuthManager(
     private static readonly HashSet<string> ReservedClaims = new(StringComparer.Ordinal)
     {
         SlimClaimTypes.UserId, SlimClaimTypes.Email, SlimClaimTypes.SecurityStamp, SlimClaimTypes.Actor,
-        SlimClaimTypes.AuthenticationMethod, SlimClaimTypes.SessionId, SlimClaimTypes.AuthTime,
+        SlimClaimTypes.AuthenticationMethod, SlimClaimTypes.SessionId, SlimClaimTypes.AuthTime, SlimClaimTypes.Tenant,
         ClaimTypes.NameIdentifier, ClaimTypes.Email,
         JwtRegisteredClaimNames.Iss, JwtRegisteredClaimNames.Aud, JwtRegisteredClaimNames.Exp,
         JwtRegisteredClaimNames.Nbf, JwtRegisteredClaimNames.Iat, JwtRegisteredClaimNames.Jti,
@@ -87,12 +87,17 @@ internal sealed class SlimAuthManager(
         return await registration.CreateAsync(normalized!, password, profile, ct);
     }
 
-    public async Task<SlimAuthResult> ImpersonateAsync(SlimUser targetUser, string impersonatorUserId, bool useCookies, CancellationToken ct = default)
+    public async Task<SlimAuthResult> ImpersonateAsync(SlimUser targetUser, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(targetUser);
-        ArgumentException.ThrowIfNullOrWhiteSpace(impersonatorUserId);
+        // the impersonator, the session mode and the origin session come from the administrator's own request
+        var admin = Http.User;
+        var impersonatorUserId = admin.Identity?.IsAuthenticated == true ? admin.GetSlimUserId() : null;
+        if (string.IsNullOrEmpty(impersonatorUserId))
+            throw new InvalidOperationException("SlimIdentity: ImpersonateAsync must be called by the signed-in administrator's request.");
+        var useCookies = admin.IsSlimCookieSession();
 
-        if (httpContextAccessor.HttpContext?.User.IsImpersonating() == true)
+        if (admin.IsImpersonating())
             return SlimAuthResult.Failed("already_impersonating");
         if (string.Equals(targetUser.Id, impersonatorUserId, StringComparison.Ordinal))
             return SlimAuthResult.Failed("cannot_impersonate_self");
@@ -103,9 +108,10 @@ internal sealed class SlimAuthManager(
         if (impersonator is not { IsActive: true })
             return SlimAuthResult.Failed("impersonator_invalid");
 
-        var currentAmr = httpContextAccessor.HttpContext?.User.FindFirst(SlimClaimTypes.AuthenticationMethod)?.Value;
-        var currentAuthTime = httpContextAccessor.HttpContext?.User is { } admin ? CurrentAuthTime(admin) : null;
-        var actor = SlimClaims.SerializeActor(SlimClaims.CreateActor(impersonator.Id, impersonator.SecurityStamp, currentAmr, currentAuthTime));
+        // ... and to the administrator's session it starts from: revoking that session (a stolen device) ends it, too
+        var originSessionId = Sessions is null ? null : CurrentSessionId(admin);
+        var actor = SlimClaims.SerializeActor(SlimClaims.CreateActor(impersonator.Id, impersonator.SecurityStamp,
+            admin.FindFirst(SlimClaimTypes.AuthenticationMethod)?.Value, CurrentAuthTime(admin), originSessionId));
 
         var started = await SignInCoreAsync(targetUser, useCookies, isPersistent: false, MethodImpersonation, null, actor, issueRefreshToken: false, ct);
         if (started.Succeeded)
@@ -128,9 +134,11 @@ internal sealed class SlimAuthManager(
             await sessions.RevokeAsync(sid, ct);
 
         var impersonator = await store.FindByIdAsync(actor.UserId, ct);
-        if (impersonator is not { IsActive: true } || !SlimUser.IsSameSecurityState(impersonator.SecurityStamp, actor.SecurityStamp))
+        if (impersonator is not { IsActive: true } || !SlimUser.IsSameSecurityState(impersonator.SecurityStamp, actor.SecurityStamp)
+            || !await IsLiveOriginSessionAsync(actor, ct))
         {
-            // The impersonator was banned or signed out everywhere in the meantime: no way back, end the session.
+            // The impersonator was banned, signed out everywhere or the session the impersonation was started from was
+            // revoked in the meantime: no way back, end the session.
             Log.ImpersonationReturnDenied(logger, actor.UserId);
             if (useCookies) await Http.SignOutAsync(SlimIdentityDefaults.CookieScheme);
             return SlimAuthResult.Failed("impersonator_invalid");
@@ -139,9 +147,24 @@ internal sealed class SlimAuthManager(
         Log.ImpersonationEnded(logger, impersonator.Id, current.GetSlimUserId());
         metrics.Impersonation("ended");
         await Hooks.RaiseAsync(SlimEventTypes.ImpersonationEnded, current.GetSlimUserId(), actorId: impersonator.Id, ct: ct);
-        // back to the administrator's own sign-in – its time and its absolute lifetime, not a fresh chain
+        // back to the administrator's own session – its id, its sign-in time and its absolute lifetime, not a fresh chain
         return await SignInCoreAsync(impersonator, useCookies, isPersistent: false, actor.AuthenticationMethod ?? MethodPassword,
-            null, null, issueRefreshToken: true, ct, authTime: actor.AuthTime, stage: SlimSignInStage.SignIn);
+            null, null, issueRefreshToken: true, ct, sessionId: Sessions is null ? null : actor.SessionId, authTime: actor.AuthTime,
+            stage: SlimSignInStage.SignIn);
+    }
+
+    /// <summary>
+    /// The administrator's session an impersonation was started from still exists (always true without a session store or
+    /// for impersonations started before the session id was recorded).
+    /// </summary>
+    internal async Task<bool> IsLiveOriginSessionAsync(SlimActor actor, CancellationToken ct) =>
+        await IsLiveOriginSessionAsync(actor, Sessions, time.GetUtcNow(), ct);
+
+    internal static async Task<bool> IsLiveOriginSessionAsync(SlimActor actor, ISlimSessionStore? sessions, DateTimeOffset now, CancellationToken ct)
+    {
+        if (actor.SessionId is null || sessions is null) return true;
+        var origin = await sessions.FindAsync(actor.SessionId, ct);
+        return origin is not null && origin.ExpiresUtc > now && string.Equals(origin.UserId, actor.UserId, StringComparison.Ordinal);
     }
 
     public async Task<IResult?> SetPasswordAsync(SlimUser user, string password, bool mustChange = true, CancellationToken ct = default)
@@ -218,14 +241,14 @@ internal sealed class SlimAuthManager(
         return services.GetRequiredService<SlimCredentialService>().ConfirmPasswordAsync(user, password, Http, ct);
     }
 
-    public Task<SlimAuthResult> ElevateToSudoAsync(SlimUser user, TimeSpan duration, bool useCookies, CancellationToken ct = default)
+    public Task<SlimAuthResult> ElevateToSudoAsync(SlimUser user, TimeSpan duration, CancellationToken ct = default)
     {
         if (duration <= TimeSpan.Zero || duration > TimeSpan.FromHours(1))
             throw new ArgumentOutOfRangeException(nameof(duration), "SlimIdentity: a sudo window lasts between 0 and 1 hour.");
-        return ElevateSessionAsync(user, [SlimClaims.SudoFor(duration, time)], useCookies, ct);
+        return ElevateSessionAsync(user, [SlimClaims.SudoFor(duration, time)], ct);
     }
 
-    public async Task<SlimAuthResult> ElevateSessionAsync(SlimUser user, IEnumerable<Claim> additionalClaims, bool useCookies, CancellationToken ct = default)
+    public async Task<SlimAuthResult> ElevateSessionAsync(SlimUser user, IEnumerable<Claim> additionalClaims, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(user);
         var current = Http.User;
@@ -237,6 +260,8 @@ internal sealed class SlimAuthManager(
             : null;
         var amr = current.FindFirst(SlimClaimTypes.AuthenticationMethod)?.Value ?? MethodPassword;
 
+        // the session is re-issued in its own mode: a cookie stays a cookie, a token pair a token pair
+        var useCookies = current.IsSlimCookieSession();
         var persistent = false;
         if (useCookies)
         {
@@ -257,7 +282,14 @@ internal sealed class SlimAuthManager(
         var principal = Http.User.Identity?.IsAuthenticated == true
             ? Http.User
             : (await Http.AuthenticateAsync(SlimIdentityDefaults.AuthenticationScheme)).Principal;
-        if (principal is not null && CurrentSessionId(principal) is { } own) sessionIds.Add(own);
+        if (principal is not null && CurrentSessionId(principal) is { } own)
+        {
+            sessionIds.Add(own);
+            // a browser signing out of an impersonation: the administrator's session it holds for the return ends, too
+            if (principal.IsSlimCookieSession()
+                && SlimClaims.ParseActorClaim(principal.FindFirst(SlimClaimTypes.Actor)?.Value)?.SessionId is { } origin)
+                sessionIds.Add(origin);
+        }
 
         // A refresh token ends its session only while it is live: consumed by this call (not used before) and issued
         // under the current security stamp. An old token – rotated away, or from before a password change on the same
@@ -395,9 +427,16 @@ internal sealed class SlimAuthManager(
             if (!o.Endpoints.AllowCookieAuth)
                 throw new InvalidOperationException("SlimIdentity: cookie authentication is disabled (Endpoints.AllowCookieAuth).");
 
-            // a new cookie replaces the one of this browser – its old server-side session is gone with it
-            if (newSession && Http.User.IsSlimCookieSession() && CurrentSessionId(Http.User) is { } replaced)
+            // a new cookie replaces the one of this browser – its old server-side session is gone with it (except the
+            // administrator's session an impersonation starts from: it is resumed when the impersonation ends)
+            if (newSession && Http.User.IsSlimCookieSession() && CurrentSessionId(Http.User) is { } replaced
+                && !string.Equals(replaced, SlimClaims.ParseActorClaim(actorJson)?.SessionId, StringComparison.Ordinal))
+            {
                 await sessions!.RevokeAsync(replaced, ct);
+                // an impersonation cookie replaced by a new sign-in: the administrator's session kept for the return goes, too
+                if (SlimClaims.ParseActorClaim(Http.User.FindFirst(SlimClaimTypes.Actor)?.Value)?.SessionId is { } origin)
+                    await sessions.RevokeAsync(origin, ct);
+            }
 
             await TrackSessionAsync(sessions, newSession, sessionId, user.Id, "cookie", authMethod, actorJson, now, now + o.Cookies.ExpireTimeSpan, ct);
 
@@ -521,6 +560,7 @@ internal sealed class SlimAuthManager(
             new(SlimClaimTypes.AuthTime, authTime.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture), ClaimValueTypes.Integer64),
         };
         if (sessionId is not null) claims.Add(new Claim(SlimClaimTypes.SessionId, sessionId));
+        if (services.GetService<SlimTenantBinding>()?.KeyOf(Http) is { } tenant) claims.Add(new Claim(SlimClaimTypes.Tenant, tenant));
 
         foreach (var claim in await store.GetClaimsAsync(user, ct))
             AddNormalized(claims, claim);

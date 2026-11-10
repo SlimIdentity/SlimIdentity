@@ -57,6 +57,7 @@ public static class SlimIdentityEndpointExtensions
         var group = endpoints.MapGroup(o.RoutePrefix)
             .WithTags(SlimIdentityDefaults.OpenApiTag)
             .AddEndpointFilter(NoStore)
+            .AddEndpointFilter(SlimRateLimitGuard.InvokeAsync)
             .AddEndpointFilter<RouteGroupBuilder, SlimCsrfEndpointFilter>();
 
         // OpenAPI: every state-changing endpoint can answer 403 csrf_validation_failed in cookie mode

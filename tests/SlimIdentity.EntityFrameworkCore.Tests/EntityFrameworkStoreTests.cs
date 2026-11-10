@@ -233,6 +233,7 @@ public sealed class EntityFrameworkStoreTests
             .AddNullEmailSender();
 
         await using var app = builder.Build();
+        app.UseRateLimiter();
         app.UseAuthentication();
         app.UseAuthorization();
         app.MapSlimIdentityApi();

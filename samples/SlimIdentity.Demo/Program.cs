@@ -130,13 +130,14 @@ app.MapGet("/api/m2m/report", (ClaimsPrincipal client) => new ReportResponse(cli
 
 // Admin impersonation via ISlimAuthManager ('act' claim keeps the admin id)
 app.MapPost("/api/admin/impersonate/{userId}", async (
-        string userId, [FromQuery] bool? useCookies, ClaimsPrincipal admin,
+        string userId, ClaimsPrincipal admin,
         ISlimUserStore store, ISlimAuthManager auth, CancellationToken ct) =>
     {
         var target = await store.FindByIdAsync(userId, ct);
         if (target is null) return Results.NotFound();
 
-        var result = await auth.ImpersonateAsync(target, admin.GetSlimUserId()!, useCookies ?? admin.IsSlimCookieSession(), ct);
+        // the impersonation session takes the mode of the admin's session (cookie or JWT)
+        var result = await auth.ImpersonateAsync(target, ct);
         return result.Succeeded
             ? Results.Ok(result.ToResponse())
             : Results.BadRequest(new SlimStatusResponse(result.Error!));
@@ -165,8 +166,10 @@ app.MapPost("/api/sudo", async (
         // lockout + notification like the built-in endpoints (400 invalid_password / 423)
         if (await auth.ConfirmPasswordAsync(user, request.Password, ct) is { } failure) return failure;
 
-        var result = await auth.ElevateToSudoAsync(user, TimeSpan.FromMinutes(5), principal.IsSlimCookieSession(), ct);
-        return Results.Ok(result.ToResponse());
+        var result = await auth.ElevateToSudoAsync(user, TimeSpan.FromMinutes(5), ct);
+        return result.Succeeded
+            ? Results.Ok(result.ToResponse())
+            : Results.Json(new SlimStatusResponse(result.Error!), DemoJsonContext.Default.SlimStatusResponse, statusCode: 403);
     })
     .RequireAuthorization()
     .RequireSlimCsrf()

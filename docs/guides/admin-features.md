@@ -6,12 +6,12 @@ A complete example is [`samples/templates/Enterprise/AdminEndpoints.cs`](../../s
 ## Impersonation
 
 ```csharp
-admin.MapPost("/impersonate/{userId}", async (string userId, ClaimsPrincipal me, ISlimUserStore store,
+admin.MapPost("/impersonate/{userId}", async (string userId, ISlimUserStore store,
         ISlimAuthManager auth, CancellationToken ct) =>
     {
         var target = await store.FindByIdAsync(userId, ct);
         if (target is null) return Results.NotFound();
-        var result = await auth.ImpersonateAsync(target, me.GetSlimUserId()!, me.IsSlimCookieSession(), ct);
+        var result = await auth.ImpersonateAsync(target, ct);   // the signed-in admin, in the mode of their session
         return result.Succeeded ? Results.Ok(result.ToResponse()) : Results.BadRequest(result.Error);
     });
 
@@ -23,8 +23,10 @@ app.MapPost("/api/impersonation/stop", async (ISlimAuthManager auth, Cancellatio
 - The session belongs to the target user; the admin is kept in the RFC 8693 `act` claim (`User.GetImpersonatorId()`,
   `/auth/me` → `isImpersonating`). Log it for your audit trail.
 - The `act` claim contains the admin's security stamp: banning the admin or signing them out everywhere ends the
-  impersonation immediately. `EndImpersonationAsync` checks it again before signing the admin back in – into the
-  admin's own sign-in (its `auth_time` and absolute lifetime), not a fresh session chain.
+  impersonation immediately. With `ISlimSessionStore` it also names the admin's session the impersonation was started
+  from: revoking that session (`DELETE /auth/sessions/{id}`, e.g. a stolen device) ends the impersonation as well.
+  `EndImpersonationAsync` checks both again and resumes that session – its `auth_time` and absolute lifetime, not a
+  fresh session chain. Without a session store the impersonation is bound to the stamp only.
 - Never persistent, no refresh token. Password change, 2FA changes, `/logout-all` and session management are blocked
   during impersonation.
 - Consider requiring sudo mode (below) before impersonating.
@@ -39,8 +41,8 @@ app.MapPost("/api/sudo", async (SudoRequest req, ClaimsPrincipal me, ISlimUserSt
         var user = await store.FindByIdAsync(me.GetSlimUserId()!, ct);
         if (user is null) return Results.Unauthorized();
         if (await auth.ConfirmPasswordAsync(user, req.Password, ct) is { } failure) return failure;   // 400 / 423
-        var result = await auth.ElevateToSudoAsync(user, TimeSpan.FromMinutes(10), me.IsSlimCookieSession(), ct);
-        return Results.Ok(result.ToResponse());
+        var result = await auth.ElevateToSudoAsync(user, TimeSpan.FromMinutes(10), ct);   // same mode as the session
+        return result.Succeeded ? Results.Ok(result.ToResponse()) : Results.Json(new { status = result.Error }, statusCode: 403);
     })
     .RequireAuthorization().RequireSlimCsrf().RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy);
 

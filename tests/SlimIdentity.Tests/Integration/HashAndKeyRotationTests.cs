@@ -50,15 +50,18 @@ public sealed class HashAndKeyRotationTests
 
     private const string OldSecret = "old-secret-0123456789-abcdefghijklmnopqrstuvwxyz";
 
-    /// <summary>The same token (claims, stamp, lifetime), signed with another secret – as an instance with the old secret issued it.</summary>
-    private static string ResignWith(string token, string secret)
+    /// <summary>The same token (claims, stamp, lifetime), signed with another key – as an instance with the old secret issued it.</summary>
+    private static string ResignWith(string token, SecurityKey key)
     {
         var payload = JsonSerializer.Deserialize<Dictionary<string, object>>(
             Base64UrlEncoder.Decode(token.Split('.')[1]))!;
         return new JsonWebTokenHandler { SetDefaultTimesOnTokenCreation = false }.CreateToken(
             JsonSerializer.Serialize(payload),
-            new SigningCredentials(new SymmetricSecurityKey(System.Text.Encoding.UTF8.GetBytes(secret)), SecurityAlgorithms.HmacSha256));
+            new SigningCredentials(key, SecurityAlgorithms.HmacSha256));
     }
+
+    private static SymmetricSecurityKey KeyWithId(string secret, string? keyId) =>
+        new(System.Text.Encoding.UTF8.GetBytes(secret)) { KeyId = keyId };
 
     [Fact]
     public async Task Tokens_of_the_previous_secret_stay_valid_during_a_rotation()
@@ -67,11 +70,27 @@ public sealed class HashAndKeyRotationTests
         var current = (await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword)).AccessToken;
 
         var client = app.CreateClient();
-        client.BearerToken = ResignWith(current!, OldSecret);
+        // exactly as the old instance signed it – including its key id (review round 5: one shared id broke this)
+        client.BearerToken = ResignWith(current!, SlimIdentity.Services.SlimJwtTokenFactory.CreateSigningKey(OldSecret));
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/auth/me")).StatusCode);
 
-        client.BearerToken = ResignWith(current!, "unknown-secret-0123456789-abcdefghijklmnopqrstuvw");
+        // tokens of 0.9.0-rc.1 carry the shared legacy id, tokens without an id exist too
+        client.BearerToken = ResignWith(current!, KeyWithId(OldSecret, "slim-hs256"));
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/auth/me")).StatusCode);
+        client.BearerToken = ResignWith(current!, KeyWithId(OldSecret, null));
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/auth/me")).StatusCode);
+
+        client.BearerToken = ResignWith(current!, KeyWithId("unknown-secret-0123456789-abcdefghijklmnopqrstuvw", "slim-hs256"));
         Assert.Equal(HttpStatusCode.Unauthorized, (await client.GetAsync("/auth/me")).StatusCode);
+    }
+
+    [Fact]
+    public void Every_secret_gets_its_own_key_id()
+    {
+        var a = SlimIdentity.Services.SlimJwtTokenFactory.CreateSigningKey(OldSecret);
+        var b = SlimIdentity.Services.SlimJwtTokenFactory.CreateSigningKey(OldSecret + "x");
+        Assert.NotEqual(a.KeyId, b.KeyId);
+        Assert.Equal(a.KeyId, SlimIdentity.Services.SlimJwtTokenFactory.CreateSigningKey(OldSecret).KeyId);
     }
 
     [Fact]

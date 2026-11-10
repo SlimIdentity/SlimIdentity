@@ -48,6 +48,13 @@ internal sealed class SlimJwtTokenFactory(IOptions<SlimIdentityOptions> options,
         return (_handler.CreateToken(descriptor), expires);
     }
 
-    internal static SymmetricSecurityKey CreateSigningKey(string secret) =>
-        new(Encoding.UTF8.GetBytes(secret)) { KeyId = "slim-hs256" };
+    // every secret gets its own key id: with one shared id the validator only tries the first key carrying it, so tokens
+    // signed with a previous secret were rejected right after a rotation. Tokens with the legacy id "slim-hs256" (or none)
+    // still validate because unmatched key ids fall back to trying all configured keys.
+    internal static SymmetricSecurityKey CreateSigningKey(string secret)
+    {
+        var bytes = Encoding.UTF8.GetBytes(secret);
+        var id = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes).AsSpan(0, 8));
+        return new(bytes) { KeyId = "slim-" + id };
+    }
 }

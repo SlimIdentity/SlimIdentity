@@ -107,12 +107,13 @@ internal sealed class SlimExternalLoginHandlers(
             return RedirectWithFragment(returnUrl, new() { ["slim_link_code"] = linkCode });
         }
 
+        var emailClaim = principal.FindFirst(ClaimTypes.Email)?.Value ?? principal.FindFirst("email")?.Value;
         var email = SlimEmailAddress.Normalize(
-            principal.FindFirst(ClaimTypes.Email)?.Value
-            ?? principal.FindFirst("email")?.Value
+            emailClaim
             ?? principal.FindFirst("preferred_username")?.Value
             ?? principal.FindFirst(ClaimTypes.Upn)?.Value);
-        var emailVerified = IsEmailVerified(principal, provider);
+        // email_verified speaks about the email claim only – never about a user name or UPN that merely looks like an address
+        var emailVerified = IsEmailVerified(principal, provider, fromEmailClaim: !string.IsNullOrEmpty(emailClaim));
 
         var user = await externalStore.FindByExternalLoginAsync(provider, providerKey, ct);
         if (user is null)
@@ -143,6 +144,9 @@ internal sealed class SlimExternalLoginHandlers(
                         await passkeys.RemoveAllAsync(existing.Id, ct);
                     existing.EmailConfirmed = true;
                     existing.PasswordHash = string.Empty;
+                    existing.PasswordChangeRequired = false;   // the start password is gone – nothing left to change
+                    existing.FailedLoginAttempts = 0;          // guesses against the removed password must not lock the owner out
+                    existing.LockoutEndUtc = null;
                     existing.SecurityStamp = SlimUser.NewSecurityStamp();
                     existing.TwoFactorEnabled = false;   // a 2FA set up by the registrant must not lock out the owner
                     await store.UpdateSecurityStateAsync(existing, ct);
@@ -342,10 +346,10 @@ internal sealed class SlimExternalLoginHandlers(
         return scheme is not null && typeof(IAuthenticationRequestHandler).IsAssignableFrom(scheme.HandlerType) ? scheme : null;
     }
 
-    private bool IsEmailVerified(ClaimsPrincipal principal, string provider)
+    private bool IsEmailVerified(ClaimsPrincipal principal, string provider, bool fromEmailClaim)
     {
         var claim = principal.FindFirst("email_verified")?.Value;
-        if (string.Equals(claim, "true", StringComparison.OrdinalIgnoreCase)) return true;
+        if (fromEmailClaim && string.Equals(claim, "true", StringComparison.OrdinalIgnoreCase)) return true;
         return O.ExternalLogin.TrustedEmailProviders.Contains(provider, StringComparer.OrdinalIgnoreCase);
     }
 

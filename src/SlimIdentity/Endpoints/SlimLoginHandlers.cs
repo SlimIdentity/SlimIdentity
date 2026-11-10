@@ -117,6 +117,9 @@ internal sealed class SlimLoginHandlers(
         {
             metrics.Login("invalid_password", cookies);
             await hooks.RaiseAsync(SlimEventTypes.SignInFailed, user.Id, SlimAuthManager.MethodPassword, "invalid_password", ct: ct);
+            // an account without a password cannot be guessed: counting would only let anyone lock its owner out of the
+            // provider or passkey sign-in
+            if (!await credentials.HasPasswordAsync(user, ct)) return (SlimResults.InvalidCredentials(), false);
             var locked = await credentials.RegisterFailureAsync(user, ct);
             return (locked && reveal ? SlimResults.Locked(Http, user.LockoutEndUtc!.Value, now) : SlimResults.InvalidCredentials(), false);
         }

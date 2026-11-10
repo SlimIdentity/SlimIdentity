@@ -80,8 +80,9 @@ public static class SlimClaimTypes
     /// <summary>Security stamp at sign-in; compared with the store to invalidate sessions.</summary>
     public const string SecurityStamp = "slim_stamp";
     /// <summary>
-    /// RFC 8693 actor claim, JSON object <c>{"sub":"&lt;impersonator id&gt;","slim_stamp":"&lt;impersonator stamp&gt;"}</c>.
-    /// The session is only valid while the impersonator is active and has the same security stamp.
+    /// RFC 8693 actor claim, JSON object <c>{"sub":"&lt;impersonator id&gt;","slim_stamp":"&lt;impersonator stamp&gt;","sid":"&lt;impersonator session&gt;"}</c>.
+    /// The session is only valid while the impersonator is active with the same security stamp and – with
+    /// <see cref="ISlimSessionStore"/> – while the administrator's session it was started from exists.
     /// </summary>
     public const string Actor = "act";
     /// <summary>Authentication method: <c>pwd</c>, <c>mfa</c>, <c>ext</c>, <c>api_key</c>, <c>impersonation</c>.</summary>
@@ -92,4 +93,6 @@ public static class SlimClaimTypes
     public const string SessionId = "sid";
     /// <summary>Unix seconds of the original sign-in (caps the refresh-token chain, see <see cref="SlimTokenOptions.RefreshTokenAbsoluteLifetime"/>).</summary>
     public const string AuthTime = "auth_time";
+    /// <summary>Tenant the session was issued in (only with <c>SlimIdentityBuilder.UseTenantKey</c>).</summary>
+    public const string Tenant = "slim_tenant";
 }

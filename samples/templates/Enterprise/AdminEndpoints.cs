@@ -36,7 +36,7 @@ public static class AdminEndpoints
 
         // Impersonate – requires a fresh sudo session
         admin.MapPost("/impersonate/{userId}", async (
-                string userId, [FromQuery] bool? useCookies, ClaimsPrincipal me,
+                string userId, ClaimsPrincipal me,
                 ISlimUserStore store, ISlimAuthManager auth, ILoggerFactory lf, CancellationToken ct) =>
             {
                 if (!me.IsInSudoMode()) return Results.Json(new { status = "sudo_required" }, statusCode: 403);
@@ -47,7 +47,8 @@ public static class AdminEndpoints
 
                 lf.CreateLogger("Audit").LogWarning("AUDIT impersonation {Admin} -> {Target}",
                     EscapeLogLineBreaks(me.GetSlimUserId() ?? ""), EscapeLogLineBreaks(target.Id));
-                var result = await auth.ImpersonateAsync(target, me.GetSlimUserId()!, useCookies ?? me.IsSlimCookieSession(), ct);
+                // the impersonation session takes the mode of the admin's session (cookie or JWT)
+                var result = await auth.ImpersonateAsync(target, ct);
                 return result.Succeeded
                     ? Results.Ok(result.ToResponse())
                     : Results.BadRequest(new { status = result.Error });
@@ -73,8 +74,10 @@ public static class AdminEndpoints
                 // lockout, notification mail and ISlimCustomPasswordValidator – exactly like the built-in endpoints
                 if (await auth.ConfirmPasswordAsync(user, req.Password, ct) is { } failure) return failure;
 
-                var result = await auth.ElevateToSudoAsync(user, TimeSpan.FromMinutes(10), me.IsSlimCookieSession(), ct);
-                return Results.Ok(result.ToResponse());
+                var result = await auth.ElevateToSudoAsync(user, TimeSpan.FromMinutes(10), ct);
+                return result.Succeeded
+                    ? Results.Ok(result.ToResponse())
+                    : Results.Json(new { status = result.Error }, statusCode: 403);   // e.g. vetoed by a sign-in guard
             })
             .RequireAuthorization()
             .RequireSlimCsrf()

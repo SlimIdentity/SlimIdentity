@@ -16,11 +16,12 @@ public static class SlimClaims
     }
 
     /// <summary>
-    /// <c>{"sub":"&lt;impersonator id&gt;","slim_stamp":"&lt;impersonator stamp&gt;"}</c> – the stamp binds the
-    /// impersonation session to the impersonator's current security state.
+    /// <c>{"sub":"&lt;impersonator id&gt;","slim_stamp":"&lt;impersonator stamp&gt;","sid":"&lt;impersonator session&gt;"}</c> –
+    /// the stamp binds the impersonation session to the impersonator's current security state, the session id (with
+    /// <see cref="ISlimSessionStore"/>) to the administrator's session it was started from.
     /// </summary>
     internal static Dictionary<string, string> CreateActor(string impersonatorUserId, string impersonatorStamp, string? impersonatorAmr,
-        DateTimeOffset? impersonatorAuthTime = null)
+        DateTimeOffset? impersonatorAuthTime = null, string? impersonatorSessionId = null)
     {
         var actor = new Dictionary<string, string>(StringComparer.Ordinal)
         {
@@ -30,6 +31,7 @@ public static class SlimClaims
         if (!string.IsNullOrEmpty(impersonatorAmr)) actor[SlimClaimTypes.AuthenticationMethod] = impersonatorAmr;
         // the administrator's own sign-in: restored when the impersonation ends (no fresh session chain)
         if (impersonatorAuthTime is { } t) actor[SlimClaimTypes.AuthTime] = t.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture);
+        if (!string.IsNullOrEmpty(impersonatorSessionId)) actor[SlimClaimTypes.SessionId] = impersonatorSessionId;
         return actor;
     }
 
@@ -52,7 +54,8 @@ public static class SlimClaims
 
             var authTime = long.TryParse(GetString(root, SlimClaimTypes.AuthTime), NumberStyles.Integer, CultureInfo.InvariantCulture, out var unix)
                 ? DateTimeOffset.FromUnixTimeSeconds(unix) : (DateTimeOffset?)null;
-            return new SlimActor(sub.GetString()!, GetString(root, SlimClaimTypes.SecurityStamp), GetString(root, SlimClaimTypes.AuthenticationMethod), authTime);
+            return new SlimActor(sub.GetString()!, GetString(root, SlimClaimTypes.SecurityStamp), GetString(root, SlimClaimTypes.AuthenticationMethod), authTime,
+                GetString(root, SlimClaimTypes.SessionId));
         }
         catch (Exception ex) when (ex is JsonException or ArgumentException or InvalidOperationException)
         {
@@ -68,10 +71,11 @@ public static class SlimClaims
 }
 
 /// <summary>Impersonator carried in the <c>act</c> claim.</summary>
-internal sealed record SlimActor(string UserId, string? SecurityStamp, string? AuthenticationMethod, DateTimeOffset? AuthTime = null)
+internal sealed record SlimActor(string UserId, string? SecurityStamp, string? AuthenticationMethod, DateTimeOffset? AuthTime = null,
+    string? SessionId = null)
 {
     public Dictionary<string, string> ToDictionary() =>
-        SlimClaims.CreateActor(UserId, SecurityStamp ?? string.Empty, AuthenticationMethod, AuthTime);
+        SlimClaims.CreateActor(UserId, SecurityStamp ?? string.Empty, AuthenticationMethod, AuthTime, SessionId);
 }
 
 /// <summary>Convenience accessors on <see cref="ClaimsPrincipal"/>.</summary>

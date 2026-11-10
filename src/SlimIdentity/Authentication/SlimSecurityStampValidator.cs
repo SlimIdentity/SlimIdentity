@@ -19,6 +19,14 @@ internal static class SlimSecurityStampValidator
         var now = http.RequestServices.GetRequiredService<TimeProvider>().GetUtcNow();
         var interval = options.Cookies.SecurityStampValidationInterval;
 
+        // a cookie of another tenant: rejected before the interval – that skips the store, which alone tells tenants apart
+        if (!SlimTenantBinding.Matches(context.Principal, http))
+        {
+            context.RejectPrincipal();
+            await http.SignOutAsync(SlimIdentityDefaults.CookieScheme);
+            return;
+        }
+
         if (interval > TimeSpan.Zero
             && context.Properties.Items.TryGetValue(ValidatedAtKey, out var raw)
             && DateTimeOffset.TryParse(raw, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var last)
@@ -60,6 +68,12 @@ internal static class SlimSecurityStampValidator
     public static async Task ValidateBearerAsync(TokenValidatedContext context)
     {
         var options = context.HttpContext.RequestServices.GetRequiredService<IOptions<SlimIdentityOptions>>().Value;
+        // all tenants share the signing key: the tenant claim keeps a token in its tenant even without a store lookup
+        if (!SlimTenantBinding.Matches(context.Principal, context.HttpContext))
+        {
+            context.Fail("SlimIdentity: the token was issued for another tenant.");
+            return;
+        }
         if (!options.Tokens.ValidateSecurityStampOnEachRequest) return;
 
         var user = await ValidPrincipalUserAsync(context.Principal, context.HttpContext);
@@ -122,6 +136,9 @@ internal static class SlimSecurityStampValidator
         var actor = SlimClaims.ParseActorClaim(actorClaim);
         if (actor?.SecurityStamp is null) return null;
         var impersonator = await store.FindByIdAsync(actor.UserId, http.RequestAborted);
-        return impersonator is { IsActive: true } && SlimUser.IsSameSecurityState(impersonator.SecurityStamp, actor.SecurityStamp) ? user : null;
+        if (impersonator is not { IsActive: true } || !SlimUser.IsSameSecurityState(impersonator.SecurityStamp, actor.SecurityStamp)) return null;
+        // the administrator's session it was started from must still exist: revoking a stolen session ends its impersonations
+        return await Services.SlimAuthManager.IsLiveOriginSessionAsync(actor, http.RequestServices.GetService<ISlimSessionStore>(),
+            http.RequestServices.GetRequiredService<TimeProvider>().GetUtcNow(), http.RequestAborted) ? user : null;
     }
 }
