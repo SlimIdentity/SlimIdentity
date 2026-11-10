@@ -234,6 +234,10 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
 
 ### Fixed
 
+- The email sender templates no longer write recipient addresses, verification or reset links, or two-factor codes to
+  logs; the SendGrid failure log also omits the recipient, and impersonation audit values escape line breaks.
+- The demo Dockerfile pins its .NET images by digest, CI restores NuGet packages in locked mode, and the release
+  workflow limits write permissions to the release job.
 - The external-login guide trusted Google's addresses through `TrustedEmailProviders`; it now maps Google's own
   `email_verified` (`ClaimActions.MapJsonKey`), which the ASP.NET Core handler drops by default.
 - `POST /auth/login/password-change` runs in the per-account attempt gate and answers `423` during a lockout, like

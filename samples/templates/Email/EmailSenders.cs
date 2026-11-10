@@ -105,22 +105,22 @@ public sealed class SendGridEmailSender(ISendGridClient client, ILogger<SendGrid
         var msg = MailHelper.CreateSingleEmail(From, new EmailAddress(to), subject, null, html);
         var response = await client.SendEmailAsync(msg, ct);
         if (!response.IsSuccessStatusCode)
-            logger.LogError("SendGrid returned {Status} for mail to {To}.", response.StatusCode, to);
+            logger.LogError("SendGrid returned {Status} while sending mail.", response.StatusCode);
     }
 }
 
-/// <summary>Development: writes mails to the log. Equivalent to the built-in AddNullEmailSender().</summary>
+/// <summary>Development: records that a mail would have been sent without logging its contents or recipient.</summary>
 public sealed class LoggingEmailSender(ILogger<LoggingEmailSender> logger) : ISlimEmailSender
 {
     public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string link, CancellationToken ct)
-    { logger.LogInformation("Verify {Email}: {Link}", email, link); return Task.CompletedTask; }
+    { logger.LogInformation("Development mail sink: verification email."); return Task.CompletedTask; }
 
     public Task SendPasswordResetEmailAsync(SlimEmailContext context, string email, string link, CancellationToken ct)
-    { logger.LogInformation("Reset {Email}: {Link}", email, link); return Task.CompletedTask; }
+    { logger.LogInformation("Development mail sink: password reset email."); return Task.CompletedTask; }
 
     public Task SendTwoFactorCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct)
-    { logger.LogInformation("2FA code for {Email}: {Code}", email, code); return Task.CompletedTask; }
+    { logger.LogInformation("Development mail sink: two-factor code email."); return Task.CompletedTask; }
 
     public Task SendEmailChangeConfirmationAsync(SlimEmailContext context, string newEmail, string link, CancellationToken ct)
-    { logger.LogInformation("Confirm new address {Email}: {Link}", newEmail, link); return Task.CompletedTask; }
+    { logger.LogInformation("Development mail sink: email change confirmation."); return Task.CompletedTask; }
 }
