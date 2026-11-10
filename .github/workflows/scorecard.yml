@@ -21,6 +21,7 @@ jobs:
     permissions:
       contents: read
       actions: read
+      administration: read
       security-events: write   # upload the results to code scanning
       id-token: write          # publish the results (signed) to scorecard.dev
     steps:
