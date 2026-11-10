@@ -216,13 +216,30 @@ internal sealed class SlimAuthManager(
     public async Task RefreshClaimsAsync(SlimUser user, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(user);
-        // the narrowest possible window against a concurrent security change: read, change the claims part, write
-        var current = await store.FindByIdAsync(user.Id, ct) ?? user;
-        current.SecurityStamp = SlimUser.WithNewClaimsPart(current.SecurityStamp);
-        await store.UpdateSecurityStateAsync(current, ct);
-        user.SecurityStamp = current.SecurityStamp;
+        await RotateSecurityStampAsync(user, SlimUser.WithNewClaimsPart, ct);
         Log.ClaimsRefreshed(logger, user.Id);
         await Hooks.RaiseAsync(SlimEventTypes.ClaimsChanged, user.Id, ct: ct);
+    }
+
+    /// <summary>
+    /// Replaces only the security stamp (compare-and-set): a concurrent password or 2FA change is never written back over.
+    /// If the stamp changed in the meantime, the user is read again and the rotation retried on the current value.
+    /// </summary>
+    internal async Task RotateSecurityStampAsync(SlimUser user, Func<string, string> next, CancellationToken ct)
+    {
+        var expected = user.SecurityStamp;
+        for (var attempt = 0; attempt < 5; attempt++)
+        {
+            var updated = next(expected);
+            if (await store.UpdateSecurityStampAsync(user, expected, updated, ct))
+            {
+                user.SecurityStamp = updated;
+                return;
+            }
+            if (await store.FindByIdAsync(user.Id, ct) is not { } current) return;   // deleted – nothing left to sign out
+            expected = current.SecurityStamp;
+        }
+        throw new InvalidOperationException($"SlimIdentity: the security stamp of user {user.Id} kept changing; it could not be rotated.");
     }
 
     public async Task UnlockAsync(SlimUser user, CancellationToken ct = default)
@@ -318,8 +335,7 @@ internal sealed class SlimAuthManager(
     public async Task SignOutEverywhereAsync(SlimUser user, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(user);
-        user.SecurityStamp = SlimUser.NewSecurityStamp();
-        await store.UpdateSecurityStateAsync(user, ct);
+        await RotateSecurityStampAsync(user, _ => SlimUser.NewSecurityStamp(), ct);
         await RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
         Log.AllSessionsRevoked(logger, user.Id);
         metrics.SignOut("everywhere");

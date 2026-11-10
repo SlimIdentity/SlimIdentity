@@ -3,6 +3,10 @@ namespace SlimIdentity;
 /// <summary>Fail-fast validation of all security-critical options (runs via <c>ValidateOnStart</c>).</summary>
 internal sealed class SlimIdentityOptionsValidator : IValidateOptions<SlimIdentityOptions>
 {
+    // "<at least 32 random bytes …>" copied from the docs is long enough – and public
+    private static bool IsPlaceholder(string secret) =>
+        secret.TrimStart().StartsWith('<') && secret.TrimEnd().EndsWith('>');
+
     public ValidateOptionsResult Validate(string? name, SlimIdentityOptions o)
     {
         var f = new List<string>();
@@ -29,6 +33,8 @@ internal sealed class SlimIdentityOptionsValidator : IValidateOptions<SlimIdenti
         {
             if (Encoding.UTF8.GetByteCount(t.JwtSecret) < 32)
                 f.Add("Tokens.JwtSecret must be at least 32 bytes.");
+            else if (IsPlaceholder(t.JwtSecret))
+                f.Add("Tokens.JwtSecret is still the <…> placeholder of the documentation – generate a random secret (e.g. openssl rand -base64 48).");
             if (t.PreviousJwtSecrets.Any(s => Encoding.UTF8.GetByteCount(s ?? string.Empty) < 32))
                 f.Add("Tokens.PreviousJwtSecrets: every secret must be at least 32 bytes.");
             if (string.IsNullOrWhiteSpace(t.Issuer)) f.Add("Tokens.Issuer is required.");

@@ -39,11 +39,28 @@ public sealed record SlimAuthResult
     internal static SlimAuthResult Failed(string error) => new() { Succeeded = false, Error = error };
     internal static SlimAuthResult Veto(SlimVeto veto) => new() { Succeeded = false, Error = veto.Error, ErrorMessage = veto.Message, Vetoed = true };
 
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Succeeded = ").Append(Succeeded);
+        builder.Append(", UsedCookies = ").Append(UsedCookies);
+        builder.Append(", AccessToken = ").Append(SlimRedaction.Mask(AccessToken));
+        builder.Append(", AccessTokenExpiresAt = ").Append(AccessTokenExpiresAt);
+        builder.Append(", RefreshToken = ").Append(SlimRedaction.Mask(RefreshToken));
+        builder.Append(", RefreshTokenExpiresAt = ").Append(RefreshTokenExpiresAt);
+        builder.Append(", SessionId = ").Append(SessionId);
+        builder.Append(", Error = ").Append(Error);
+        builder.Append(", Vetoed = ").Append(Vetoed);
+        return true;
+    }
+
     /// <summary>
-    /// Maps the result to the JSON DTO returned by the built-in endpoints. <c>expiresIn</c> is measured from the moment
-    /// the tokens were issued, on the clock SlimIdentity uses (the registered <see cref="TimeProvider"/>).
+    /// Maps a successful result to the JSON DTO returned by the built-in endpoints. <c>expiresIn</c> is measured from the
+    /// moment the tokens were issued, on the clock SlimIdentity uses (the registered <see cref="TimeProvider"/>).
     /// </summary>
-    public SlimAuthResponse ToResponse() => UsedCookies
+    /// <exception cref="InvalidOperationException">The result did not succeed – check <see cref="Succeeded"/> first and answer with <see cref="Error"/>.</exception>
+    public SlimAuthResponse ToResponse() => !Succeeded
+        ? throw new InvalidOperationException($"The sign-in did not succeed ({Error}); check Succeeded before calling ToResponse().")
+        : UsedCookies
         ? new SlimAuthResponse { Status = "success", Mode = "cookie" }
         : new SlimAuthResponse
         {
@@ -65,13 +82,31 @@ public sealed record SlimAuthResult
 /// <param name="Token">Raw reset token (for <c>POST /auth/reset-password</c>).</param>
 /// <param name="Link">The reset link (<c>Links.BaseUrl</c> + <c>/reset-password</c> or <c>Links.PasswordResetUrl</c>) with the token inserted, or the raw token if neither is configured.</param>
 /// <param name="ExpiresAt">End of validity.</param>
-public sealed record SlimPasswordReset(string Token, string Link, DateTimeOffset ExpiresAt);
+public sealed record SlimPasswordReset(string Token, string Link, DateTimeOffset ExpiresAt)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Token = ").Append(SlimRedaction.Mask(Token));
+        builder.Append(", Link = ").Append(SlimRedaction.Mask(Link));
+        builder.Append(", ExpiresAt = ").Append(ExpiresAt);
+        return true;
+    }
+}
 
 /// <summary>Result of <see cref="ISlimAuthManager.CreateInvitationAsync"/>: send <see cref="Link"/> to the invited user.</summary>
 /// <param name="Token">Raw invitation token.</param>
 /// <param name="Link">The invitation link (<c>Links.BaseUrl</c> + <c>/accept-invitation</c> or <c>Links.InvitationUrl</c>) with the token inserted, or the raw token if neither is configured.</param>
 /// <param name="ExpiresAt">End of validity.</param>
-public sealed record SlimInvitation(string Token, string Link, DateTimeOffset ExpiresAt);
+public sealed record SlimInvitation(string Token, string Link, DateTimeOffset ExpiresAt)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Token = ").Append(SlimRedaction.Mask(Token));
+        builder.Append(", Link = ").Append(SlimRedaction.Mask(Link));
+        builder.Append(", ExpiresAt = ").Append(ExpiresAt);
+        return true;
+    }
+}
 
 /// <summary>
 /// Result of <see cref="ISlimAuthManager.RegisterAsync"/>. Return <see cref="Response"/> from a public endpoint: it does

@@ -109,9 +109,11 @@ reviewing an integration, focus on [assumptions](#assumptions), [host responsibi
 - Credential attempts of one account are serialized per instance. With several instances, attempts that arrive on
   different instances at the very moment the threshold is reached can each still be evaluated – at most one extra
   guess per additional instance and lockout cycle.
-- E-mail verification, e-mail change confirmation and claiming an account via external login write the security
-  fields of a user read at the start of the request. A password change that completes in the same instant can be
-  overwritten (the narrow-update store methods protect sign-in bookkeeping, not these rare flows).
+- E-mail verification, e-mail change confirmation, claiming an account via external login and the user's own 2FA
+  changes (enable, disable) write the security fields of a user read at the start of the request. A password change
+  that completes in the same instant can be overwritten (the narrow store methods protect sign-in bookkeeping and the
+  pure stamp rotations – sign-out everywhere, `RefreshClaimsAsync`, forgetting remembered devices – not these rare
+  flows).
 - With an `ISlimCustomPasswordValidator` (LDAP, legacy hashes) unknown accounts burn a local dummy hash while known
   accounts wait for the directory – the response time can reveal whether an account exists.
 - The code has not been independently audited yet. The [attack scenarios](attack-scenarios.md) list what is covered by

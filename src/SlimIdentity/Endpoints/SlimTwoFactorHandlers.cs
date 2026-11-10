@@ -100,7 +100,7 @@ internal sealed class SlimTwoFactorHandlers(
         await hooks.RaiseAsync(SlimEventTypes.TwoFactorDisabled, user.Id, reason: "user", ct: ct);
 
         var session = await authManager.RefreshCurrentSessionAsync(user, ct);
-        return Results.Ok(session.ToResponse());
+        return SlimResults.ReissuedSession(session);
     }
 
     // POST /2fa/recovery-codes
@@ -128,14 +128,13 @@ internal sealed class SlimTwoFactorHandlers(
         if (user is null) return error!;
 
         // remembered devices are bound to the security stamp – rotating it is the only stateless way to revoke them all
-        user.SecurityStamp = SlimUser.NewSecurityStamp();
-        await store.UpdateSecurityStateAsync(user, ct);
+        await authManager.RotateSecurityStampAsync(user, _ => SlimUser.NewSecurityStamp(), ct);
         await authManager.RevokeSessionsAsync(user.Id, SlimAuthManager.CurrentSessionId(Http.User), ct);
         twoFactor.ForgetDevice(Http);
         Log.RememberedDevicesForgotten(logger, user.Id);
 
         var session = await authManager.RefreshCurrentSessionAsync(user, ct);
-        return Results.Ok(session.ToResponse());
+        return SlimResults.ReissuedSession(session);
     }
 
     // ------------------------------------------------------------------ helpers
@@ -163,7 +162,8 @@ internal sealed class SlimTwoFactorHandlers(
         await hooks.RaiseAsync(SlimEventTypes.TwoFactorEnabled, user.Id, method, ct: ct);
 
         var session = await authManager.RefreshCurrentSessionAsync(user, ct);
-        return Results.Ok(new SlimRecoveryCodesResponse(codes, session.ToResponse()));
+        // the codes are shown exactly once – they go out even if this session could not be renewed
+        return Results.Ok(new SlimRecoveryCodesResponse(codes, session.Succeeded ? session.ToResponse() : null));
     }
 
     private async Task<(SlimUser? User, IResult? Error)> ConfirmPasswordAsync(

@@ -301,7 +301,9 @@ public sealed class TestExternalLoginStore(ISlimUserStore users) : ISlimExternal
 
     public Task LinkExternalLoginAsync(string userId, string provider, string providerKey, CancellationToken ct)
     {
-        _links[(provider, providerKey)] = userId;
+        // unique per provider + key, like a unique index: a taken identity is never moved to another account
+        if (!_links.TryAdd((provider, providerKey), userId) && _links[(provider, providerKey)] != userId)
+            throw new InvalidOperationException("This external identity is already linked to another account.");
         return Task.CompletedTask;
     }
 

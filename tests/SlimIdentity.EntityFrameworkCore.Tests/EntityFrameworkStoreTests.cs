@@ -184,6 +184,23 @@ public sealed class EntityFrameworkStoreTests
     }
 
     [Fact]
+    public async Task A_failed_save_leaves_nothing_tracked_for_the_next_call()
+    {
+        var file = SqliteFile();
+        await using var sp = await BuildAsync<GuidContext, GuidUser, Guid>(o => o.UseSqlite(file));
+        await using var scope = sp.CreateAsyncScope();
+        var user = (await scope.ServiceProvider.GetRequiredService<ISlimUserStore>().CreateAsync(new SlimNewUser { Email = "t@test.local" }, default))!;
+        var tokens = scope.ServiceProvider.GetRequiredService<ISlimRefreshTokenStore>();
+        var expires = DateTimeOffset.UtcNow.AddHours(1);
+
+        await tokens.StoreRefreshTokenAsync(user.Id, new string('a', 64), expires, default);
+        await Assert.ThrowsAsync<DbUpdateException>(() => tokens.StoreRefreshTokenAsync(user.Id, new string('a', 64), expires, default));
+        await tokens.StoreRefreshTokenAsync(user.Id, new string('b', 64), expires, default);   // the failed row is not saved again
+
+        Assert.Equal(user.Id, await tokens.ValidateAndConsumeRefreshTokenAsync(new string('b', 64), default));
+    }
+
+    [Fact]
     public async Task Int_keys_honour_all_store_contracts_on_SQLite()
     {
         var file = SqliteFile();

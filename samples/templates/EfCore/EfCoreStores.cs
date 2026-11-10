@@ -122,6 +122,14 @@ public sealed class EfCoreUserStore(IdentityDb identity) : ISlimUserStore
             .SetProperty(u => u.PasswordChangeRequired, user.PasswordChangeRequired), ct);
     }
 
+    // compare-and-set: a concurrent password or 2FA change is never written back over
+    public async Task<bool> UpdateSecurityStampAsync(SlimUser user, string expectedStamp, string newStamp, CancellationToken ct)
+    {
+        var id = Guid.Parse(user.Id);
+        return await db.Users.Where(u => u.Id == id && u.SecurityStamp == expectedStamp)
+            .ExecuteUpdateAsync(s => s.SetProperty(u => u.SecurityStamp, newStamp), ct) == 1;
+    }
+
     public async Task<bool> UpdateEmailAsync(SlimUser user, string newEmail, CancellationToken ct)
     {
         var id = Guid.Parse(user.Id);
@@ -240,12 +248,23 @@ public sealed class EfCoreTwoFactorStore(IdentityDb identity) : ISlimTwoFactorSt
     public async Task StoreRecoveryCodesAsync(SlimUser user, IEnumerable<string> hashedCodes, CancellationToken ct)
     {
         var id = Guid.Parse(user.Id);
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
-        await db.RecoveryCodes.Where(c => c.UserId == id).ExecuteDeleteAsync(ct);
-        db.RecoveryCodes.AddRange(hashedCodes.Select(h => new RecoveryCode { UserId = id, CodeHash = h }));
-        await db.SaveChangesAsync(ct);
-        db.ChangeTracker.Clear();
-        await tx.CommitAsync(ct);
+        var hashes = hashedCodes.ToList();
+        // through the execution strategy: a manual transaction otherwise throws with EnableRetryOnFailure
+        await db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            try
+            {
+                await using var tx = await db.Database.BeginTransactionAsync(ct);
+                await db.RecoveryCodes.Where(c => c.UserId == id).ExecuteDeleteAsync(ct);
+                db.RecoveryCodes.AddRange(hashes.Select(h => new RecoveryCode { UserId = id, CodeHash = h }));
+                await db.SaveChangesAsync(ct);
+                await tx.CommitAsync(ct);
+            }
+            finally
+            {
+                db.ChangeTracker.Clear();   // a retry starts clean
+            }
+        });
     }
 
     public async Task<bool> ValidateAndConsumeRecoveryCodeAsync(SlimUser user, string hashedCode, CancellationToken ct)
@@ -357,10 +376,9 @@ public sealed class EfCoreApiKeyStore(IdentityDb identity, TimeProvider time) : 
 
     public async Task<IReadOnlyCollection<Claim>?> ValidateApiKeyAsync(string keyHash, CancellationToken ct)
     {
-        var now = time.GetUtcNow();
-        var key = await db.ApiKeys.AsNoTracking()
-            .FirstOrDefaultAsync(k => k.KeyHash == keyHash && !k.Revoked && (k.ExpiresAt == null || k.ExpiresAt > now), ct);
-        if (key is null) return null;
+        // lookup by the primary key, expiry checked in memory: SQLite cannot compare DateTimeOffset in SQL
+        var key = await db.ApiKeys.AsNoTracking().FirstOrDefaultAsync(k => k.KeyHash == keyHash && !k.Revoked, ct);
+        if (key is null || (key.ExpiresAt is { } expires && expires <= time.GetUtcNow())) return null;
 
         var claims = new List<Claim> { new(SlimClaimTypes.UserId, $"client:{key.ClientId}") };
         claims.AddRange(key.Scopes.Select(s => new Claim("scope", s)));

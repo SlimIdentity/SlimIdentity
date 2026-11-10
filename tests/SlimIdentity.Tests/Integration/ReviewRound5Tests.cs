@@ -47,6 +47,7 @@ public sealed class ReviewRound5Tests
         public Task<SlimUser?> FindByIdAsync(string userId, CancellationToken ct) => Current.FindByIdAsync(userId, ct);
         public Task<SlimUser?> CreateAsync(SlimNewUser newUser, CancellationToken ct) => Current.CreateAsync(newUser, ct);
         public Task UpdateSecurityStateAsync(SlimUser user, CancellationToken ct) => Current.UpdateSecurityStateAsync(user, ct);
+        public Task<bool> UpdateSecurityStampAsync(SlimUser user, string expectedStamp, string newStamp, CancellationToken ct) => Current.UpdateSecurityStampAsync(user, expectedStamp, newStamp, ct);
         public Task<int> IncrementFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct) => Current.IncrementFailedLoginAttemptsAsync(user, ct);
         public Task SetLockoutEndAsync(SlimUser user, DateTimeOffset? lockoutEndUtc, CancellationToken ct) => Current.SetLockoutEndAsync(user, lockoutEndUtc, ct);
         public Task ResetFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct) => Current.ResetFailedLoginAttemptsAsync(user, ct);
@@ -264,5 +265,89 @@ public sealed class ReviewRound5Tests
 
         Assert.Contains("email_not_verified", location);
         Assert.Null(await app.Users.FindByEmailAsync(SocialEmail, default));
+    }
+
+    // ---------------------------------------------------------------- U-3: ToResponse() of a failed result
+
+    [Fact]
+    public void A_failed_result_cannot_be_turned_into_a_success_response() =>
+        Assert.Throws<InvalidOperationException>(() => new SlimAuthResult { Succeeded = false, Error = "account_disabled" }.ToResponse());
+
+    [Fact]
+    public async Task A_password_change_at_the_end_of_the_refresh_chain_reports_that_the_session_ended()
+    {
+        await using var app = await TestApp.StartAsync(new TestAppOptions
+        {
+            Sessions = false,   // with a session store the session itself ends with the chain
+            Configure = o => (o.Tokens.RefreshTokenLifetime, o.Tokens.RefreshTokenAbsoluteLifetime) = (TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(10)),
+        });
+        var me = app.CreateClient();
+        me.BearerToken = (await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword)).AccessToken;
+        app.Time.Advance(TimeSpan.FromMinutes(11));   // the access token is still valid, the chain is not
+
+        var response = await me.SendRawAsync("/auth/change-password", """{"currentPassword":"User1234!","newPassword":"Changed-Pass-123"}""", "application/json");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Contains("session_expired", await response.Content.ReadAsStringAsync());
+        await app.LoginBearerAsync(TestApp.UserEmail, "Changed-Pass-123");   // the change itself was saved
+    }
+
+    // ---------------------------------------------------------------- U-7: no secrets in ToString()
+
+    [Fact]
+    public void Records_with_secrets_do_not_print_them()
+    {
+        var printed = string.Join("\n",
+            new SlimIdentity.Contracts.SlimLoginRequest("a@test.local", "Secret-Password-1", TwoFactorRememberToken: "remember-token-1").ToString(),
+            new SlimIdentity.Contracts.SlimRefreshRequest("refresh-token-1").ToString(),
+            new SlimIdentity.Contracts.SlimChangePasswordRequest("Secret-Password-1", "Secret-Password-2").ToString(),
+            new SlimIdentity.Contracts.SlimTwoFactorSetupResponse("SHAREDKEY", "otpauth://totp/x?secret=SHAREDKEY", "setup-token-1").ToString(),
+            new SlimPasswordReset("reset-token-1", "https://x/reset?token=reset-token-1", DateTimeOffset.UnixEpoch).ToString(),
+            new SlimAuthResult { Succeeded = true, AccessToken = "access-token-1", RefreshToken = "refresh-token-1" }.ToString());
+
+        foreach (var secret in new[] { "Secret-Password", "remember-token", "refresh-token", "SHAREDKEY", "setup-token", "reset-token", "access-token" })
+            Assert.DoesNotContain(secret, printed);
+        Assert.Contains("a@test.local", printed);   // the rest still helps debugging
+    }
+
+    // ---------------------------------------------------------------- Q-2: remember-device cookie behind UsePathBase
+
+    [Fact]
+    public async Task The_remember_device_cookie_includes_the_path_base()
+    {
+        await using var app = await TestApp.StartAsync(new TestAppOptions { Configure = o => o.TwoFactor.RememberDeviceLifetime = TimeSpan.FromDays(30) });
+        using var scope = app.App.Services.CreateScope();
+        var http = new DefaultHttpContext { RequestServices = scope.ServiceProvider };
+        http.Request.PathBase = "/api";
+
+        scope.ServiceProvider.GetRequiredService<SlimIdentity.Services.SlimTwoFactorService>()
+            .RememberDevice(app.Users.Get(TestApp.UserEmail), http, cookieMode: true);
+
+        Assert.Contains("path=/api/auth", http.Response.Headers.SetCookie.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ---------------------------------------------------------------- S-9: stamp rotations never write back a stale user
+
+    [Fact]
+    public async Task Refreshing_claims_or_signing_out_everywhere_with_a_stale_user_keeps_a_concurrent_password_change()
+    {
+        await using var app = await TestApp.StartAsync();
+        using var scope = app.App.Services.CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<ISlimUserStore>();
+        var auth = scope.ServiceProvider.GetRequiredService<ISlimAuthManager>();
+        var stale = (await store.FindByEmailAsync(TestApp.UserEmail, default))!;
+
+        // another request changes the password after "stale" was read (e.g. a loop over group members)
+        var fresh = (await store.FindByIdAsync(stale.Id, default))!;
+        await auth.SetPasswordAsync(fresh, "Concurrent-Password-456");
+        var changedHash = (await store.FindByIdAsync(stale.Id, default))!.PasswordHash;
+
+        await auth.RefreshClaimsAsync(stale);
+        Assert.Equal(changedHash, (await store.FindByIdAsync(stale.Id, default))!.PasswordHash);
+
+        await auth.SignOutEverywhereAsync(stale);
+        var saved = (await store.FindByIdAsync(stale.Id, default))!;
+        Assert.Equal(changedHash, saved.PasswordHash);
+        Assert.Equal(saved.SecurityStamp, stale.SecurityStamp);   // the caller's instance carries the rotated stamp
     }
 }

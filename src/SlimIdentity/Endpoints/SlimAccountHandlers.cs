@@ -318,7 +318,7 @@ internal sealed class SlimAccountHandlers(
 
         // keep the calling device signed in
         var session = await authManager.RefreshCurrentSessionAsync(user, ct);
-        return Results.Ok(session.ToResponse());
+        return SlimResults.ReissuedSession(session);
     }
 
     // ------------------------------------------------------------------ GET /me (authenticated)

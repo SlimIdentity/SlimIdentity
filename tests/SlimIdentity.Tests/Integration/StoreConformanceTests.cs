@@ -20,11 +20,12 @@ public sealed class StoreConformanceTests
             .AddSingleton<ISlimSessionStore, TestSessionStore>()
             .AddSingleton<ISlimExternalLoginStore, TestExternalLoginStore>()
             .AddSingleton<ISlimPasskeyStore, TestPasskeyStore>()
+            .AddSingleton<ISlimApiKeyStore>(new HashedApiKeyStore(ValidKey.Hash))
             .BuildServiceProvider();
 
-        var report = await SlimStoreConformance.VerifyAsync(services);
+        var report = await SlimStoreConformance.VerifyAsync(services, new SlimConformanceOptions { ApiKey = ValidKey.Key });
 
-        Assert.All(new[] { nameof(ISlimUserStore), nameof(ISlimTwoFactorStore), nameof(ISlimRefreshTokenStore), nameof(ISlimSessionStore), nameof(ISlimExternalLoginStore), nameof(ISlimPasskeyStore) },
+        Assert.All(new[] { nameof(ISlimUserStore), nameof(ISlimTwoFactorStore), nameof(ISlimRefreshTokenStore), nameof(ISlimSessionStore), nameof(ISlimExternalLoginStore), nameof(ISlimPasskeyStore), nameof(ISlimApiKeyStore) },
             store => Assert.Contains(report.Results, r => r.Store == store));
     }
 
@@ -42,8 +43,17 @@ public sealed class StoreConformanceTests
         Assert.Contains(failed, r => r.Contains("counts parallel failures atomically"));
         Assert.Contains(failed, r => r.Contains("never overwrites the password hash"));
         Assert.Contains(failed, r => r.Contains("only if the hash is unchanged"));
+        Assert.Contains(failed, r => r.Contains("only the stamp and only if it is unchanged"));
         Assert.Contains("fix:", ex.Message);
         Assert.Contains(ex.Report.Results, r => r.Passed);   // the correct parts are still reported as passed
+    }
+
+    private static readonly (string Key, string Hash) ValidKey = SlimApiKeys.Generate();
+
+    private sealed class HashedApiKeyStore(string validHash) : ISlimApiKeyStore
+    {
+        public Task<IReadOnlyCollection<Claim>?> ValidateApiKeyAsync(string keyHash, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyCollection<Claim>?>(keyHash == validHash ? [new Claim(SlimClaimTypes.UserId, "client:conformance")] : null);
     }
 
     /// <summary>
@@ -76,6 +86,12 @@ public sealed class StoreConformanceTests
             if (_users.TryGetValue(user.Id, out var existing)) copy.Email = existing.Email;
             _users[user.Id] = copy;
             return Task.CompletedTask;
+        }
+
+        public Task<bool> UpdateSecurityStampAsync(SlimUser user, string expectedStamp, string newStamp, CancellationToken ct)
+        {
+            _users[user.Id].SecurityStamp = newStamp;   // ignores expectedStamp
+            return Task.FromResult(true);
         }
 
         public async Task<int> IncrementFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct)

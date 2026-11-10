@@ -18,7 +18,8 @@ namespace SlimIdentity.Testing;
 /// <remarks>
 /// <para>
 /// Every registered store interface is checked: <see cref="ISlimUserStore"/> (required), <see cref="ISlimTwoFactorStore"/>,
-/// <see cref="ISlimRefreshTokenStore"/>, <see cref="ISlimSessionStore"/>, <see cref="ISlimExternalLoginStore"/> and <see cref="ISlimPasskeyStore"/>.
+/// <see cref="ISlimRefreshTokenStore"/>, <see cref="ISlimSessionStore"/>, <see cref="ISlimExternalLoginStore"/>, <see cref="ISlimPasskeyStore"/>
+/// and <see cref="ISlimApiKeyStore"/>.
 /// Each operation resolves the store from a <b>new DI scope</b>, so scoped stores with their own <c>DbContext</c> or
 /// connection run truly in parallel – exactly like concurrent HTTP requests.
 /// </para>
@@ -66,6 +67,7 @@ public static class SlimStoreConformance
         if (access.Has<ISlimSessionStore>()) await SessionStoreChecks.RunAsync(run).ConfigureAwait(false);
         if (access.Has<ISlimExternalLoginStore>()) await ExternalLoginStoreChecks.RunAsync(run).ConfigureAwait(false);
         if (access.Has<ISlimPasskeyStore>()) await PasskeyStoreChecks.RunAsync(run).ConfigureAwait(false);
+        if (access.Has<ISlimApiKeyStore>()) await ApiKeyStoreChecks.RunAsync(run).ConfigureAwait(false);
         return run.ToReport();
     }
 }
@@ -81,6 +83,12 @@ public sealed class SlimConformanceOptions
     /// (the reserved <c>.invalid</c> TLD can never receive mail).
     /// </summary>
     public string EmailDomain { get; set; } = "conformance.invalid";
+
+    /// <summary>
+    /// A valid key (clear text) of your <see cref="ISlimApiKeyStore"/>, e.g. one created by the test setup. The kit cannot
+    /// create keys itself: without it, only unknown and malformed hashes are checked.
+    /// </summary>
+    public string? ApiKey { get; set; }
 }
 
 /// <summary>Result of one conformance rule.</summary>

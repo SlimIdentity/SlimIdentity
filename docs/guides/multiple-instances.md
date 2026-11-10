@@ -20,7 +20,7 @@ and that "sign out everywhere" on A ends sessions on B immediately.
 | 4 | Configure **forwarded headers** for your load balancer | Otherwise every client appears with the balancer's address: one shared rate-limit bucket for everybody (a few failed logins block all users), wrong scheme for CSRF and OAuth. [Guide](reverse-proxy.md) |
 | 5 | Keep the **clocks in sync** (NTP) | TOTP codes, token lifetimes and single-use markers compare times issued by different machines. Seconds of drift are tolerated; 30 s and more break 2FA. |
 | 6 | Register a **refresh-token store** when you use external login | It also makes the one-time exchange codes single-use across instances (the EF Core package registers it by default). |
-| 7 | For guaranteed mail delivery use an **outbox** | The built-in mail queue is in memory: drained on a regular shutdown, lost on a crash. [Template](../../samples/templates/Email/OutboxEmailSender.cs) |
+| 7 | For durable mail delivery use an **outbox** | The built-in mail queue is in memory: drained on a regular shutdown, lost on a crash. The outbox survives crashes and delivers at least once, with retries over several hours – not guaranteed: watch for rows it gave up on. [Template](../../samples/templates/Email/OutboxEmailSender.cs) |
 
 ```csharp
 // 1 + 2: one key ring, one name, one secret – e.g. in your database

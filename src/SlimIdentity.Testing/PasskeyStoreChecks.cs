@@ -89,6 +89,24 @@ internal static class PasskeyStoreChecks
                 Expect.Equal(1, parallel.Count(r => r), "parallel uses with the same expected counter that succeeded");
             });
 
+        await run.CheckAsync(Store, "a challenge is single use even when the counter stays 0 (synced passkeys)",
+            "Synced passkeys always report sign count 0, so the challenge is the only replay protection: the WHERE clause must include last_challenge_at < @issuedAt and the update must be one atomic statement.",
+            async () =>
+            {
+                var user = await run.NewUserAsync();
+                var passkey = NewPasskey(user.Id);
+                await stores.UseAsync<ISlimPasskeyStore, bool>(s => s.AddPasskeyAsync(passkey, ct));
+                var used = ConformanceRun.WholeSeconds(DateTimeOffset.UtcNow);
+
+                var parallel = await run.InParallelAsync(_ =>
+                    stores.UseAsync<ISlimPasskeyStore, bool>(s => s.TryRecordUseAsync(passkey.CredentialId, 0, 0, 5_000, used, false, ct)));
+                Expect.Equal(1, parallel.Count(r => r), "parallel uses of one challenge with counter 0 that succeeded");
+                Expect.True(!await stores.UseAsync<ISlimPasskeyStore, bool>(s => s.TryRecordUseAsync(passkey.CredentialId, 0, 0, 5_000, used, false, ct)),
+                    "the same challenge was accepted again with counter 0");
+                Expect.True(await stores.UseAsync<ISlimPasskeyStore, bool>(s => s.TryRecordUseAsync(passkey.CredentialId, 0, 0, 6_000, used, false, ct)),
+                    "a newer challenge with counter 0 was refused");
+            });
+
         await run.CheckAsync(Store, "renames and removes passkeys of their own user only",
             "UPDATE / DELETE … WHERE credential_id = @id AND user_id = @userId.",
             async () =>

@@ -29,6 +29,7 @@ public interface ISlimUserStore
     Task<SlimUser?> FindByIdAsync(string userId, CancellationToken ct);
     Task<SlimUser?> CreateAsync(SlimNewUser newUser, CancellationToken ct);            // null if the address is taken
     Task UpdateSecurityStateAsync(SlimUser user, CancellationToken ct);                // persist the security fields only
+    Task<bool> UpdateSecurityStampAsync(SlimUser user, string expectedStamp, string newStamp, CancellationToken ct); // only if unchanged
     Task<bool> UpdateEmailAsync(SlimUser user, string newEmail, CancellationToken ct); // false if the address is taken
     Task<IReadOnlyCollection<Claim>> GetClaimsAsync(SlimUser user, CancellationToken ct); // roles, tenant id, …
 
@@ -51,10 +52,12 @@ yours – map it in the store.
 
 ## 3. Implement (or stub) the e-mail sender
 
+Start with the null sender – it writes links and codes to the log, so the first requests work without a mail server:
+
 ```csharp
 builder.Services.AddSlimIdentity(...)
-    .AddEmailSender<MyEmailSender>();     // production: MailKit, SendGrid, … (see samples/templates/Email)
-    // .AddNullEmailSender();             // development: writes links and codes to the log
+    .AddNullEmailSender();                // development: writes links and codes to the log
+    // .AddEmailSender<MyEmailSender>();  // production: MailKit, SendGrid, … (see samples/templates/Email)
 ```
 
 ## 4. Register and map
@@ -64,8 +67,8 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddSlimIdentity(builder.Configuration.GetSection("SlimIdentity"))
     .AddUserStore<MyUserStore>()
-    .AddEmailSender<MyEmailSender>()
-    .AddRefreshTokenStore<MyRefreshTokenStore>();   // optional, enables /auth/refresh
+    .AddNullEmailSender();                          // later: .AddEmailSender<MyEmailSender>()
+    // .AddRefreshTokenStore<MyRefreshTokenStore>() // later, optional: enables /auth/refresh
 
 var app = builder.Build();
 app.UseRateLimiter();
@@ -82,7 +85,7 @@ app.Run();
 {
   "SlimIdentity": {
     "Tokens": {
-      "JwtSecret": "<at least 32 random bytes – use user secrets / a key vault, never commit it>",
+      "JwtSecret": "<replace: openssl rand -base64 48 – keep it in user secrets / a key vault, never commit it>",
       "Issuer": "MyApp",
       "Audience": "MyAppClients"
     },
@@ -96,7 +99,7 @@ app.Run();
 That is the whole configuration for most apps: the `JwtSecret` enables bearer tokens (leave it out for a cookie-only
 app), `Links.BaseUrl` makes mail links point to `/verify-email`, `/reset-password`, … of your front end. Everything else
 has secure defaults ([configuration reference](configuration.md)). The options are validated at startup – a too short
-`JwtSecret`, for example, stops the application with a clear message instead of failing later.
+`JwtSecret` – or the placeholder above left in place – stops the application with a clear message instead of failing later.
 
 ## 5. Try it
 
@@ -107,6 +110,10 @@ Content-Type: application/json
 { "email": "me@example.com", "password": "Secret123!" }
 ```
 
+The null sender logs a verification link to `Links.BaseUrl` + `/verify-email` – a page of your front end that does not
+exist yet. Until it does, take the `token` from the link and confirm with `POST /auth/verify-email` and
+`{ "token": "…" }`; signing in does not wait for it unless you set `SignIn.RequireConfirmedEmail`.
+
 ```http
 POST /auth/login
 Content-Type: application/json
@@ -114,7 +121,7 @@ Content-Type: application/json
 { "email": "me@example.com", "password": "Secret123!" }
 ```
 
-The answer contains `accessToken` and `refreshToken`. Send `Authorization: Bearer <accessToken>` to protected
+The answer contains `accessToken` and `refreshToken` (the latter once a refresh-token store is registered). Send `Authorization: Bearer <accessToken>` to protected
 endpoints; when it expires, exchange the refresh token at `POST /auth/refresh`.
 
 For a browser SPA on the same site, cookies are usually the better choice: `POST /auth/login?useCookies=true` with

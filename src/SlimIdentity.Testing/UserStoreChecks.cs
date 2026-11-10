@@ -82,13 +82,33 @@ internal static class UserStoreChecks
             });
 
         await run.CheckAsync(Store, "parallel registrations of one address create exactly one account",
-            "Do not check for existence first – insert and let the unique index reject the losers; return null for them instead of throwing.",
+            "Do not check for existence first – insert and let the unique index on the normalized address reject the losers (also for other casings); return null for them instead of throwing.",
             async () =>
             {
-                var email = run.NewEmail();
-                var results = await run.InParallelAsync(_ =>
-                    stores.UseAsync<ISlimUserStore, SlimUser?>(s => s.CreateAsync(new SlimNewUser { Email = email, PasswordHash = ConformanceRun.NewHash() }, ct)));
-                Expect.Equal(1, results.Count(u => u is not null), "accounts created by parallel CreateAsync calls");
+                var email = $"Slim.Race-{Guid.NewGuid():N}@{run.Options.EmailDomain}";
+                var results = await run.InParallelAsync(i =>
+                    stores.UseAsync<ISlimUserStore, SlimUser?>(s => s.CreateAsync(new SlimNewUser { Email = i % 2 == 0 ? email : email.ToLowerInvariant(), PasswordHash = ConformanceRun.NewHash() }, ct)));
+                Expect.Equal(1, results.Count(u => u is not null), "accounts created by parallel CreateAsync calls (two casings of one address)");
+            });
+
+        await run.CheckAsync(Store, "a new user starts unconfirmed, unlocked and without 2FA",
+            "Insert the given PasswordHash and a fresh SecurityStamp; EmailConfirmed = false, FailedLoginAttempts = 0, LockoutEndUtc = null, TwoFactorEnabled = false, PasswordChangeRequired = false – no column defaults that grant more.",
+            async () =>
+            {
+                var hash = ConformanceRun.NewHash();
+                var created = await stores.UseAsync<ISlimUserStore, SlimUser?>(s => s.CreateAsync(new SlimNewUser { Email = run.NewEmail(), PasswordHash = hash }, ct))
+                    ?? throw new ConformanceFailure("CreateAsync returned null for a new address.");
+                var saved = await run.ReloadAsync(created);
+                Expect.Equal(hash, saved.PasswordHash, "PasswordHash");
+                Expect.Equal(false, saved.EmailConfirmed, "EmailConfirmed");
+                Expect.Equal(0, saved.FailedLoginAttempts, "FailedLoginAttempts");
+                Expect.SameInstant(null, saved.LockoutEndUtc, "LockoutEndUtc");
+                Expect.Equal(false, saved.TwoFactorEnabled, "TwoFactorEnabled");
+                Expect.Equal(false, saved.PasswordChangeRequired, "PasswordChangeRequired");
+
+                var other = await run.NewUserAsync();
+                Expect.True(other.SecurityStamp != created.SecurityStamp && (await run.ReloadAsync(other)).SecurityStamp != saved.SecurityStamp,
+                    "Two new users got the same SecurityStamp – store the value of the SlimUser, not a constant default.");
             });
 
         await run.CheckAsync(Store, "UpdateSecurityStateAsync persists all security fields",
@@ -114,6 +134,51 @@ internal static class UserStoreChecks
                 Expect.SameInstant(lockoutEnd, saved.LockoutEndUtc, "LockoutEndUtc");
                 Expect.Equal(true, saved.TwoFactorEnabled, "TwoFactorEnabled");
                 Expect.Equal(true, saved.PasswordChangeRequired, "PasswordChangeRequired");
+
+                // and back: cleared values must be written, too (no "only if not null" updates)
+                user.EmailConfirmed = false;
+                user.FailedLoginAttempts = 0;
+                user.LockoutEndUtc = null;
+                user.TwoFactorEnabled = false;
+                user.PasswordChangeRequired = false;
+                user.PasswordHash = string.Empty;
+                await stores.UseAsync<ISlimUserStore>(s => s.UpdateSecurityStateAsync(user, ct));
+
+                var cleared = await run.ReloadAsync(user);
+                Expect.Equal(false, cleared.EmailConfirmed, "EmailConfirmed after clearing");
+                Expect.Equal(0, cleared.FailedLoginAttempts, "FailedLoginAttempts after clearing");
+                Expect.SameInstant(null, cleared.LockoutEndUtc, "LockoutEndUtc after clearing");
+                Expect.Equal(false, cleared.TwoFactorEnabled, "TwoFactorEnabled after clearing");
+                Expect.Equal(false, cleared.PasswordChangeRequired, "PasswordChangeRequired after clearing");
+                Expect.True(string.IsNullOrEmpty(cleared.PasswordHash), "PasswordHash after removing the password (empty) – the old hash is still stored.");
+            });
+
+        await run.CheckAsync(Store, "UpdateSecurityStampAsync replaces only the stamp and only if it is unchanged",
+            "UPDATE users SET security_stamp = @newStamp WHERE id = @id AND security_stamp = @expectedStamp; return affected rows = 1. Never write other columns.",
+            async () =>
+            {
+                var stale = await run.NewUserAsync();
+                var original = (await run.ReloadAsync(stale)).SecurityStamp;
+
+                // another request changes the password in the meantime – the stamp rotation must not undo it
+                var fresh = await run.ReloadAsync(stale);
+                fresh.PasswordHash = ConformanceRun.NewHash();
+                await stores.UseAsync<ISlimUserStore>(s => s.UpdateSecurityStateAsync(fresh, ct));
+
+                var rotated = SlimUser.NewSecurityStamp();
+                Expect.True(await stores.UseAsync<ISlimUserStore, bool>(s => s.UpdateSecurityStampAsync(stale, original, rotated, ct)),
+                    "UpdateSecurityStampAsync returned false although the stamp was unchanged.");
+                var saved = await run.ReloadAsync(stale);
+                Expect.Equal(rotated, saved.SecurityStamp, "SecurityStamp after the rotation");
+                Expect.Equal(fresh.PasswordHash, saved.PasswordHash, "PasswordHash after the rotation (must stay – only the stamp is written)");
+
+                Expect.True(!await stores.UseAsync<ISlimUserStore, bool>(s => s.UpdateSecurityStampAsync(stale, original, SlimUser.NewSecurityStamp(), ct)),
+                    "UpdateSecurityStampAsync returned true for an outdated expected stamp.");
+                Expect.Equal(rotated, (await run.ReloadAsync(stale)).SecurityStamp, "SecurityStamp after a rotation with an outdated stamp (must stay unchanged)");
+
+                var parallel = await run.InParallelAsync(_ =>
+                    stores.UseAsync<ISlimUserStore, bool>(s => s.UpdateSecurityStampAsync(stale, rotated, SlimUser.NewSecurityStamp(), ct)));
+                Expect.Equal(1, parallel.Count(r => r), "parallel rotations from the same stamp that succeeded");
             });
 
         await run.CheckAsync(Store, "IncrementFailedLoginAttemptsAsync counts parallel failures atomically",

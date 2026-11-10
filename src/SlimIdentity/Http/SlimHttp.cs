@@ -193,6 +193,14 @@ internal static class SlimResults
     public static IResult InvalidToken(int statusCode = StatusCodes.Status400BadRequest) =>
         Status("invalid_token", "The token is invalid or has expired.", statusCode);
 
+    /// <summary>
+    /// Answer after a change that re-issued the caller's session: the new session, or – if it could not be renewed (refresh
+    /// chain at its end) – <c>401</c> with the reason; the change itself is saved, the client signs in again.
+    /// </summary>
+    public static IResult ReissuedSession(SlimAuthResult session) => session.Succeeded
+        ? Results.Ok(session.ToResponse())
+        : Status(session.Error ?? "session_expired", "The change was saved, but this session could not be renewed; sign in again.", StatusCodes.Status401Unauthorized);
+
     public static IResult BadRequest(string status, string? message = null) =>
         Status(status, message, StatusCodes.Status400BadRequest);
 

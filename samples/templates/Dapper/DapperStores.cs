@@ -118,6 +118,15 @@ public sealed class DapperUserStore(NpgsqlDataSource db) : ISlimUserStore
             """, user, cancellationToken: ct));
     }
 
+    // compare-and-set: a concurrent password or 2FA change is never written back over
+    public async Task<bool> UpdateSecurityStampAsync(SlimUser user, string expectedStamp, string newStamp, CancellationToken ct)
+    {
+        await using var c = await db.OpenConnectionAsync(ct);
+        return await c.ExecuteAsync(new CommandDefinition(
+            "UPDATE users SET security_stamp = @newStamp WHERE id = @id::uuid AND security_stamp = @expectedStamp",
+            new { id = user.Id, expectedStamp, newStamp }, cancellationToken: ct)) == 1;
+    }
+
     public async Task<bool> UpdateEmailAsync(SlimUser user, string newEmail, CancellationToken ct)
     {
         await using var c = await db.OpenConnectionAsync(ct);

@@ -95,6 +95,18 @@ public sealed class InMemoryUserStore : ISlimUserStore
         return Task.CompletedTask;
     }
 
+    // compare-and-set on the stamp only (contract of ISlimUserStore)
+    public Task<bool> UpdateSecurityStampAsync(SlimUser user, string expectedStamp, string newStamp, CancellationToken ct)
+    {
+        if (!_users.TryGetValue(user.Id, out var stored)) return Task.FromResult(false);
+        lock (stored)
+        {
+            if (stored.SecurityStamp != expectedStamp) return Task.FromResult(false);
+            stored.SecurityStamp = newStamp;
+            return Task.FromResult(true);
+        }
+    }
+
     public Task<bool> UpdateEmailAsync(SlimUser user, string newEmail, CancellationToken ct)
     {
         lock (_users)
@@ -200,7 +212,9 @@ public sealed class InMemoryExternalLoginStore(ISlimUserStore users) : ISlimExte
 
     public Task LinkExternalLoginAsync(string userId, string provider, string providerKey, CancellationToken ct)
     {
-        _links[(provider, providerKey)] = userId;
+        // unique per provider + key, like a unique index: a taken identity is never moved to another account
+        if (!_links.TryAdd((provider, providerKey), userId) && _links[(provider, providerKey)] != userId)
+            throw new InvalidOperationException("This external identity is already linked to another account.");
         return Task.CompletedTask;
     }
 
