@@ -60,6 +60,11 @@ A single instance with locally persisted keys is a valid setup – then 8002/800
   instances × `PermitLimit`. The protection that matters most is not affected: the **account lockout** counts failures
   in the database and applies across all instances (also proven by `MultiInstanceTests`).
 - **Mail limit per recipient** (3 per kind and 15 minutes, 5 for 2FA codes): likewise per instance.
+- **Back-channel logout tokens and link codes** are single use per instance only (in memory, also with a
+  refresh-token store). A logout token replayed on another instance within its 5 minutes signs the user out once more
+  – it can only end sessions, never open one, and the token travels server to server. A link code replayed within its
+  1 minute links the same external identity to the same account again; it is PKCE-bound and needs the owner's session
+  and password. Accepted, so no extra store is required.
 
 If you need a hard global limit per client, put it in front of the instances – the gateway sees every request:
 

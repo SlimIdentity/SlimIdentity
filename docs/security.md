@@ -100,6 +100,9 @@ reviewing an integration, focus on [assumptions](#assumptions), [host responsibi
 - Cookie revocation takes effect at the next validation (`Cookies.SecurityStampValidationInterval`, default 1 min).
 - The external-login exchange code is made single use through `ISlimRefreshTokenStore` (shared, atomic). Without a
   refresh-token store an in-memory registry is used, which is per instance – run several instances only with a store.
+- Back-channel logout tokens (`jti`) and link codes are single use per instance only. A replay on another instance
+  within their lifetime (5 minutes / 1 minute) can only sign the user out again or link the same identity to the same
+  account again ([several instances](guides/multiple-instances.md#limits-that-are-per-instance)).
 - `/register` performs one database write for new addresses only; this can make the response measurably slower than
   for existing addresses.
 - Rate limiting is per client IP (or your custom key) and per instance (in-memory); a hard global limit belongs in the
