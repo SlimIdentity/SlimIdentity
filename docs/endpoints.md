@@ -65,9 +65,9 @@ matched).
 | `POST /register` ⏱ | `email`, `password`, `profile` (optional object – [business data](guides/registration-profile.md)) | `200 registration_accepted` (always, also for existing addresses) | `400` validation (`profile.<field>` from your profile hook; `profile` if none is registered), `403 <veto>` of a registration guard |
 | `POST /verify-email` ⏱ | `token` | `200 email_confirmed` | `400 invalid_token` |
 | `POST /resend-verification` ⏱ | `email` | `200 verification_sent` (always) | – |
-| `POST /forgot-password` ⏱ | `email` | `200 reset_requested` (always) | – |
-| `POST /reset-password` ⏱ | `token`, `newPassword` | `200 password_reset` – all sessions end | `400 invalid_token`, `400` validation |
-| `POST /change-password` ⏱ 🔒 | `currentPassword`, `newPassword` | `200` new session for this device – others end | `400 invalid_password`, `400` validation, `403 not_allowed_while_impersonating`, `423 locked_out` |
+| `POST /forgot-password` ⏱ | `email` | `200 reset_requested` (always; no link for a pure SSO account) | – |
+| `POST /reset-password` ⏱ | `token`, `newPassword` | `200 password_reset` – all sessions end | `400 invalid_token`, `400` validation, `409 external_sign_in_only` |
+| `POST /change-password` ⏱ 🔒 | `currentPassword`, `newPassword` | `200` new session for this device – others end | `400 invalid_password`, `400` validation, `403 not_allowed_while_impersonating`, `409 password_not_set`, `423 locked_out` |
 | `POST /change-email` ⏱ 🔒 | `newEmail`, `password` | `200 email_change_requested` (always – also for taken addresses); link goes to the new address | `400 email_unchanged`, `400 invalid_password`, `400` validation, `403` during impersonation, `423 locked_out` |
 | `POST /confirm-email-change` ⏱ | `token` | `200 email_changed` – address changed, confirmed, all sessions end, old address notified | `400 invalid_token`, `400 email_taken` |
 | `GET /password-policy` | – | `200` `minimumLength`, `maximumLength`, `hasAdditionalRules` – for hints and live validation in the front end (no composition rules, NIST SP 800-63B) | – |
@@ -97,7 +97,7 @@ Links are created by the host with `ISlimAuthManager.CreateInvitationAsync` – 
 
 | Endpoint | Body | Success | Errors |
 | :--- | :--- | :--- | :--- |
-| `POST /passkeys/register/options` ⏱ 🔒 | `password` (if the account has one) | `200` `options` (creation options, base64url), `state` | `400 invalid_password`, `403 email_not_confirmed`, `403` during impersonation, `423` |
+| `POST /passkeys/register/options` ⏱ 🔒 | `password` | `200` `options` (creation options, base64url), `state` | `400 invalid_password`, `403 password_required` (account without a password), `403 email_not_confirmed`, `403` during impersonation, `423` |
 | `POST /passkeys/register` ⏱ 🔒 | `state`, `credential` (result of `navigator.credentials.create`), `name` | `200` `id`, `name`, `createdUtc`, `backupEligible`, `backedUp` | `400 invalid_passkey`, `409 passkey_exists` |
 | `POST /passkeys/login/options` ⏱ | – | `200` `options` (request options), `state` | – |
 | `POST /passkeys/login?useCookies=…` ⏱ | `state`, `credential` (result of `navigator.credentials.get`), `rememberMe` | `200` session (`amr: passkey`, no second factor) | `401 invalid_passkey`, `403 email_not_confirmed`, `403 password_change_required`, `403 <veto>` |

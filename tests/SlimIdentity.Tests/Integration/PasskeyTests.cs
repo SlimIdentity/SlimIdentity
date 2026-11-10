@@ -421,11 +421,23 @@ public sealed class PasskeyTests
         browser.SendCsrfHeader = true;
         var start = await browser.GetAsync("/auth/login/Fake?useCookies=true&returnUrl=/done");
         await browser.GetAsync(start.Headers.Location!.OriginalString);
+        // such an account only comes from before passkeys needed a password: register with a temporary password, drop it
+        var userId = app.Users.Get("social@test.local").Id;
+        await using (var scope = app.App.Services.CreateAsyncScope())
+            await scope.ServiceProvider.GetRequiredService<ISlimAuthManager>().SetPasswordAsync(app.Users.Get("social@test.local"), "Temporary-Pass-123", mustChange: false);
+        var me = await SignedInAsync(app, "social@test.local", "Temporary-Pass-123");
         using var key = new SoftwarePasskey();
-        await RegisterAsync(app, browser, key, password: null);
+        await RegisterAsync(app, me, key, password: "Temporary-Pass-123");
+        await using (var scope = app.App.Services.CreateAsyncScope())
+        {
+            var users = scope.ServiceProvider.GetRequiredService<ISlimUserStore>();
+            var user = (await users.FindByIdAsync(userId, default))!;
+            user.PasswordHash = string.Empty;
+            await users.UpdateSecurityStateAsync(user, default);
+        }
 
-        await browser.PostJsonAsync("/auth/sign-in-methods/external/remove", new { provider = "Fake", providerKey = "google-1" });
-        var refused = await browser.PostJsonAsync("/auth/sign-in-methods/passkeys/remove", new { id = key.IdBase64Url }, HttpStatusCode.Conflict);
+        await me.PostJsonAsync("/auth/sign-in-methods/external/remove", new { provider = "Fake", providerKey = "google-1" });
+        var refused = await me.PostJsonAsync("/auth/sign-in-methods/passkeys/remove", new { id = key.IdBase64Url }, HttpStatusCode.Conflict);
         Assert.Equal("last_sign_in_method", refused.Str("status"));
         Assert.Equal(HttpStatusCode.OK, (await LoginAsync(app, key)).Status);
     }

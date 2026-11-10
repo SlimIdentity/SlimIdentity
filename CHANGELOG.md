@@ -290,6 +290,11 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
   password reset before), `loginRecoveryCode`, and a failed refresh clears the token only on 400/401 (not on 429 or
   5xx). **Breaking:** an invitation accepted without a session returns `sign_in_required`; `changeEmail` and
   `confirmEmailChange` return a `FormResult`; the 2FA calls return a success-or-error result instead of `[]`.
+- **Breaking:** a pure SSO account (no password, an external login) gets no local sign-in method by self-service:
+  `/change-password` only changes an existing password (`409 password_not_set` – before, a fresh sign-in set a first
+  one), a self-service reset sends no link (`409 external_sign_in_only` for an older one), and a passkey needs a
+  password on the account (`403 password_required`). Accounts with a password keep password and passkeys when a
+  provider is linked; administrators can still set a password.
 - Docs: getting-started starts with the null mail sender and without a refresh-token store; minimal-setup installs
   the EF provider and tooling and creates the database; hooks.md states that the session renewal after a password or
   2FA change skips the guards.
