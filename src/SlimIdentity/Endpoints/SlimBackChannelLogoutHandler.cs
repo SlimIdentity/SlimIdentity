@@ -24,7 +24,7 @@ internal sealed class SlimBackChannelLogoutHandler(
     IOptionsMonitor<SlimBackChannelLogoutOptions> providerOptions,
     SlimBackChannelProviders providers,
     SlimBackChannelConfigurations configurations,
-    SlimLocalNonceRegistry nonces,
+    SlimSharedStateAccess sharedState,
     IServiceProvider services,
     SlimAuthManager authManager,
     IOptions<SlimIdentityOptions> options,
@@ -83,7 +83,7 @@ internal sealed class SlimBackChannelLogoutHandler(
         if (issuedAt > now + skew || now - issuedAt > MaxTokenAge + skew) return Invalid(provider, "iat outside the accepted window");
         // jti is required (OIDC Back-Channel Logout §2.4) – without it the token could be replayed within its lifetime
         if (!jwt.TryGetPayloadValue<string>("jti", out var jti) || string.IsNullOrEmpty(jti)) return Invalid(provider, "jti missing");
-        if (!nonces.TryConsume($"backchannel:{provider}:{jti}", issuedAt + MaxTokenAge + skew)) return Invalid(provider, "replayed");
+        if (!await sharedState.TryConsumeAsync(SlimSharedStateAccess.BackChannelToken, $"{provider}:{jti}", issuedAt + MaxTokenAge + skew, ct)) return Invalid(provider, "replayed");
 
         // sid-only tokens would need the provider's session id per local session – not tracked; providers send sub
         if (!jwt.TryGetPayloadValue<string>("sub", out var sub) || string.IsNullOrEmpty(sub)) return Invalid(provider, "sub missing");

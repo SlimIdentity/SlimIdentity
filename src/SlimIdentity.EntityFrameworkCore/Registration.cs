@@ -20,6 +20,12 @@ public sealed class SlimEntityFrameworkOptions
     /// The <c>SlimPasskeys</c> table is part of the model either way, so switching them on needs no migration.
     /// </summary>
     public bool Passkeys { get; set; }
+    /// <summary>
+    /// <see cref="ISlimSharedState"/>: single-use codes and mail limits shared by every instance (table
+    /// <c>SlimSharedState</c>). Default <c>true</c>; switch it off to keep them in memory or to register another
+    /// implementation (e.g. on Redis) with <c>AddSharedState&lt;T&gt;()</c>.
+    /// </summary>
+    public bool SharedState { get; set; } = true;
     /// <summary>Persist user agent and IP address of sessions (personal data, shown in the device list). Default <c>true</c>.</summary>
     public bool StoreClientInfo { get; set; } = true;
 }
@@ -56,6 +62,7 @@ public static class SlimEntityFrameworkBuilderExtensions
         if (options.Sessions) builder.AddSessionStore<SlimEfSessionStore<TContext, TKey>>();
         if (options.ExternalLogins) builder.AddExternalLoginStore<SlimEfExternalLoginStore<TContext, TKey>>();
         if (options.Passkeys) builder.AddPasskeyStore<SlimEfPasskeyStore<TContext, TKey>>();
+        if (options.SharedState) builder.AddSharedState<SlimEfSharedState<TContext>>();
         return builder;
     }
 }

@@ -22,10 +22,9 @@ internal sealed class SlimExternalLoginHandlers(
     SlimWorkflowTokens workflow,
     SlimHookRunner hooks,
     SlimMetrics metrics,
-    SlimLocalNonceRegistry nonces,
+    SlimSharedStateAccess sharedState,
     IServiceProvider services,
     IOptions<SlimIdentityOptions> options,
-    TimeProvider time,
     IHttpContextAccessor httpContextAccessor,
     ILogger<SlimExternalLoginHandlers> logger)
 {
@@ -226,11 +225,6 @@ internal sealed class SlimExternalLoginHandlers(
                 new SlimExchangePayload(user.Id, user.SecurityStamp, provider, Convert.ToHexString(RandomNumberGenerator.GetBytes(16)), codeChallenge!),
                 SlimIdentityDefaults.ExternalExchangeCodeLifetime);
 
-            // Single use: with a refresh-token store the code is registered there and consumed atomically (works across
-            // instances); otherwise the nonce is tracked in memory on exchange.
-            if (services.GetService<ISlimRefreshTokenStore>() is { } refreshStore)
-                await refreshStore.StoreRefreshTokenAsync(user.Id, ExchangeCodeHash(code), time.GetUtcNow() + SlimIdentityDefaults.ExternalExchangeCodeLifetime, ct);
-
             return RedirectWithFragment(returnUrl, new() { ["code"] = code });
         }
 
@@ -268,10 +262,7 @@ internal sealed class SlimExternalLoginHandlers(
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
 
         // consume – a code that was already exchanged is rejected
-        var consumed = services.GetService<ISlimRefreshTokenStore>() is { } refreshStore
-            ? string.Equals(await refreshStore.ValidateAndConsumeRefreshTokenAsync(ExchangeCodeHash(request!.Code), ct), payload.Uid, StringComparison.Ordinal)
-            : nonces.TryConsume(payload.Nonce, expiresAt);
-        if (!consumed)
+        if (!await sharedState.TryConsumeAsync(SlimSharedStateAccess.ExchangeCode, payload.Nonce, expiresAt, ct))
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
 
         var user = await store.FindByIdAsync(payload.Uid, ct);
@@ -319,7 +310,7 @@ internal sealed class SlimExternalLoginHandlers(
         if (await credentials.ConfirmPasswordAsync(user, request.Password, Http, ct) is { } failure)
             return failure;
 
-        if (!nonces.TryConsume(payload.Nonce, expiresAt))   // after the password: a typo does not burn the code
+        if (!await sharedState.TryConsumeAsync(SlimSharedStateAccess.LinkCode, payload.Nonce, expiresAt, ct))   // after the password: a typo does not burn the code
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
 
         var owner = await externalStore.FindByExternalLoginAsync(payload.Provider, payload.ProviderKey, ct);
@@ -338,9 +329,6 @@ internal sealed class SlimExternalLoginHandlers(
     }
 
     // ------------------------------------------------------------------ helpers
-
-    // domain-separated, so an exchange code can never be confused with a refresh token in the shared store
-    private static string ExchangeCodeHash(string code) => SlimHashing.Sha256Hex($"slimidentity.exchange-code.v1:{code}");
 
     private async Task<AuthenticationScheme?> FindRemoteSchemeAsync(string provider)
     {

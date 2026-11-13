@@ -43,7 +43,7 @@ internal sealed class SlimEmailDispatcher(
     {
         if (!options.Value.Email.Enabled) return;   // WithoutEmail(): nothing is ever sent
 
-        if (!throttle.TryAcquire(kind, recipient))
+        if (!await throttle.TryAcquireAsync(kind, recipient, ct))
         {
             Log.MailThrottled(logger, kind);
             metrics.Mail(kind, "throttled");

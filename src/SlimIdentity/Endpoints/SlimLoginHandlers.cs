@@ -193,7 +193,7 @@ internal sealed class SlimLoginHandlers(
             var code = SlimTotp.GenerateNumericCode();
             codeHash = HashEmailCode(user.Id, code, issuedAt);
             // sent inline (the user waits for it); over the per-recipient limit the challenge is issued without a mail
-            if (mailThrottle.TryAcquire(SlimEmailKinds.TwoFactorCode, user.Email))
+            if (await mailThrottle.TryAcquireAsync(SlimEmailKinds.TwoFactorCode, user.Email, ct))
             {
                 await services.GetRequiredService<ISlimEmailSender>().SendTwoFactorCodeAsync(mailDispatcher.CreateContext(SlimEmailKinds.TwoFactorCode, user.Id), user.Email, code, ct);
                 metrics.Mail(SlimEmailKinds.TwoFactorCode, "sent");

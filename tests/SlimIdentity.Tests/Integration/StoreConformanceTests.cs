@@ -21,11 +21,12 @@ public sealed class StoreConformanceTests
             .AddSingleton<ISlimExternalLoginStore, TestExternalLoginStore>()
             .AddSingleton<ISlimPasskeyStore, TestPasskeyStore>()
             .AddSingleton<ISlimApiKeyStore>(new HashedApiKeyStore(ValidKey.Hash))
+            .AddSingleton<ISlimSharedState, TestSharedState>()
             .BuildServiceProvider();
 
         var report = await SlimStoreConformance.VerifyAsync(services, new SlimConformanceOptions { ApiKey = ValidKey.Key });
 
-        Assert.All(new[] { nameof(ISlimUserStore), nameof(ISlimTwoFactorStore), nameof(ISlimRefreshTokenStore), nameof(ISlimSessionStore), nameof(ISlimExternalLoginStore), nameof(ISlimPasskeyStore), nameof(ISlimApiKeyStore) },
+        Assert.All(new[] { nameof(ISlimUserStore), nameof(ISlimTwoFactorStore), nameof(ISlimRefreshTokenStore), nameof(ISlimSessionStore), nameof(ISlimExternalLoginStore), nameof(ISlimPasskeyStore), nameof(ISlimApiKeyStore), nameof(ISlimSharedState) },
             store => Assert.Contains(report.Results, r => r.Store == store));
     }
 
@@ -70,6 +71,7 @@ public sealed class StoreConformanceTests
             .AddSingleton<ISlimExternalLoginStore, NaiveExternalLoginStore>()
             .AddSingleton<ISlimPasskeyStore, NaivePasskeyStore>()
             .AddSingleton<ISlimApiKeyStore>(new PrefixApiKeyStore(ValidKey.Hash))
+            .AddSingleton<ISlimSharedState, NaiveSharedState>()
             .BuildServiceProvider();
 
         var ex = await Assert.ThrowsAsync<SlimStoreConformanceException>(() =>
@@ -95,6 +97,10 @@ public sealed class StoreConformanceTests
             "ISlimPasskeyStore: a challenge is single use even when the counter stays 0 (synced passkeys)",
             "ISlimApiKeyStore: unknown and malformed key hashes are rejected",
             "ISlimApiKeyStore: a valid key returns its owner – and only for its exact hash",
+            "ISlimSharedState: an expired marker counts as absent",
+            "ISlimSharedState: a marker is added once even under parallel requests",
+            "ISlimSharedState: a counter restarts at 1 after its window",
+            "ISlimSharedState: a counter loses no increment under parallel requests",
         ];
         Assert.All(expected, rule => Assert.Contains(rule, failed));
     }
@@ -255,6 +261,28 @@ public sealed class StoreConformanceTests
             await Task.Delay(5, ct);
             _tokens.TryRemove(tokenHash, out _);
             return userId;
+        }
+    }
+
+    /// <summary>No expiry; check-then-insert and read-add-write.</summary>
+    private sealed class NaiveSharedState : ISlimSharedState
+    {
+        private readonly ConcurrentDictionary<string, long> _entries = new();
+
+        public async Task<bool> TryAddAsync(string key, DateTimeOffset expiresAt, CancellationToken ct)
+        {
+            if (_entries.ContainsKey(key)) return false;
+            await Task.Delay(5, ct);
+            _entries[key] = 0;
+            return true;
+        }
+
+        public async Task<long> IncrementAsync(string key, TimeSpan window, CancellationToken ct)
+        {
+            var count = _entries.GetValueOrDefault(key) + 1;
+            await Task.Delay(5, ct);
+            _entries[key] = count;
+            return count;
         }
     }
 

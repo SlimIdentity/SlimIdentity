@@ -56,7 +56,7 @@ reviewing an integration, focus on [assumptions](#assumptions), [host responsibi
 | Account takeover via external login | Auto-linking and auto-registration only for **verified** e-mails (`email_verified` or explicitly trusted provider), and auto-linking only to accounts without a password of their own; otherwise `account_conflict` (the user signs in and links with the PKCE-bound link flow) or `email_not_verified` – no account is created for an address the provider has not verified. |
 | Pre-account hijacking (attacker registers the victim's address first) | An unconfirmed account can neither set up a second factor nor link an external login. The first proof of the mailbox through a password reset or a verified external login removes the registrant's password, 2FA, sessions, external logins and passkeys. A click on the verification link confirms the address but proves nothing about who set the password – so an account with a password is never joined to an external login automatically. |
 | Look-alike addresses | Addresses are trimmed and Unicode-normalized (NFC) before they reach the store, so precomposed and decomposed forms are one account; case-insensitive lookup is a store rule. `+tag` and homoglyphs are different addresses. |
-| Mail bombing | At most 3 mails per recipient and kind within 15 minutes (5 for 2FA codes); further requests get the same answer without a mail. Per instance. The table is bounded (100,000 recipients): filled by a flood of fresh addresses, it fails closed – new recipients get no mail until entries expire (warning 7006), tracked ones keep their limit. |
+| Mail bombing | At most 3 mails per recipient and kind within 15 minutes (5 for 2FA codes); further requests get the same answer without a mail. Counted in `ISlimSharedState` – across instances once a shared one is registered. The in-memory default is bounded (200,000 entries): filled by a flood of fresh addresses, it fails closed – new recipients get no mail until entries expire (warning 8005), tracked ones keep their limit. |
 | Dev mail sender in production | `AddNullEmailSender()` stops the start in the `Production` environment (it would log live links and codes) unless explicitly allowed. |
 | Cached answers with secrets | Every answer under `/auth` carries `Cache-Control: no-store` (RFC 6749 §5.1) – tokens, recovery codes and TOTP secrets never land in a browser, proxy or CDN cache. |
 | Tokens in URLs / logs | After an external login, secrets travel in the URL **fragment** (never sent to servers, logs or referrers): bearer clients get a short-lived (1 min), single-use code that is bound to their PKCE challenge (S256) – worthless without the verifier –, cookie sign-ins with 2FA get their challenge there. Only error codes use the query. E-mail links carry their token by nature (single use, stamp-bound, short-lived); a link template like `https://app/reset#token={token}` keeps it out of server logs and referrers. Logs and metrics contain user ids at most, never passwords, tokens or codes. |
@@ -98,17 +98,15 @@ reviewing an integration, focus on [assumptions](#assumptions), [host responsibi
 - Without `ISlimSessionStore` sessions are stateless: a copied cookie stays valid until it expires or the stamp
   rotates (`/logout-all`).
 - Cookie revocation takes effect at the next validation (`Cookies.SecurityStampValidationInterval`, default 1 min).
-- The external-login exchange code is made single use through `ISlimRefreshTokenStore` (shared, atomic). Without a
-  refresh-token store an in-memory registry is used, which is per instance – run several instances only with a store.
-- Back-channel logout tokens (`jti`) and link codes are single use per instance only. A replay on another instance
-  within their lifetime (5 minutes / 1 minute) can only sign the user out again or link the same identity to the same
-  account again ([several instances](guides/multiple-instances.md#limits-that-are-per-instance)).
+- External-login exchange and link codes and back-channel logout tokens (`jti`) are single use through
+  `ISlimSharedState`. The in-memory default is per instance: with several instances and no shared state, a code can be
+  redeemed once per instance within its lifetime ([several instances](guides/multiple-instances.md#limits-that-are-per-instance)).
 - `/register` performs one database write for new addresses only; this can make the response measurably slower than
   for existing addresses.
 - Rate limiting is per client IP (or your custom key) and per instance (in-memory); a hard global limit belongs in the
   gateway. The account lockout is stored in the database and therefore global
   ([several instances](guides/multiple-instances.md)).
-- The mail limit per recipient is kept in memory per instance; with several instances the effective limit is a multiple.
+- The mail limit per recipient is per instance unless a shared `ISlimSharedState` is registered.
 - With an `ISlimCustomPasswordValidator` (LDAP, legacy hashes) unknown accounts burn a local dummy hash while known
   accounts wait for the directory – the response time can reveal whether an account exists.
 - The code has not been independently audited yet. The [attack scenarios](attack-scenarios.md) list what is covered by

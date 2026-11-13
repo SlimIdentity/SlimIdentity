@@ -73,14 +73,12 @@ public sealed class DeploymentDiagnosticsTests
     }
 
     [Fact]
-    public async Task External_login_without_refresh_store_is_reported_in_production()
+    public async Task In_memory_shared_state_is_reported_in_production()
     {
-        var without = await StartInProductionAsync(_ => { }, b => b.AddExternalLoginStore<TestExternalLoginStore>(ServiceLifetime.Singleton));
+        var without = await StartInProductionAsync(_ => { });
         Assert.Contains(8004, without.EventIds);
 
-        var with = await StartInProductionAsync(_ => { }, b => b
-            .AddExternalLoginStore<TestExternalLoginStore>(ServiceLifetime.Singleton)
-            .AddRefreshTokenStore<TestRefreshTokenStore>(ServiceLifetime.Singleton));
+        var with = await StartInProductionAsync(_ => { }, b => b.AddSharedState<TestSharedState>(ServiceLifetime.Singleton));
         Assert.DoesNotContain(8004, with.EventIds);
     }
 }

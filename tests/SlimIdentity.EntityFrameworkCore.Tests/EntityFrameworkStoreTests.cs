@@ -177,7 +177,7 @@ public sealed class EntityFrameworkStoreTests
         var file = SqliteFile();   // once – the options callback runs per scope
         await using var sp = await BuildAsync<GuidContext, GuidUser, Guid>(o => o.UseSqlite(file), wal: true);
         var report = await SlimStoreConformance.VerifyAsync(sp, Sqlite);
-        Assert.Equal(6, report.Results.Select(r => r.Store).Distinct().Count());   // user, 2FA, refresh, sessions, external logins, passkeys
+        Assert.Equal(7, report.Results.Select(r => r.Store).Distinct().Count());   // user, 2FA, refresh, sessions, external logins, passkeys, shared state
     }
 
     [Fact]

@@ -64,9 +64,6 @@ internal static partial class Log
     [LoggerMessage(3005, LogLevel.Debug, "SlimIdentity: rejected {Purpose} token.")]
     public static partial void TokenRejected(ILogger logger, Exception exception, string purpose);
 
-    [LoggerMessage(7006, LogLevel.Warning, "SlimIdentity: mail throttle full ({Capacity} recipients within 15 minutes) – mails to new recipients are not sent. A flood of fresh addresses is likely.")]
-    public static partial void MailThrottleFull(ILogger logger, int capacity);
-
     [LoggerMessage(3011, LogLevel.Warning, "SlimIdentity: user {UserId} had no security stamp (created outside SlimIdentity?) – one was created at sign-in. Initialize SecurityStamp with SlimUser.NewSecurityStamp() when you create users.")]
     public static partial void SecurityStampMissing(ILogger logger, string userId);
 
@@ -184,8 +181,14 @@ internal static partial class Log
     [LoggerMessage(8003, LogLevel.Information, "SlimIdentity: no Data Protection application name is set; keys are isolated by the content-root path. With several instances in different directories call SetApplicationName(\"…\").")]
     public static partial void DataProtectionNoApplicationName(ILogger logger);
 
-    [LoggerMessage(8004, LogLevel.Warning, "SlimIdentity: external login without ISlimRefreshTokenStore – the one-time exchange codes are tracked in memory and single-use per instance only. Register a refresh-token store when running several instances.")]
-    public static partial void ExchangeCodesPerInstance(ILogger logger);
+    [LoggerMessage(8004, LogLevel.Information, "SlimIdentity: one-time codes and mail limits are tracked in memory, per instance. When running several instances register a shared ISlimSharedState (AddSharedState<T>() or the EF package) – see docs/guides/multiple-instances.md.")]
+    public static partial void SharedStatePerInstance(ILogger logger);
+
+    [LoggerMessage(8005, LogLevel.Warning, "SlimIdentity: in-memory shared state full ({Capacity} entries) – new one-time codes are rejected and mails to new recipients are not sent. A flood of fresh codes or addresses is likely.")]
+    public static partial void SharedStateFull(ILogger logger, int capacity);
+
+    [LoggerMessage(8006, LogLevel.Error, "SlimIdentity: ISlimSharedState failed ({Purpose}) – one-time codes are rejected, mail limits are counted per instance until it recovers.")]
+    public static partial void SharedStateFailed(ILogger logger, Exception exception, string purpose);
 
     // SlimNullEmailSender (development only – these log live links and codes)
     [LoggerMessage(7101, LogLevel.Warning, "[SlimIdentity:NullEmailSender] Verification for {Email}: {Link}")]

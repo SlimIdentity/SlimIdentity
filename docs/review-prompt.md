@@ -83,8 +83,9 @@ Challenge them only if you can show a concrete attack or a concrete integration 
 
 - Refresh-token reuse always revokes the token family; two parallel refreshes with the same token end the session
   (no grace window – clients serialize, see `docs/guides/mobile-bearer.md`).
-- Rate limit and mail limit (3 per recipient and kind in 15 min, 5 for 2FA codes) are per instance; the account
-  lockout is in the database and global. No distributed limiter (gateway's job).
+- Rate limit is per instance; the mail limit (3 per recipient and kind in 15 min, 5 for 2FA codes) and single-use
+  codes live in `ISlimSharedState` (in memory per instance unless a shared one is registered); the account lockout is
+  in the database and global. No distributed limiter (gateway's job).
 - CSRF protection = custom header `X-CSRF` + `Origin` check, always on in cookie mode; `SameSite=Strict` by default.
 - No password composition rules (NIST SP 800-63B); length + optional `ISlimPasswordRule`.
 - TOTP uses HMAC-SHA1 (RFC 6238, authenticator compatibility).
@@ -105,7 +106,7 @@ Challenge them only if you can show a concrete attack or a concrete integration 
 - A registration `profile` is refused unless the host registers an `ISlimRegistrationProfile`; only the object the
   hook returns reaches the store.
 - `AddNullEmailSender()` refuses to start in the `Production` environment. Deployment diagnostics (log events
-  8001–8004) only log, they never change behaviour.
+  8001–8006) only log, they never change behaviour.
 
 ## Part 1 – Security
 

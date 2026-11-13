@@ -184,6 +184,16 @@ public sealed class TestUserStore : ISlimUserStore
     };
 }
 
+/// <summary>A host-registered shared state (in memory – shared between test instances by registering one object).</summary>
+public sealed class TestSharedState(TimeProvider time) : ISlimSharedState
+{
+    private readonly SlimIdentity.Services.SlimMemorySharedState _inner = new(time);
+
+    public Task<bool> TryAddAsync(string key, DateTimeOffset expiresAt, CancellationToken ct) => _inner.TryAddAsync(key, expiresAt, ct);
+
+    public Task<long> IncrementAsync(string key, TimeSpan window, CancellationToken ct) => _inner.IncrementAsync(key, window, ct);
+}
+
 public sealed class TestRefreshTokenStore(TimeProvider time) : ISlimRefreshTokenStore
 {
     private readonly ConcurrentDictionary<string, (string UserId, DateTimeOffset ExpiresAt)> _tokens = new();

@@ -29,12 +29,14 @@ public sealed class MultiInstanceTests
         public readonly LockstepLinks Links;
         public readonly CapturingEmailSender Mail = new();
         public readonly TestRefreshTokenStore RefreshTokens;
+        public readonly TestSharedState SharedState;
         private readonly DirectoryInfo _keys = Directory.CreateTempSubdirectory("slim-cluster-keys");
         public WebApplication A = null!, B = null!;
 
         private Cluster()
         {
             RefreshTokens = new TestRefreshTokenStore(Time);
+            SharedState = new TestSharedState(Time);
             Links = new LockstepLinks(new TestExternalLoginStore(Users));
         }
 
@@ -67,7 +69,8 @@ public sealed class MultiInstanceTests
                 .AddRefreshTokenStore<TestRefreshTokenStore>(ServiceLifetime.Singleton)
                 .AddSessionStore<TestSessionStore>(ServiceLifetime.Singleton)
                 .AddTwoFactorStore<TestTwoFactorStore>(ServiceLifetime.Singleton)
-                .AddExternalLoginStore<LockstepLinks>(ServiceLifetime.Singleton);
+                .AddExternalLoginStore<LockstepLinks>(ServiceLifetime.Singleton)
+                .AddSharedState<TestSharedState>(ServiceLifetime.Singleton);
             // one database: every node gets the same store instances
             builder.Services.Replace(ServiceDescriptor.Singleton<ISlimUserStore>(Users));
             builder.Services.Replace(ServiceDescriptor.Singleton<ISlimEmailSender>(Mail));
@@ -75,6 +78,7 @@ public sealed class MultiInstanceTests
             builder.Services.Replace(ServiceDescriptor.Singleton<ISlimSessionStore>(Sessions));
             builder.Services.Replace(ServiceDescriptor.Singleton<ISlimTwoFactorStore>(TwoFactor));
             builder.Services.Replace(ServiceDescriptor.Singleton<ISlimExternalLoginStore>(Links));
+            builder.Services.Replace(ServiceDescriptor.Singleton<ISlimSharedState>(SharedState));
 
             var app = builder.Build();
             app.UseRateLimiter();
@@ -255,6 +259,18 @@ public sealed class MultiInstanceTests
         // but the per-account lockout counts every failure on every instance: 5 failures → locked everywhere
         Assert.Equal(5, cluster.Users.Get(TestApp.UserEmail).FailedLoginAttempts);
         Assert.True(cluster.Users.Get(TestApp.UserEmail).IsLockedOut(cluster.Time.GetUtcNow()));
+    }
+
+    [Fact]
+    public async Task The_mail_limit_per_recipient_spans_instances()
+    {
+        await using var cluster = await Cluster.StartAsync();
+        foreach (var node in new[] { cluster.A, cluster.B, cluster.A, cluster.B, cluster.A, cluster.B })
+            await cluster.On(node).PostAsync("/auth/forgot-password", new { email = TestApp.UserEmail });
+
+        await Task.Delay(200);   // let queued mails go out
+        Assert.Equal(SlimIdentity.Services.SlimMailThrottle.PerKindAndRecipient,
+            cluster.Mail.Mails.Count(m => m.Kind == "password-reset" && m.To == TestApp.UserEmail));
     }
 
     [Fact]

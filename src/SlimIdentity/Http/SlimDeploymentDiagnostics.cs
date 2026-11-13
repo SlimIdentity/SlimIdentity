@@ -45,10 +45,17 @@ internal sealed class SlimDeploymentDiagnostics(ILogger<SlimDeploymentDiagnostic
             || string.Equals(Path.TrimEndingDirectorySeparator(discriminator), Path.TrimEndingDirectorySeparator(environment.ContentRootPath), StringComparison.OrdinalIgnoreCase))
             Log.DataProtectionNoApplicationName(logger);
 
-        // without a refresh-token store, exchange codes of the external login are single-use per instance only
-        var isService = services.GetService<IServiceProviderIsService>();
-        if (isService is not null && isService.IsService(typeof(ISlimExternalLoginStore)) && !isService.IsService(typeof(ISlimRefreshTokenStore)))
-            Log.ExchangeCodesPerInstance(logger);
+        // with the in-memory default, one-time codes and mail limits hold per instance only
+        try
+        {
+            using var scope = services.CreateScope();
+            if (scope.ServiceProvider.GetService<ISlimSharedState>() is Services.SlimMemorySharedState)
+                Log.SharedStatePerInstance(logger);
+        }
+        catch (InvalidOperationException)
+        {
+            // a host-registered state that cannot be built here is not the default
+        }
     }
 
     /// <summary>

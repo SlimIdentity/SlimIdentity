@@ -47,8 +47,8 @@ After the provider round trip SlimIdentity redirects to `returnUrl`:
 | Error | `returnUrl?slim_error=<code>` |
 
 Secrets travel only in the URL **fragment**, which browsers never send to servers, logs or referrers; only error codes
-use the query. The exchange code is valid for 1 minute, works exactly once (registered in `ISlimRefreshTokenStore`,
-or in memory when no refresh-token store is registered – then per instance only) and only together with the
+use the query. The exchange code is valid for 1 minute, works exactly once (`ISlimSharedState` – across instances with a shared one, see
+[several instances](multiple-instances.md)) and only together with the
 verifier – an intercepted code (deep link, history, another app) is worthless. The front-end client
 (`samples/templates/Frontend/slimIdentityClient.ts`) does all of this: `loginWith(provider)` and
 `completeExternalLogin()`.

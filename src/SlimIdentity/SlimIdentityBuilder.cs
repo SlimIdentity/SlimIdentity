@@ -119,7 +119,6 @@ public sealed class SlimIdentityBuilder
             names = new SlimBackChannelProviders();
             Services.AddSingleton(names);
             Services.TryAddSingleton<SlimBackChannelConfigurations>();
-            Services.TryAddSingleton<SlimLocalNonceRegistry>();
             Services.TryAddScoped<SlimBackChannelLogoutHandler>();
         }
         names.Names.Add(provider);
@@ -200,6 +199,13 @@ public sealed class SlimIdentityBuilder
 
     // ---------------------------------------------------------------- optional capabilities
 
+    /// <summary>
+    /// Shares single-use markers and mail counters between instances (see <see cref="ISlimSharedState"/>). Without it they
+    /// are kept in memory per instance – fine for one instance.
+    /// </summary>
+    public SlimIdentityBuilder AddSharedState<[DynamicallyAccessedMembers(Ctors)] TState>(ServiceLifetime lifetime = ServiceLifetime.Scoped)
+        where TState : class, ISlimSharedState => Register<ISlimSharedState, TState>(lifetime);
+
     /// <summary>Activates <c>/refresh</c> and refresh tokens in bearer responses.</summary>
     public SlimIdentityBuilder AddRefreshTokenStore<[DynamicallyAccessedMembers(Ctors)] TStore>(ServiceLifetime lifetime = ServiceLifetime.Scoped)
         where TStore : class, ISlimRefreshTokenStore => Register<ISlimRefreshTokenStore, TStore>(lifetime);
@@ -230,7 +236,6 @@ public sealed class SlimIdentityBuilder
     {
         Register<ISlimExternalLoginStore, TStore>(lifetime);
         Services.TryAddScoped<SlimExternalLoginHandlers>();
-        Services.TryAddSingleton<SlimLocalNonceRegistry>();
         Services.Configure<AuthenticationOptions>(o => o.DefaultSignInScheme ??= SlimIdentityDefaults.ExternalScheme);
         return this;
     }

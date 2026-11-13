@@ -128,22 +128,23 @@ public sealed class ReviewRound3Tests
         Assert.Equal("requires_two_factor", bearer.Str("status"));
     }
 
-    // ------------------------------------------------------------------ S-4: bounded nonce registry
+    // ------------------------------------------------------------------ S-4: bounded in-memory shared state
 
     [Fact(Timeout = 30_000)]
-    public async Task S4_the_nonce_registry_is_bounded_and_stays_fast()
+    public async Task S4_the_in_memory_shared_state_is_bounded_and_stays_fast()
     {
         await Task.Yield();
         var time = new FakeTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z", System.Globalization.CultureInfo.InvariantCulture));
-        var registry = new SlimLocalNonceRegistry(time);
+        var state = new SlimMemorySharedState(time);
         var expiry = time.GetUtcNow().AddMinutes(5);
 
-        for (var i = 0; i < SlimLocalNonceRegistry.MaxEntries; i++)
-            Assert.True(registry.TryConsume($"nonce-{i}", expiry));
-        Assert.False(registry.TryConsume("nonce-0", expiry));                 // single use
-        Assert.False(registry.TryConsume("one-too-many", expiry));            // full: refused (fail closed), no growth
+        for (var i = 0; i < SlimMemorySharedState.MaxEntries; i++)
+            Assert.True(state.TryAdd($"nonce-{i}", expiry));
+        Assert.False(state.TryAdd("nonce-0", expiry));                        // single use
+        Assert.False(state.TryAdd("one-too-many", expiry));                   // full: refused (fail closed), no growth
+        Assert.Equal(long.MaxValue, state.Increment("counter", TimeSpan.FromMinutes(5)));   // over every limit
 
         time.Advance(TimeSpan.FromMinutes(6));                                  // all expired
-        Assert.True(registry.TryConsume("after-expiry", time.GetUtcNow().AddMinutes(5)));
+        Assert.True(state.TryAdd("after-expiry", time.GetUtcNow().AddMinutes(5)));
     }
 }

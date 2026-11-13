@@ -56,8 +56,8 @@ answer does not (enumeration protection). Keep metrics internal.
 | 4xxx | Account | 4002 password reset, 4004/4005 e-mail change, 4003 invitation accepted, 4006 registration race lost |
 | 5xxx | External login | 5001 account conflict, 5002 linked, 5003 user created, 5010 back-channel logout, 5013 external login removed, 5011 logout token rejected, 5012 discovery document unavailable, 5015 provider round trip cancelled or failed |
 | 6xxx | Impersonation | 6001 started, 6002 ended, 6003 return denied |
-| 7xxx | Mail | 7001 queue full, 7002 send failed, 7004 unsent mails at shutdown, 7005 per-recipient limit reached, 7006 throttle table full (flood of fresh addresses – new recipients get no mail) |
-| 8xxx | Deployment | 8001 forwarded headers not applied, 8002 local key ring, 8003 no Data Protection application name, 8004 exchange codes per instance – see [several instances](multiple-instances.md) |
+| 7xxx | Mail | 7001 queue full, 7002 send failed, 7004 unsent mails at shutdown, 7005 per-recipient limit reached |
+| 8xxx | Deployment | 8001 forwarded headers not applied, 8002 local key ring, 8003 no Data Protection application name, 8004 shared state in memory (per instance), 8005 in-memory shared state full, 8006 shared state failed – see [several instances](multiple-instances.md) |
 | 9xxx | Passkeys | 9001 registered, 9002 removed, 9003 ceremony rejected (reason), 9004 counter regression (possibly cloned authenticator) |
 
 The logger categories are the SlimIdentity class names (`SlimIdentity.*`), so `"Logging:LogLevel:SlimIdentity"` controls all of them.

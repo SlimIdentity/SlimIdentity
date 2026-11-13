@@ -342,6 +342,15 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
   and `UpdateEmailAsync` must write nothing else, `UpdateEmailAsync` must accept a new spelling of the user's own
   address and let exactly one of parallel changes to one address win, and lookups must ignore case beyond ASCII.
   Every race check runs `SlimConformanceOptions.RaceRounds` times (default 5) after warming up the connections.
+- New `ISlimSharedState` (`AddSharedState<T>()`): single-use markers and windowed counters shared by all instances.
+  Exchange codes, link codes and back-channel logout tokens are single use and the mail limit per recipient holds
+  across instances once it is registered; without it they are kept in memory per instance (bounded, fails closed –
+  warning 8005). If the shared state fails, codes are rejected and mail limits are counted per instance (error 8006).
+  The EF Core package implements it on the new table `SlimSharedState` (**breaking**: a migration is needed;
+  `SlimEntityFrameworkOptions.SharedState` switches it off). The conformance kit checks implementations.
+- **Breaking**: exchange codes of the external login are no longer registered in `ISlimRefreshTokenStore`. Event 8004
+  is now information and reports the in-memory shared state in `Production`, independent of external login; warning
+  7006 is replaced by 8005.
 
 ### Fixed
 

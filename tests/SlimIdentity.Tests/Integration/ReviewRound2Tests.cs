@@ -234,33 +234,41 @@ public sealed class ReviewRound2Tests
 
     // ------------------------------------------------------------------ F-05: mail throttle at capacity
 
+    private static SlimMailThrottle Throttle(TimeProvider time)
+    {
+        var memory = new SlimMemorySharedState(time);
+        return new SlimMailThrottle(new SlimSharedStateAccess(memory, memory, Microsoft.Extensions.Logging.Abstractions.NullLogger<SlimSharedStateAccess>.Instance));
+    }
+
     [Fact]
-    public void F05_a_full_mail_throttle_does_not_let_a_victim_be_flooded()
+    public async Task F05_a_full_mail_throttle_does_not_let_a_victim_be_flooded()
     {
         var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(DateTimeOffset.UtcNow);
-        var throttle = new SlimMailThrottle(time);
+        var throttle = Throttle(time);
 
-        // a distributed attacker fills the table with 100,000 fresh recipients
-        for (var i = 0; i < 100_000; i++)
-            Assert.True(throttle.TryAcquire(SlimEmailKinds.Verification, $"bot-{i}@example.invalid"));
+        // a distributed attacker fills the table with fresh recipients
+        for (var i = 0; i < SlimMemorySharedState.MaxEntries; i++)
+            Assert.True(await throttle.TryAcquireAsync(SlimEmailKinds.Verification, $"bot-{i}@example.invalid", default));
 
-        var allowedForVictim = Enumerable.Range(0, 20).Count(_ => throttle.TryAcquire(SlimEmailKinds.PasswordReset, "victim@example.com"));
+        var allowedForVictim = 0;
+        for (var i = 0; i < 20; i++)
+            if (await throttle.TryAcquireAsync(SlimEmailKinds.PasswordReset, "victim@example.com", default)) allowedForVictim++;
 
         Assert.True(allowedForVictim <= SlimMailThrottle.PerKindAndRecipient,
             $"{allowedForVictim} mails to victim@example.com were allowed (fail open).");
     }
 
     [Fact]
-    public void F05_after_the_flood_new_recipients_get_mail_again()
+    public async Task F05_after_the_flood_new_recipients_get_mail_again()
     {
         var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(DateTimeOffset.UtcNow);
-        var throttle = new SlimMailThrottle(time);
-        for (var i = 0; i < 100_000; i++) throttle.TryAcquire(SlimEmailKinds.Verification, $"bot-{i}@example.invalid");
-        Assert.False(throttle.TryAcquire(SlimEmailKinds.Verification, "late@example.com"));   // full: refused, not unlimited
+        var throttle = Throttle(time);
+        for (var i = 0; i < SlimMemorySharedState.MaxEntries; i++) await throttle.TryAcquireAsync(SlimEmailKinds.Verification, $"bot-{i}@example.invalid", default);
+        Assert.False(await throttle.TryAcquireAsync(SlimEmailKinds.Verification, "late@example.com", default));   // full: refused, not unlimited
 
         time.Advance(SlimMailThrottle.Window + TimeSpan.FromMinutes(1));
 
-        Assert.True(throttle.TryAcquire(SlimEmailKinds.Verification, "late@example.com"));
+        Assert.True(await throttle.TryAcquireAsync(SlimEmailKinds.Verification, "late@example.com", default));
     }
 
     // ------------------------------------------------------------------ F-06: logout with a dead refresh token

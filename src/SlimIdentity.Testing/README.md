@@ -39,6 +39,7 @@ Works with xUnit, NUnit, MSTest or a console app – the package has no test-fra
 | `ISlimSessionStore` | round trip; touch; revoke one / all / all but current |
 | `ISlimExternalLoginStore` | lookup by provider and key; list per user; remove only the user's own link |
 | `ISlimPasskeyStore` | credential ids unique, **also in parallel**; `TryRecordUseAsync` single use per challenge and compare-and-set on the counter, **also in parallel**; list, rename and remove per user; `RemovePasskeysAsync` removes all of one user only; backup flags stored, `BackedUp` updated with each use |
+| `ISlimSharedState` | a marker is added once, **also in parallel**; an expired marker counts as absent; counters count 1, 2, 3 per key without losing an increment **in parallel** and restart at 1 after their window; keys of 128 characters |
 
 A failed run reads like this:
 

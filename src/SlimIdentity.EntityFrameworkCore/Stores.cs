@@ -620,3 +620,85 @@ public class SlimEfPasskeyStore<TContext, TKey>(SlimEfContext<TContext> context)
         BackupEligible = p.BackupEligible, BackedUp = p.BackedUp, UserHandle = p.UserHandle,
     };
 }
+
+/// <summary>
+/// <see cref="ISlimSharedState"/> on the table <c>SlimSharedState</c>: single-use markers through the primary key,
+/// counters through a compare-and-set update. Expired rows are taken over in place and deleted now and then.
+/// </summary>
+public class SlimEfSharedState<TContext>(SlimEfContext<TContext> context, TimeProvider time) : ISlimSharedState
+    where TContext : DbContext
+{
+    private const int MaxAttempts = 50;
+    private const int CleanupOneIn = 100;
+
+    private DbSet<SlimSharedStateEntity> Entries => context.Db.Set<SlimSharedStateEntity>();
+
+    /// <inheritdoc />
+    public async Task<bool> TryAddAsync(string key, DateTimeOffset expiresAt, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        var now = time.GetUtcNow().ToUnixTimeMilliseconds();
+        var expires = expiresAt.ToUnixTimeMilliseconds();
+        await CleanupSometimesAsync(now, ct).ConfigureAwait(false);
+
+        // an expired marker is taken over atomically – only one caller's update matches
+        if (await context.Writing(Entries).Where(e => e.Key == key && e.ExpiresAt <= now)
+                .ExecuteUpdateAsync(s => s.SetProperty(e => e.ExpiresAt, expires).SetProperty(e => e.Count, 0L), ct).ConfigureAwait(false) == 1)
+            return true;
+        return await TryInsertAsync(key, 0, expires, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<long> IncrementAsync(string key, TimeSpan window, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        for (var attempt = 0; attempt < MaxAttempts; attempt++)
+        {
+            var now = time.GetUtcNow().ToUnixTimeMilliseconds();
+            var end = now + (long)window.TotalMilliseconds;
+            var current = await Entries.AsNoTracking().Where(e => e.Key == key)
+                .Select(e => new { e.Count, e.ExpiresAt }).FirstOrDefaultAsync(ct).ConfigureAwait(false);
+            if (current is null)
+            {
+                if (await TryInsertAsync(key, 1, end, ct).ConfigureAwait(false)) return 1;
+                continue;
+            }
+
+            var (count, expires) = current.ExpiresAt > now ? (current.Count + 1, current.ExpiresAt) : (1L, end);
+            if (await context.Writing(Entries)
+                    .Where(e => e.Key == key && e.Count == current.Count && e.ExpiresAt == current.ExpiresAt)
+                    .ExecuteUpdateAsync(s => s.SetProperty(e => e.Count, count).SetProperty(e => e.ExpiresAt, expires), ct).ConfigureAwait(false) == 1)
+                return count;
+        }
+        throw new InvalidOperationException($"SlimIdentity: the counter could not be updated after {MaxAttempts} attempts (heavy contention).");
+    }
+
+    private async Task<bool> TryInsertAsync(string key, long count, long expiresAt, CancellationToken ct)
+    {
+        var db = context.Db;
+        var entity = new SlimSharedStateEntity { Key = key, Count = count, ExpiresAt = expiresAt };
+        context.BeforeWrite();
+        Entries.Add(entity);
+        try
+        {
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            return true;
+        }
+        catch (DbUpdateException)
+        {
+            // inserted concurrently (primary key) – anything else is rethrown
+            db.Entry(entity).State = EntityState.Detached;
+            if (await Entries.AsNoTracking().AnyAsync(e => e.Key == key, ct).ConfigureAwait(false)) return false;
+            throw;
+        }
+        finally
+        {
+            db.ChangeTracker.Clear();
+        }
+    }
+
+    private Task CleanupSometimesAsync(long now, CancellationToken ct) =>
+        Random.Shared.Next(CleanupOneIn) == 0
+            ? context.Writing(Entries).Where(e => e.ExpiresAt <= now).ExecuteDeleteAsync(ct)
+            : Task.CompletedTask;
+}

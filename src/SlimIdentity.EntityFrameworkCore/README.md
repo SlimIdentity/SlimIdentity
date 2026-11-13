@@ -50,7 +50,8 @@ builder.Services.AddSlimIdentity(builder.Configuration.GetSection("SlimIdentity"
 ```
 
 Then create a migration (`dotnet ef migrations add SlimIdentity`). Besides the columns on your user table it adds
-`SlimRefreshTokens`, `SlimSessions`, `SlimRecoveryCodes`, `SlimExternalLogins` and `SlimPasskeys` (passkeys are
+`SlimRefreshTokens`, `SlimSessions`, `SlimRecoveryCodes`, `SlimExternalLogins`, `SlimSharedState` (single-use codes
+and mail limits of all instances, cleaned up by the store itself) and `SlimPasskeys` (passkeys are
 opt-in: `AddEntityFrameworkStores<…>(o => o.Passkeys = true)` with `Links.BaseUrl` or
 `.AddPasskeys(o => o.RelyingPartyId = …)` from the referenced `SlimIdentity.Passkeys` package).
 
