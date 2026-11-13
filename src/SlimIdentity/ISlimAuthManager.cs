@@ -116,7 +116,7 @@ public interface ISlimAuthManager
     /// <c>administrator</c>). Without <paramref name="initialPassword"/> the account has no sign-in method yet: hand
     /// out <see cref="CreateInvitationAsync"/> or <see cref="CreatePasswordResetAsync"/>, or let the user sign in with
     /// an external provider. With it, the password is a start password: checked against the password rules before
-    /// anything is written, and the first sign-in answers <c>password_change_required</c>.
+    /// anything is written, and the first sign-in requires the step <c>change_password</c>.
     /// <paramref name="profile"/> reaches <see cref="ISlimUserStore.CreateAsync"/> as <see cref="SlimNewUser.Profile"/>.
     /// Fails with <c>400</c> (address, password rules) or <c>409 email_taken</c> – which tells whether the address has an
     /// account: never return it from a public endpoint.
@@ -137,8 +137,8 @@ public interface ISlimAuthManager
 
     /// <summary>
     /// Administrator: sets the password of <paramref name="user"/> – e.g. a start password for an account you created,
-    /// on hosts without mail. With <paramref name="mustChange"/> (default) the next sign-in answers
-    /// <c>password_change_required</c> and issues no session until the user has chosen an own password. All sessions
+    /// on hosts without mail. With <paramref name="mustChange"/> (default) the next sign-in requires
+    /// the step <c>change_password</c> and issues no session until the user has chosen an own password. All sessions
     /// and pending links of the user end; a lockout is cleared. Returns <c>null</c>, or <c>400</c> with the violated
     /// password rules. Prefer <see cref="CreatePasswordResetAsync"/> where you can: then you never know the password.
     /// </summary>

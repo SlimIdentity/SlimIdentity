@@ -1,14 +1,15 @@
 # Invitations
 
-For invite-only applications (typical B2B) or accounts created by an admin or an import: the user receives a link and
-sets the password themselves.
+For invite-only applications or accounts created by an administrator or an import: the user receives a link and sets
+the first credential. The flow itself (`POST /auth/flow` → `set_credential`) is described in the
+[endpoint reference](../endpoints.md#invitations).
 
 ```csharp
 builder.Services.AddSlimIdentity(o =>
 {
-    o.Endpoints.EnableRegistration = false;                                    // no self-registration
-    o.Links.BaseUrl = "https://app.example.com";   // link: /accept-invitation?token=… (or set Links.InvitationUrl)
-    o.Tokens.InvitationTokenLifetime = TimeSpan.FromDays(14);
+    o.Endpoints.EnableRegistration = false;                     // no self-registration
+    o.Links.BaseUrl = "https://app.example.com";                // link: /accept-invitation?token=… (or Links.InvitationUrl)
+    o.Tokens.InvitationTokenLifetime = TimeSpan.FromDays(14);   // default 7 days, at most 30
 });
 ```
 
@@ -18,10 +19,9 @@ builder.Services.AddSlimIdentity(o =>
 app.MapPost("/api/admin/invitations", async (InviteRequest req, ISlimAuthManager auth, IMyMailer mailer,
         CancellationToken ct) =>
     {
-        // no password yet; business data (tenant, roles, display name) goes in as profile – written with the account
-        var created = await auth.CreateUserAsync(req.Email, profile: req, ct: ct);
-        if (!created.Succeeded) return created.Failure;   // 400 invalid address, 409 address taken
-        var invitation = await auth.CreateInvitationAsync(created.User, ct: ct);
+        var created = await auth.CreateUserAsync(req.Email, profile: req, ct: ct);   // no password; profile = your data
+        if (!created.Succeeded) return created.Failure;                             // 400 invalid address, 409 taken
+        var invitation = await auth.CreateInvitationAsync(created.User!, ct: ct);
         await mailer.SendInvitationAsync(req.Email, invitation.Link, invitation.ExpiresAt, ct);
         return Results.Ok();
     })
@@ -29,24 +29,12 @@ app.MapPost("/api/admin/invitations", async (InviteRequest req, ISlimAuthManager
     .RequireSlimCsrf();
 ```
 
-The invitation mail is yours (sender, wording, inviter's name, branding) – it is not part of `ISlimEmailSender`.
+The invitation mail is yours (sender, wording, branding); it is not sent through `ISlimEmailSender`.
 
 ## Accepting (front end)
 
-1. The page behind the link (`/accept-invitation`) calls `POST /auth/flow?useCookies=true { token }` →
-   `action_required` `["set_credential"]` with `details.setCredential.email` to show the address (or
-   `401 invalid_token` → "link expired or already used"). Accounts with 2FA (enabled by the host beforehand) pass
-   `second_factor` first; a mailed code is accepted.
-2. The user chooses a password: `POST /auth/register/password { flowToken, password }` sets it (password policy
-   applies), confirms the e-mail and signs the user in. With the passkey package, `/auth/register/passkey` sets a
-   passkey instead.
-
-## Properties
-
-- **Stateless:** the token is a Data Protection payload bound to the user's security stamp – no table, survives
-  restarts and deployments (as long as the key ring is persisted).
-- **Single use:** accepting rotates the stamp; a user who already has a password or whose address changed cannot use
-  the link.
-- Any stamp rotation (e.g. an admin signs the user out everywhere) invalidates outstanding invitations – create a new one.
-- With `ISlimCustomPasswordValidator` (LDAP) and no passkeys there is no local credential to set; `/flow` answers
-  `400 password_managed_externally`.
+The page behind the link posts the `token` to `POST /auth/flow?useCookies=true` and continues with `set_credential`
+(`details.setCredential.email` names the account) as in the [endpoint reference](../endpoints.md#invitations);
+`401 invalid_token` means "link expired or already used". The token is a Data Protection payload bound to the
+security stamp – no table. Accepting rotates the stamp; any other rotation (e.g. sign out everywhere) also
+invalidates outstanding invitations.

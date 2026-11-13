@@ -1,7 +1,9 @@
 # Admin features
 
-All of these are built with `ISlimAuthManager` in your own endpoints, protected by your own policies.
-A complete example is [`samples/templates/Enterprise/AdminEndpoints.cs`](../../samples/templates/Enterprise/AdminEndpoints.cs).
+All of these are built with `ISlimAuthManager` in your own endpoints, behind your own policies (complete example:
+[`AdminEndpoints.cs`](../../samples/templates/Enterprise/AdminEndpoints.cs)). The account tools – `CreateUserAsync`,
+`CreatePasswordResetAsync`, `SetPasswordAsync`, `ResetTwoFactorAsync`, `UnlockAsync` – are listed in
+[running without e-mail](without-email.md#the-administrators-tools).
 
 ## Impersonation
 
@@ -22,26 +24,21 @@ app.MapPost("/api/impersonation/stop", async (ISlimAuthManager auth, Cancellatio
 
 - The session belongs to the target user; the admin is kept in the RFC 8693 `act` claim (`User.GetImpersonatorId()`,
   `/auth/me` → `isImpersonating`). Log it for your audit trail.
-- The `act` claim contains the admin's security stamp: banning the admin or signing them out everywhere ends the
-  impersonation immediately. With `ISlimSessionStore` it also names the admin's session the impersonation was started
-  from: revoking that session (`DELETE /auth/sessions/{id}`, e.g. a stolen device) ends the impersonation as well.
-  `EndImpersonationAsync` checks both again and resumes that session – its `auth_time` and absolute lifetime, not a
-  fresh session chain. Without a session store the impersonation is bound to the stamp only.
-- Never persistent, no refresh token. Password change, 2FA changes, `/logout-all` and session management are blocked
-  during impersonation.
-- Consider requiring sudo mode (below) before impersonating.
+- `act` carries the admin's security stamp and – with `ISlimSessionStore` – the admin's session: banning the admin,
+  signing them out everywhere or revoking that session ends the impersonation. `EndImpersonationAsync` checks both
+  again and resumes that session (its `auth_time` and absolute lifetime).
+- Never persistent, no refresh token. Password change, 2FA changes, `/logout-all` and session management are blocked.
+- Errors: `impersonator_invalid`, `already_impersonating`, `cannot_impersonate_self`. Consider sudo mode first.
 
 ## Step-up ("sudo") mode
-
-Re-confirm the password before dangerous actions:
 
 ```csharp
 app.MapPost("/api/sudo", async (SudoRequest req, ClaimsPrincipal me, ISlimUserStore store, ISlimAuthManager auth, CancellationToken ct) =>
     {
         var user = await store.FindByIdAsync(me.GetSlimUserId()!, ct);
         if (user is null) return Results.Unauthorized();
-        if (await auth.ConfirmPasswordAsync(user, req.Password, ct) is { } failure) return failure;   // 400 / 423
-        var result = await auth.ElevateToSudoAsync(user, TimeSpan.FromMinutes(10), ct);   // same mode as the session
+        if (await auth.ConfirmPasswordAsync(user, req.Password, ct) is { } failure) return failure;   // 400 / 423 / 403
+        var result = await auth.ElevateToSudoAsync(user, TimeSpan.FromMinutes(10), ct);           // ≤ 1 hour
         return result.Succeeded ? Results.Ok(result.ToResponse()) : Results.Json(new { status = result.Error }, statusCode: 403);
     })
     .RequireAuthorization().RequireSlimCsrf().RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy);
@@ -49,33 +46,16 @@ app.MapPost("/api/sudo", async (SudoRequest req, ClaimsPrincipal me, ISlimUserSt
 app.MapDelete("/api/account", DeleteAccount).RequireAuthorization(SlimIdentityDefaults.SudoPolicy);
 ```
 
-`ConfirmPasswordAsync` applies the rules of the built-in endpoints: an active lockout is honoured, wrong passwords
-count towards it (with the lockout notification), parallel guesses beyond the threshold are not evaluated and an
-`ISlimCustomPasswordValidator` (LDAP, legacy hashes) is used. Never verify the password with `IPasswordHasher`
-yourself – a stolen session could then guess it without limit. `ElevateSessionAsync` only accepts the signed-in user
-of the request.
+`ConfirmPasswordAsync` applies the rules of the built-in endpoints: lockout, counting failures, serialized parallel
+attempts, `ISlimCustomPasswordValidator`; accounts without a password need a sign-in within 5 minutes. Never verify
+the password with `IPasswordHasher` yourself – a stolen session could guess without limit. `ElevateToSudoAsync` and
+`ElevateSessionAsync` (additional temporary claims) accept only the signed-in user of the request.
 
-## Passwords, reset links, 2FA reset, unlock
+## Roles, bans
 
-`ISlimAuthManager` has the administrator's tools for accounts whose owners cannot help themselves – essential on hosts
-without mail: `CreatePasswordResetAsync` (a link the user sets the password with), `SetPasswordAsync` (a start
-password, by default with a forced change at the next sign-in), `ResetTwoFactorAsync` and `UnlockAsync`. See
-[running without e-mail](without-email.md); endpoints for all of them are in the admin template.
-
-## Changing roles and permissions
-
-After changing a user's roles, groups or permissions in your data, call `await auth.RefreshClaimsAsync(user, ct)`:
-running sessions pick up the new claims at their next validation, without a sign-out –
-[roles and permissions](roles-and-permissions.md).
-
-## Banning a user
-
-```csharp
-await auth.SignOutEverywhereAsync(user, ct);   // ends all sessions and tokens immediately
-// then set IsActive = false in your store
-```
-
-Inactive users cannot sign in (they get the same answer as for a wrong password by default).
+After changing roles or permissions call `RefreshClaimsAsync(user)` ([roles and permissions](roles-and-permissions.md)).
+To ban: `SignOutEverywhereAsync(user)`, then set `IsActive = false` in your store; inactive users get the
+wrong-password answer by default.
 
 ## API keys (machine-to-machine)
 
@@ -85,14 +65,9 @@ Inactive users cannot sign in (they get the same answer as for a wrong password 
 var (key, hash) = SlimApiKeys.Generate("sk");   // show `key` once, store only `hash`
 ```
 
-Clients send `X-API-Key: sk_…`; `ISlimApiKeyStore.ValidateApiKeyAsync(hash)` returns the claims of the client (or
-null).
+Clients send `X-API-Key: sk_…`; `ISlimApiKeyStore.ValidateApiKeyAsync(hash)` returns the client's claims (or null).
 
-**A few fixed clients, no database:** configure the hashes and let SlimIdentity read them.
-
-```bash
-dotnet run tools/new-api-key.cs -- reports   # prints the key (for the client) and its hash (for you)
-```
+**A few fixed clients, no database:** `dotnet run tools/new-api-key.cs -- reports` prints a key and its hash.
 
 ```json
 "SlimIdentity": {
@@ -106,11 +81,11 @@ dotnet run tools/new-api-key.cs -- reports   # prints the key (for the client) a
 .AddConfigurationApiKeys(builder.Configuration.GetSection("SlimIdentity:ApiKeys"))
 ```
 
-The principal's `sub` is `client:{ClientId}`, scopes become `scope` claims, roles `role` claims. Entries are validated
-at startup (a key pasted instead of its hash stops the start) and followed on reload – remove or change an entry to
-revoke a key. Keep the hashes out of source control like any other credential material.
+`sub` is `client:{ClientId}`, scopes become `scope` claims, roles `role` claims. Entries are validated at startup (a
+key pasted instead of its hash stops the start) and followed on reload – change or remove an entry to revoke. Keep the
+hashes out of source control.
 
-**Machine-to-machine only:** an API that has no users at all needs neither a user store nor a mail sender – call
-`AddSlimIdentity()` with `AddConfigurationApiKeys(…)` (or `AddApiKeyStore<T>()`), leave out `MapSlimIdentityApi()`, and
-protect the endpoints with the API-key scheme as shown below. Protect M2M endpoints with `.RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = SlimIdentityDefaults.ApiKeyScheme })`
-or rely on the default policy scheme, which forwards requests with an `X-API-Key` header to the API-key handler.
+An API without users needs neither user store nor mail sender: `AddSlimIdentity()` with `AddConfigurationApiKeys(…)`
+or `AddApiKeyStore<T>()`, no `MapSlimIdentityApi()`. Protect endpoints with
+`.RequireAuthorization(new AuthorizeAttribute { AuthenticationSchemes = SlimIdentityDefaults.ApiKeyScheme })`, or rely
+on the default policy scheme, which forwards requests with `X-API-Key` to the API-key handler.

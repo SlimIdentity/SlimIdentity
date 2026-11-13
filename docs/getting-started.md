@@ -1,156 +1,82 @@
-# Getting started
+# Getting started (own store, bearer tokens)
 
-This is the **custom-store and bearer/JWT path**: it walks through the `ISlimUserStore` contract, registration and
-token login for a SPA or mobile app. For the quickest EF Core setup with browser cookies, use
-[Minimal setup](minimal-setup.md) instead. The two pages are alternatives for different starting points.
-How the pieces fit together – and why some store methods must be atomic – is described in
-[How SlimIdentity works](how-it-works.md).
+The path for hosts without EF Core and for SPA or mobile clients with JWTs. For an EF Core app with cookies see
+[Minimal setup](minimal-setup.md); the rules every store must follow are in
+[How SlimIdentity works](how-it-works.md#your-part-the-stores).
 
-## 1. Install
+## 1. Install and implement the user store
 
 ```bash
 dotnet add package SlimIdentity --prerelease
 ```
 
-## 2. Implement the user store
-
-> **Using EF Core?** Skip this step: the `SlimIdentity.EntityFrameworkCore` package implements every store on your own
-> `DbContext` and user entity – see the [minimal setup](minimal-setup.md). This section explains the contract for
-> everything else.
-
-SlimIdentity's core never touches a database. You implement `ISlimUserStore` against whatever you use
-(Dapper, another ORM, a REST service, …). Complete Dapper and EF Core versions are in
-[`samples/`](https://github.com/SlimIdentity/SlimIdentity/tree/main/samples); the contract is small:
+The core never touches a database. Implement `ISlimUserStore` against what you use (Dapper, another ORM, a REST
+service) – start from the [Dapper or EF Core templates](../samples/templates), not from scratch:
 
 ```csharp
 public interface ISlimUserStore
 {
-    Task<SlimUser?> FindByEmailAsync(string email, CancellationToken ct);              // case-insensitive!
+    Task<SlimUser?> FindByEmailAsync(string email, CancellationToken ct);              // case-insensitive
     Task<SlimUser?> FindByIdAsync(string userId, CancellationToken ct);
     Task<SlimUser?> CreateAsync(SlimNewUser newUser, CancellationToken ct);            // null if the address is taken
-    Task<bool> UpdateSecurityStateAsync(SlimUser user, string expectedStamp, CancellationToken ct); // security fields, only while the stamp is unchanged
-    Task<bool> UpdateSecurityStampAsync(SlimUser user, string expectedStamp, string newStamp, CancellationToken ct); // only if unchanged
-    Task<SlimEmailUpdateResult> UpdateEmailAsync(SlimUser user, string newEmail, string expectedStamp, string newStamp, CancellationToken ct); // address + confirmation + stamp in one step
+    Task<bool> UpdateSecurityStateAsync(SlimUser user, string expectedStamp, CancellationToken ct); // only while the stamp is unchanged
+    Task<bool> UpdateSecurityStampAsync(SlimUser user, string expectedStamp, string newStamp, CancellationToken ct);
+    Task<SlimEmailUpdateResult> UpdateEmailAsync(SlimUser user, string newEmail, string expectedStamp, string newStamp, CancellationToken ct);
     Task<IReadOnlyCollection<Claim>> GetClaimsAsync(SlimUser user, CancellationToken ct); // roles, tenant id, …
 
     // sign-in bookkeeping – narrow, atomic operations on their own columns
-    Task<SlimAttemptReservation?> TryBeginAttemptAsync(SlimUser user, SlimAttemptRequest attempt, CancellationToken ct); // count before the check
+    Task<SlimAttemptReservation?> TryBeginAttemptAsync(SlimUser user, SlimAttemptRequest attempt, CancellationToken ct);
     Task ResetFailedAttemptsAsync(SlimUser user, SlimAttemptFactor factor, CancellationToken ct);
     Task UpdatePasswordHashAsync(SlimUser user, string currentHash, string newHash, CancellationToken ct); // only if unchanged
 }
 ```
 
-The narrow methods exist because sign-in requests are slow (password hashing) and run in parallel: they must never
-write back a whole, possibly outdated `SlimUser` – that could undo a password change that happened in the meantime.
-Copy the store from the samples rather than writing it from scratch – the rules that matter for security are listed in
-[How SlimIdentity works](how-it-works.md#your-part-the-stores).
+`SlimUser` carries only the [security fields](architecture-manifest.md#3-core-data-model-slimuser); your own user
+entity is mapped in the store.
 
-`SlimUser` is a plain transfer object with the security fields only (`Id`, `Email`, `PasswordHash`, `SecurityStamp`,
-`IsActive`, `EmailConfirmed`, `FailedLoginAttempts`, `LockoutEndUtc`, `FailedSecondFactorAttempts`, `SecondFactorLockoutEndUtc`,
-`TwoFactorEnabled`, `PasswordChangeRequired`). Your own user entity stays
-yours – map it in the store.
-
-## 3. Implement (or stub) the e-mail sender
-
-Start with the null sender – it writes links and codes to the log, so the first requests work without a mail server:
+## 2. Register and map
 
 ```csharp
-builder.Services.AddSlimIdentity(...)
-    .AddNullEmailSender();                // development: writes links and codes to the log
-    // .AddEmailSender<MyEmailSender>();  // production: MailKit, SendGrid, … (see samples/templates/Email)
-```
-
-## 4. Register and map
-
-```csharp
-var builder = WebApplication.CreateBuilder(args);
-
 builder.Services.AddSlimIdentity(builder.Configuration.GetSection("SlimIdentity"))
     .AddUserStore<MyUserStore>()
-    .AddNullEmailSender();                          // later: .AddEmailSender<MyEmailSender>()
-    // .AddRefreshTokenStore<MyRefreshTokenStore>() // later, optional: enables /auth/refresh
+    .AddNullEmailSender();                          // development: links and codes go to the log
+    // .AddEmailSender<MyEmailSender>()             // production (samples/templates/Email)
+    // .AddRefreshTokenStore<MyRefreshTokenStore>() // optional: enables /auth/refresh
 
 var app = builder.Build();
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
-
 app.MapSlimIdentityApi();
 app.MapGet("/api/hello", (ClaimsPrincipal user) => $"Hello {user.GetSlimEmail()}").RequireAuthorization();
-
 app.Run();
 ```
 
 ```json
 {
   "SlimIdentity": {
-    "Tokens": {
-      "JwtSecret": "<replace: openssl rand -base64 48 – keep it in user secrets / a key vault, never commit it>",
-      "Issuer": "MyApp",
-      "Audience": "MyAppClients"
-    },
-    "Links": {
-      "BaseUrl": "https://app.example.com"
-    }
+    "Tokens": { "JwtSecret": "<openssl rand -base64 48 – from user secrets / a key vault>", "Issuer": "MyApp", "Audience": "MyAppClients" },
+    "Links": { "BaseUrl": "https://app.example.com" }
   }
 }
 ```
 
-That is the whole configuration for most apps: the `JwtSecret` enables bearer tokens (leave it out for a cookie-only
-app), `Links.BaseUrl` makes mail links point to `/verify-email`, `/reset-password`, … of your front end. Everything else
-has secure defaults ([configuration reference](configuration.md)). The options are validated at startup – a too short
-`JwtSecret` – or the placeholder above left in place – stops the application with a clear message instead of failing later.
+`JwtSecret` enables bearer tokens (omit it for cookie-only apps); `Links.BaseUrl` points mail links to your front end
+(`/verify-email`, `/reset-password`, …). Options are validated at startup – a short or placeholder secret stops the
+application. All other options: [configuration](configuration.md).
 
-## 5. Try it
+## 3. Try it
 
-```http
-POST /auth/register
-Content-Type: application/json
+`POST /auth/register { "email" }` answers `action_required` (`verify_email`, `set_credential`) with a `flowToken`; the
+null sender logs a 6-digit code and a link. Send `{ "flowToken", "code" }` to `/auth/register/verify` (or the link's
+`token` to `/auth/flow`), then `{ "flowToken", "password" }` to `/auth/register/password`
+([registration](endpoints.md#registration)). Later: `POST /auth/login { "email", "password" }`.
 
-{ "email": "me@example.com" }
-```
+The sign-in answer contains `accessToken` (and `refreshToken` with a refresh-token store). Send
+`Authorization: Bearer <accessToken>`; renew at `POST /auth/refresh`. Browser SPAs on the same site are better served
+by cookies: [SPA with cookies](guides/spa-cookies.md).
 
-The answer is `action_required` with the steps `verify_email` and `set_credential` and a `flowToken`. The null sender
-logs a 6-digit code and a link to `Links.BaseUrl` + `/verify-email` (a page of your front end that does not exist yet).
-Send the code, then the password – the account is created with its address confirmed, and you are signed in:
+Cookies are always `Secure` (browsers send them over HTTPS and to `http://localhost`). Bearer tokens also work over
+plain HTTP but then travel in clear text – only on trusted networks.
 
-```http
-POST /auth/register/verify
-Content-Type: application/json
-
-{ "flowToken": "…", "code": "123456" }
-
-POST /auth/register/password
-Content-Type: application/json
-
-{ "flowToken": "…", "password": "Secret123!" }
-```
-
-The link does the same as the code: its `token` goes to `POST /auth/flow` ([registration](endpoints.md#registration)).
-
-```http
-POST /auth/login
-Content-Type: application/json
-
-{ "email": "me@example.com", "password": "Secret123!" }
-```
-
-The answer contains `accessToken` and `refreshToken` (the latter once a refresh-token store is registered). Send `Authorization: Bearer <accessToken>` to protected
-endpoints; when it expires, exchange the refresh token at `POST /auth/refresh`.
-
-For a browser SPA on the same site, cookies are usually the better choice: `POST /auth/login?useCookies=true` with
-the header `X-CSRF: 1` – see [SPA with cookies](guides/spa-cookies.md).
-
-**HTTPS:** browsers only send the (always `Secure`) cookie over HTTPS – and to `http://localhost` during development.
-Bearer tokens and API keys also work over plain HTTP, e.g. for service-to-service calls on the same host or in a
-private network; they travel in clear text there, so do not use HTTP across untrusted networks.
-
-## Next steps
-
-- **Persist the Data Protection key ring** before going to production ([guide](guides/data-protection.md)) – cookies,
-  links, refresh tokens and TOTP secrets are encrypted with it.
-- Choose the capabilities you need: [sessions](guides/sessions-and-logout.md), [2FA](guides/two-factor.md),
-  [external login](guides/external-login.md), [invitations](guides/invitations.md),
-  [breached-password check](configuration.md#passwords).
-- Add [metrics](guides/observability.md) to your monitoring.
-- Read the [security model](security.md).
+Before production: see the checklist in [Minimal setup](minimal-setup.md#before-production).

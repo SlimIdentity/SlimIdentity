@@ -4,18 +4,16 @@
 
 - [Minimal setup](minimal-setup.md) – quickest route for an EF Core app with browser cookies
 - [Getting started](getting-started.md) – implement your own store and set up a bearer/JWT client
-- [Agent integration](agent-integration.md) – compact, task-oriented instructions for coding agents working in a host application
+- [Agent integration](agent-integration.md) – compact instructions for coding agents
 - [How SlimIdentity works](how-it-works.md) – responsibilities, store contracts and conformance checks
 
 **References**
 
 - [Configuration reference](configuration.md) – every option with its default
 - [Endpoint reference](endpoints.md) – routes, request/response bodies, status codes
-- [Security model](security.md) – threat model, assumptions and host responsibilities; a detailed reference
+- [Security model](security.md) – threat model, assumptions and host responsibilities
 
 **Guides**
-
-The guides below are task-specific recipes; read the ones that match the capabilities and deployment you use.
 
 - [SPA with cookies](guides/spa-cookies.md) – same-site and cross-subdomain setups, CSRF
 - [Mobile apps and bearer tokens](guides/mobile-bearer.md) – access/refresh tokens, rotation
@@ -23,11 +21,11 @@ The guides below are task-specific recipes; read the ones that match the capabil
 - [Two-factor authentication](guides/two-factor.md) – TOTP with QR code, e-mail codes, recovery codes, replay protection
 - [Passkeys](guides/passkeys.md) – WebAuthn sign-in without password, setup, flows, what is checked
 - [External login (OAuth / OIDC)](guides/external-login.md) – Google, Entra ID, Keycloak, account linking
-- [Google and Microsoft Entra ID](guides/google-and-entra-id.md) – step by step, from the provider console to the front end
+- [Google and Microsoft Entra ID](guides/google-and-entra-id.md) – step by step, provider console to front end
 - [Invitations](guides/invitations.md) – invite-only registration, "complete your registration"
 - [Admin features](guides/admin-features.md) – impersonation, sudo mode, bans, API keys
-- [Running without e-mail](guides/without-email.md) – internal services: accounts, start passwords and resets by an administrator
-- [Registration with business data](guides/registration-profile.md) – validated profile, created with the account, own sign-up endpoints
+- [Running without e-mail](guides/without-email.md) – internal services; administrators issue start passwords and resets
+- [Registration with business data](guides/registration-profile.md) – validated profile, own sign-up endpoints
 - [The first administrator](guides/seeding.md) – seeding by code: start password or reset link, roles, database seeds
 - [Hooks: guards and events](guides/hooks.md) – tenant and IP vetoes, registration rules, audit trail
 - [Roles and permissions](guides/roles-and-permissions.md) – groups to claims to policies, keeping claims current

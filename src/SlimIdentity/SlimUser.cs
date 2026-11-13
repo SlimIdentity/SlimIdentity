@@ -49,7 +49,7 @@ public sealed class SlimUser
 
     /// <summary>
     /// The password was set by an administrator and must be changed at the next sign-in, before any session exists
-    /// (<c>password_change_required</c>). Cleared by every new password.
+    /// (step <c>change_password</c>). Cleared by every new password.
     /// </summary>
     public bool PasswordChangeRequired { get; set; }
 

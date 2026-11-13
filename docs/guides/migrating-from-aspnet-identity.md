@@ -1,59 +1,41 @@
 # Migrating from ASP.NET Core Identity
 
-SlimIdentity uses the same `PasswordHasher<T>` format as ASP.NET Core Identity, so existing password hashes keep
-working – users do not have to reset their passwords. The migration is mostly a matter of mapping columns in your
-`ISlimUserStore`.
+SlimIdentity uses the same `PasswordHasher<T>` format, so existing hashes keep working. The migration is mostly
+column mapping in your `ISlimUserStore` – against the existing tables (EF Core: map an entity to the same table) or a
+new schema.
 
-## Column mapping (`AspNetUsers` → `SlimUser`)
-
-| ASP.NET Core Identity | SlimUser | Notes |
+| ASP.NET Core Identity | SlimIdentity | Notes |
 | :--- | :--- | :--- |
 | `Id` | `Id` | string |
 | `Email` / `NormalizedEmail` | `Email` | look up by `NormalizedEmail` (upper-case) |
-| `PasswordHash` | `PasswordHash` | identical format (Identity V3 / PBKDF2); `null` → empty string |
-| `SecurityStamp` | `SecurityStamp` | keep it; rotating it signs users out |
-| `EmailConfirmed` | `EmailConfirmed` | see [Unconfirmed addresses](#unconfirmed-addresses) |
-| `AccessFailedCount` | `FailedLoginAttempts` | |
-| `LockoutEnd` | `LockoutEndUtc` | ignore it if `LockoutEnabled` is false for a user |
-| – | `FailedSecondFactorAttempts`, `SecondFactorLockoutEndUtc` | new columns, start with `0` / `null` (ASP.NET Core Identity counts 2FA failures on `AccessFailedCount`) |
+| `PasswordHash` | `PasswordHash` | same format; `null` → empty string |
+| `SecurityStamp` | `SecurityStamp` | keep it; rotating signs users out |
+| `EmailConfirmed` | `EmailConfirmed` | see [unconfirmed addresses](#unconfirmed-addresses) |
+| `AccessFailedCount` / `LockoutEnd` | `FailedLoginAttempts` / `LockoutEndUtc` | ignore `LockoutEnd` where `LockoutEnabled` is false |
+| – | `FailedSecondFactorAttempts`, `SecondFactorLockoutEndUtc` | new, start with `0` / `null` |
 | `TwoFactorEnabled` | `TwoFactorEnabled` | |
-| – | `PasswordChangeRequired` | new; `false` for migrated users |
-| – | `IsActive` | new; map from your own flag (e.g. not deleted) or always `true` |
-| `AspNetUserRoles` + `AspNetRoles` | `GetClaimsAsync` | return `ClaimTypes.Role` claims |
-| `AspNetUserClaims` | `GetClaimsAsync` | return them as additional claims |
-| `AspNetUserLogins` | `ISlimExternalLoginStore` | `LoginProvider` / `ProviderKey`; provider names must match your scheme names |
-| `AspNetUserTokens` (`AuthenticatorKey`) | `ISlimTwoFactorStore.GetTotpSecretAsync` | Identity stores the Base32 key in clear text; encrypt it once during migration: `provider.CreateProtector(SlimIdentityDefaults.TotpSecretProtectionPurpose).Protect(key)` |
-| `AspNetUserTokens` (`RecoveryCodes`) | – | Identity stores them in clear text and with less entropy; users should regenerate codes (`POST /auth/2fa/recovery-codes`) |
-| – | `ISlimTwoFactorStore.TryMarkCodeUsedAsync` | new column for replay protection (nullable `bigint`) |
-| – | `ISlimTwoFactorStore.TryMarkChallengeUsedAsync` | new column for single-use sign-in challenges (nullable `bigint`) |
-
-You can keep the existing tables and implement the stores directly against them (EF Core: map your existing
-`IdentityUser` entity or a plain class to the same table), or migrate into your own schema.
+| – | `PasswordChangeRequired`, `IsActive` | new; `false` / `true` (or your own flag) |
+| `AspNetUserRoles`, `AspNetUserClaims` | `GetClaimsAsync` | roles as `ClaimTypes.Role` |
+| `AspNetUserLogins` | `ISlimExternalLoginStore` | provider names must match your scheme names |
+| `AspNetUserTokens` (`AuthenticatorKey`) | `ISlimTwoFactorStore.GetTotpSecretAsync` | clear-text Base32; encrypt once with `CreateProtector(SlimIdentityDefaults.TotpSecretProtectionPurpose).Protect(key)` |
+| `AspNetUserTokens` (`RecoveryCodes`) | – | clear text, low entropy: users regenerate (`POST /auth/2fa/recovery-codes`) |
+| – | `TryMarkCodeUsedAsync`, `TryMarkChallengeUsedAsync` | two new nullable `bigint` columns |
 
 ## Unconfirmed addresses
 
-ASP.NET Core Identity lets accounts sign in with an unconfirmed address unless `RequireConfirmedEmail` is set; with
-mail on, SlimIdentity treats such an account as not yet proven to belong to the owner of the address:
+With mail, an account with an unconfirmed address is not yet proven to belong to the mailbox owner:
 
-- every sign-in continues with the `verify_email` step (a code to the address) until the address is confirmed –
-  after that the account keeps everything;
-- a password reset confirms the address and removes the other ways in (2FA, external logins, passkeys), since
-  whoever set them up may not own the mailbox;
-- a verified external login of the same address answers `account_conflict` instead of joining the account;
-- a second factor or a passkey cannot be added.
+- every sign-in continues with the `verify_email` step until the address is confirmed;
+- a password reset confirms it and removes 2FA, external logins and passkeys;
+- a verified external login of the same address answers `account_conflict`;
+- no second factor or passkey can be added.
 
-Carry `EmailConfirmed` over as it is to keep this protection. Setting it to `true` for every migrated user skips all
-of the above, but trusts that each imported address belongs to whoever set up the account.
+Carry `EmailConfirmed` over unchanged to keep this; setting it to `true` for everyone trusts every imported address.
 
-## Behavioural differences
+## Differences
 
-- **Endpoints:** `MapIdentityApi` routes (`/login`, `/refresh`, `/manage/info`, …) differ from SlimIdentity's
-  (`/auth/login`, `/auth/refresh`, `/auth/me`, …) and so do the payloads; front ends need to be adapted.
-- **Tokens:** Identity's bearer tokens are opaque Data Protection tokens; SlimIdentity issues JWTs (plus refresh
-  tokens with rotation). Existing sessions end at the switch – users sign in once.
-- **Cookies:** the cookie name and scheme change (`SlimAuth`, `SlimIdentity.Cookie`); users sign in once.
-- **Lockout:** progressive (1 min, doubling up to 1 h) instead of a fixed 5 minutes; configure `Lockout` if you need
-  the old behaviour (`Duration` = `MaxDuration`).
-- **Password policy:** check `Password` options against your previous `PasswordOptions`.
-- **UserManager / SignInManager:** not used. For your own flows use `ISlimAuthManager`, `IPasswordHasher<SlimUser>`
-  and your store.
+- **Endpoints and payloads** differ from `MapIdentityApi` (`/auth/login`, `/auth/refresh`, `/auth/me`, …).
+- **Sessions end once:** SlimIdentity issues JWTs plus rotating refresh tokens and its own cookie (`SlimAuth`).
+- **Lockout** is progressive (1 min doubling up to 1 h); `Duration` = `MaxDuration` gives a fixed one.
+- **Password options:** compare with your previous `PasswordOptions`.
+- **No `UserManager` / `SignInManager`:** use `ISlimAuthManager`, `IPasswordHasher<SlimUser>` and your store.

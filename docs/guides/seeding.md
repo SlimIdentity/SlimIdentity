@@ -1,86 +1,54 @@
 # The first administrator (seeding)
 
-A fresh database has no users – and on hosts without self-registration nobody can create the first one through the
-API. Create it by code at start-up. SlimIdentity's own APIs work outside a request, so the account gets everything a
-regular one has: a security stamp, a password hash with the configured hasher, the password rules.
-
-## With a start password
+A fresh database has no users, and without self-registration nobody can create the first one through the API. Create
+it at startup; `ISlimAuthManager` works outside a request, so the account gets a security stamp, a hash from the
+configured hasher and the password rules.
 
 ```csharp
 var app = builder.Build();
 
-await SeedAdministratorAsync(app.Services,
-    builder.Configuration["Admin:Email"]!,
-    builder.Configuration["Admin:StartPassword"]!,   // a secret (user secrets, environment, vault) – never in the repository
-    CancellationToken.None);
+await using (var scope = app.Services.CreateAsyncScope())
+{
+    var auth = scope.ServiceProvider.GetRequiredService<ISlimAuthManager>();
+    var created = await auth.CreateUserAsync(
+        builder.Configuration["Admin:Email"]!,
+        builder.Configuration["Admin:StartPassword"],     // a secret – never in the repository
+        profile: new SeededRole("admin"));                // your business data, written by your store / user factory
+    // 409 email_taken: already seeded (or created in parallel by another instance) – nothing to do
+}
 
 app.Run();
-
-static async Task SeedAdministratorAsync(IServiceProvider services, string email, string startPassword, CancellationToken ct)
-{
-    await using var scope = services.CreateAsyncScope();
-    var store = scope.ServiceProvider.GetRequiredService<ISlimUserStore>();
-    var auth = scope.ServiceProvider.GetRequiredService<ISlimAuthManager>();
-
-    if (await store.FindByEmailAsync(email, ct) is not null) return;                  // already there: nothing to do
-    var admin = await store.CreateAsync(new SlimNewUser { Email = email }, ct);        // Profile = your data (role, name)
-    if (admin is null) return;                                                         // created in parallel by another instance
-
-    admin.EmailConfirmed = true;                                                       // you vouch for the address
-    await store.UpdateSecurityStateAsync(admin, admin.SecurityStamp, ct);
-    if (await auth.SetPasswordAsync(admin, startPassword, mustChange: true, ct) is not null)   // 400 with the violated rules
-        throw new InvalidOperationException("The start password does not meet the password rules.");
-}
 ```
 
-- **Runs on every start** and does nothing once the account exists; with several instances the unique address decides
-  (`CreateAsync` returns `null` for the loser).
-- **`mustChange: true`** – the first sign-in answers `action_required` (`change_password`) and issues no session until the
-  administrator has chosen an own password (TypeScript: `completePasswordChange`). The start password is then worthless;
-  remove it from the configuration.
-- **The role** – your business data: pass it as `Profile` and write it in your store (EF Core package:
-  `ISlimUserFactory<AppUser>`, see [registration with business data](registration-profile.md)), or insert it into your
-  roles table after `CreateAsync`. Claims come from `GetClaimsAsync` / `ISlimUserClaimsProvider<AppUser>` as usual
-  ([roles and permissions](roles-and-permissions.md)).
-
-```csharp
-// EF Core package: the factory turns the profile into entity fields
-var admin = await store.CreateAsync(new SlimNewUser { Email = email, Profile = new SeededRole("admin") }, ct);
-
-public sealed record SeededRole(string Role);
-public sealed class AppUsers : ISlimUserFactory<AppUser>
-{
-    public AppUser Create(SlimNewUser user) => new() { Role = user.Profile is SeededRole r ? r.Role : "member" };
-}
-```
+- **Runs on every start**; the unique address makes it idempotent across instances.
+- **Start password:** checked against the password rules (`400` otherwise); the first sign-in answers
+  `action_required` `["change_password"]` ([forced password change](without-email.md#the-forced-password-change)).
+  Remove it from the configuration afterwards.
+- **Role:** the profile reaches `ISlimUserStore.CreateAsync` as `SlimNewUser.Profile`; with the EF Core package an
+  `ISlimUserFactory<AppUser>` maps it to entity fields ([registration with business data](registration-profile.md)).
+  Claims come from your store as usual ([roles and permissions](roles-and-permissions.md)).
 
 ## Without a password anyone knows
 
-Create the account without a password and hand over a reset link – the administrator chooses the password, nobody
-else ever sees it:
+Omit the start password and hand out a reset link; nobody but the administrator ever sees the password:
 
 ```csharp
-var admin = await store.CreateAsync(new SlimNewUser { Email = email }, ct);
-var reset = await auth.CreatePasswordResetAsync(admin!, TimeSpan.FromDays(1), ct);
-logger.LogWarning("First administrator: set the password within 24 hours at {Link}", reset.Link);   // once, on the console
+var reset = await auth.CreatePasswordResetAsync(created.User!, TimeSpan.FromDays(1));
+logger.LogWarning("First administrator: set the password within 24 hours at {Link}", reset.Link);
 ```
 
-The link works once and only until the account's security stamp changes. Write it somewhere only operators see – it
-is as good as the password for its lifetime.
+The link works once and until the security stamp changes. Write it only where operators see it.
 
-## Data seeding by the database (EF Core `HasData`, SQL scripts)
+## Seeding by the database (EF Core `HasData`, SQL scripts)
 
-Possible for the account itself, not for the password: leave `PasswordHash` empty and hand over a reset link as above.
-Fill the SlimIdentity fields like SlimIdentity would:
+Possible for the account, not the password: leave `PasswordHash` empty and hand out a reset link as above.
 
 | Field | Value |
 | :--- | :--- |
-| `Email` / `NormalizedEmail` | the address / `ToUpperInvariant()` of it (EF Core package; your own store: whatever your lookup compares) |
-| `SecurityStamp` | `SlimUser.NewSecurityStamp()` – a fixed value in a migration is fine, the first password replaces it |
+| `Email` / `NormalizedEmail` | the address / its `ToUpperInvariant()` (EF Core package; own store: whatever your lookup compares) |
+| `SecurityStamp` | `SlimUser.NewSecurityStamp()` – a fixed value in a migration is fine |
 | `IsActive` | `true` |
 | `EmailConfirmed` | `true` if you vouch for the address |
 
-An empty `SecurityStamp` is repaired at the first sign-in (log event 3011), but initialize it anyway.
-
-Never hash a password yourself with another algorithm or another `PasswordHasher` configuration – SlimIdentity could
-not verify it.
+An empty `SecurityStamp` is repaired at the first sign-in (log event 3011). Never hash a password with another
+algorithm or `PasswordHasher` configuration – SlimIdentity could not verify it.
