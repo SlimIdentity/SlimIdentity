@@ -44,7 +44,7 @@ facts.
   `SlimIdentity.Passkeys` (optional WebAuthn support), and `SlimIdentity.Testing` (conformance checks for store
   implementations). Copy-paste templates (EF Core, Dapper, mail, admin endpoints, TypeScript client) are in
   `samples/templates`.
-- Target: .NET 10. Status: 0.9.0 pre-release; four external review rounds, no professional audit.
+- Target: .NET 10. Status: 0.9.0 pre-release, no professional audit.
 
 ## Read first (in this order)
 
@@ -52,7 +52,7 @@ facts.
 2. Choose the relevant integration path: `docs/minimal-setup.md` for EF Core and browser cookies, or
    `docs/getting-started.md` for a custom store and bearer/JWT. These are alternatives, not sequential setup steps.
 3. `docs/security.md` – threat model, host responsibilities, **known limitations**.
-4. `docs/attack-scenarios.md` – every scenario with the test that is supposed to cover it.
+4. `docs/attack-scenarios.md` – the threat catalogue with the state of each scenario.
 5. `docs/architecture-manifest.md` – principles and design decisions with their reasons.
 6. `docs/endpoints.md`, `docs/configuration.md`, the guides in `docs/guides/` as needed.
 7. Then the code: `src/SlimIdentity` (start with `Endpoints/`, `Services/`, `Authentication/`, `Http/`, `Security/`),
@@ -68,12 +68,8 @@ applications); the public API surface as a whole.
 "Breakme" playground), vulnerabilities in ASP.NET Core or third-party packages, misconfigurations the documentation
 explicitly warns against.
 
-## Already reviewed – do not re-report
+## Already documented – do not re-report
 
-- Four external review rounds and seven further findings were fixed; each fix has a test (`ReviewRound1Tests.cs` to
-  `ReviewRound4Tests.cs` and the tests referenced in `docs/attack-scenarios.md`, marked **Fixed**; CHANGELOG sections
-  "Security (external review round …)"). Report such an
-  area again only if you can show that the fix is incomplete.
 - Everything under **Known limitations** in `docs/security.md` is a documented trade-off, not a finding – unless you
   find a cheap fix the documentation overlooks or the impact is worse than described.
 
