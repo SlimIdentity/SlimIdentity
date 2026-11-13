@@ -77,7 +77,7 @@ public sealed class DapperUserStore(NpgsqlDataSource db) : ISlimUserStore
         await using var c = await db.OpenConnectionAsync(ct);
         await using var tx = await c.BeginTransactionAsync(ct);
         var current = await c.QuerySingleOrDefaultAsync<AttemptState>(new CommandDefinition(
-            $"SELECT {counter} AS Count, {end} AS LockoutEnd FROM users WHERE id = @id::uuid FOR UPDATE",
+            $"SELECT {counter} AS Count, {end} AS LockoutEndUtc FROM users WHERE id = @id::uuid FOR UPDATE",
             new { id = user.Id }, tx, cancellationToken: ct));
         if (current is null) return null;   // deleted during the sign-in
         if (attempt.IsLockedOut(current.LockoutEnd)) return SlimAttemptReservation.LockedOut(current.LockoutEnd!.Value);
@@ -90,7 +90,10 @@ public sealed class DapperUserStore(NpgsqlDataSource db) : ISlimUserStore
         return SlimAttemptReservation.Reserved(count);
     }
 
-    private sealed record AttemptState(int Count, DateTimeOffset? LockoutEnd);
+    private sealed record AttemptState(int Count, DateTime? LockoutEndUtc)
+    {
+        public DateTimeOffset? LockoutEnd => LockoutEndUtc is { } end ? new DateTimeOffset(DateTime.SpecifyKind(end, DateTimeKind.Utc)) : null;
+    }
 
     public async Task ResetFailedAttemptsAsync(SlimUser user, SlimAttemptFactor factor, CancellationToken ct)
     {
