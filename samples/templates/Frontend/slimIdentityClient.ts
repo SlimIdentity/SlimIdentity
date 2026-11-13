@@ -19,7 +19,7 @@ export interface AuthResponse {
 }
 
 export interface LoginChallenge {
-  status: "invalid_credentials" | "requires_two_factor" | "password_change_required";
+  status: "requires_two_factor" | "password_change_required";
   preAuthToken?: string;
   twoFactorMethod?: "totp" | "email" | "recovery";
   passwordChangeToken?: string;
@@ -102,12 +102,12 @@ export type AuthenticatorSetupResult =
   | { ok: false; status: string; errors?: Record<string, string[]> };
 
 /**
- * The machine-readable code of an answer: `status` ("invalid_token", "locked_out", …) – for validation errors
- * (RFC 9457, where `status` is the HTTP status number) the `code` "validation_failed".
+ * The machine-readable code of an answer: errors are problem details (RFC 9457) carrying `code`
+ * ("invalid_token", "locked_out", "validation_failed", …); success answers carry it as text in `status`.
  */
 function codeOf(body: { status?: unknown; code?: unknown }, r: Response): string {
-  if (typeof body.status === "string") return body.status;
-  return typeof body.code === "string" ? body.code : `http_${r.status}`;
+  if (typeof body.code === "string") return body.code;
+  return typeof body.status === "string" ? body.status : `http_${r.status}`;
 }
 
 async function toFormResult(r: Response): Promise<FormResult> {

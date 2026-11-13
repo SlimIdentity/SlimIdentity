@@ -1,5 +1,6 @@
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.AspNetCore.WebUtilities;
 using SlimIdentity.Contracts;
 
 namespace SlimIdentity.Http;
@@ -146,10 +147,10 @@ internal abstract class SlimClientRateLimiterPolicy(
     {
         var policy = context.HttpContext.GetEndpoint()?.Metadata.GetMetadata<EnableRateLimitingAttribute>()?.PolicyName ?? "unknown";
         context.HttpContext.RequestServices.GetService<SlimMetrics>()?.RateLimited(policy);
-        context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
         if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
             context.HttpContext.Response.Headers.RetryAfter = ((int)Math.Ceiling(retryAfter.TotalSeconds)).ToString(CultureInfo.InvariantCulture);
-        return ValueTask.CompletedTask;
+        return new ValueTask(SlimResults.WriteProblemAsync(context.HttpContext.Response, StatusCodes.Status429TooManyRequests,
+            SlimErrorCodes.RateLimited, "Too many requests."));
     };
 
     public RateLimitPartition<string> GetPartition(HttpContext httpContext)
@@ -172,12 +173,42 @@ internal abstract class SlimClientRateLimiterPolicy(
 
 internal static class SlimResults
 {
+    public const string ProblemContentType = "application/problem+json";
+
+    /// <summary>A status answer, or – from 400 on – a problem with <paramref name="status"/> as <c>code</c>.</summary>
     public static IResult Status(string status, string? message = null, int statusCode = StatusCodes.Status200OK) =>
-        Results.Json(new SlimStatusResponse(status, message), SlimJsonContext.Default.SlimStatusResponse, statusCode: statusCode);
+        statusCode >= StatusCodes.Status400BadRequest
+            ? Problem(statusCode, status, message)
+            : Results.Json(new SlimStatusResponse(status, message), SlimJsonContext.Default.SlimStatusResponse, statusCode: statusCode);
+
+    public static SlimProblemResponse CreateProblem(int statusCode, string code, string? detail = null) => new()
+    {
+        Status = statusCode,
+        Code = code,
+        Title = ReasonPhrases.GetReasonPhrase(statusCode),
+        Detail = detail,
+    };
+
+    public static IResult Problem(int statusCode, string code, string? detail = null) =>
+        Problem(CreateProblem(statusCode, code, detail));
+
+    public static IResult Problem(SlimProblemResponse problem) =>
+        Results.Json(problem, SlimJsonContext.Default.SlimProblemResponse, ProblemContentType, problem.Status);
+
+    /// <summary>Writes a problem directly, for answers outside an endpoint (authentication events, rate limiter).</summary>
+    public static Task WriteProblemAsync(HttpResponse response, int statusCode, string code, string? detail = null)
+    {
+        response.StatusCode = statusCode;
+        response.ContentType = ProblemContentType;
+        return System.Text.Json.JsonSerializer.SerializeAsync(response.Body, CreateProblem(statusCode, code, detail),
+            SlimJsonContext.Default.SlimProblemResponse, response.HttpContext.RequestAborted);
+    }
 
     public static IResult InvalidCredentials() =>
-        Results.Json(new SlimLoginChallengeResponse { Status = SlimErrorCodes.InvalidCredentials, Message = "Invalid e-mail or password." },
-            SlimJsonContext.Default.SlimLoginChallengeResponse, statusCode: StatusCodes.Status401Unauthorized);
+        Problem(StatusCodes.Status401Unauthorized, SlimErrorCodes.InvalidCredentials, "Invalid e-mail or password.");
+
+    public static IResult Unauthenticated() =>
+        Problem(StatusCodes.Status401Unauthorized, SlimErrorCodes.Unauthenticated, "Authentication is required.");
 
     public static IResult Challenge(SlimLoginChallengeResponse challenge) =>
         Results.Json(challenge, SlimJsonContext.Default.SlimLoginChallengeResponse, statusCode: StatusCodes.Status401Unauthorized);
@@ -186,8 +217,11 @@ internal static class SlimResults
     {
         var seconds = (int)Math.Max(1, Math.Ceiling((lockoutEnd - now).TotalSeconds));
         http.Response.Headers.RetryAfter = seconds.ToString(CultureInfo.InvariantCulture);
-        return Results.Json(new SlimLockedResponse(SlimErrorCodes.LockedOut, lockoutEnd), SlimJsonContext.Default.SlimLockedResponse,
-            statusCode: StatusCodes.Status423Locked);
+        var problem = CreateProblem(StatusCodes.Status423Locked, SlimErrorCodes.LockedOut, "The account is locked.");
+        return Problem(new SlimProblemResponse
+        {
+            Status = problem.Status, Code = problem.Code, Title = problem.Title, Detail = problem.Detail, LockoutEndUtc = lockoutEnd,
+        });
     }
 
     public static IResult InvalidToken(int statusCode = StatusCodes.Status400BadRequest) =>
@@ -208,10 +242,13 @@ internal static class SlimResults
     public static IResult BadRequest(string status, string? message = null) =>
         Status(status, message, StatusCodes.Status400BadRequest);
 
-    /// <summary>
-    /// RFC 9457 validation problem (field errors in <c>errors</c>); <c>status</c> is the HTTP status there, so the
-    /// machine-readable code every other SlimIdentity error carries in <c>status</c> is in <c>code</c>.
-    /// </summary>
-    public static IResult Validation(IDictionary<string, string[]> errors) =>
-        Results.ValidationProblem(errors, extensions: new Dictionary<string, object?> { ["code"] = SlimErrorCodes.ValidationFailed });
+    /// <summary>400 <c>validation_failed</c> with the messages per field in <c>errors</c>.</summary>
+    public static IResult Validation(IDictionary<string, string[]> errors)
+    {
+        var problem = CreateProblem(StatusCodes.Status400BadRequest, SlimErrorCodes.ValidationFailed, "One or more fields are invalid.");
+        return Problem(new SlimProblemResponse
+        {
+            Status = problem.Status, Code = problem.Code, Title = problem.Title, Detail = problem.Detail, Errors = errors,
+        });
+    }
 }

@@ -82,7 +82,7 @@ public sealed class SignInMethodTests
 
         var refused = await browser.PostJsonAsync("/auth/sign-in-methods/external/remove", new { provider = "Fake", providerKey = "google-1" }, HttpStatusCode.Conflict);
 
-        Assert.Equal("last_sign_in_method", refused.Str("status"));
+        Assert.Equal("last_sign_in_method", refused.Str("code"));
         Assert.NotNull(await Links(app).FindByExternalLoginAsync("Fake", "google-1", default));
     }
 

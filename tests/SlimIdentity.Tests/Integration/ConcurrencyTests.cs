@@ -36,7 +36,7 @@ public sealed class ConcurrencyTests
         // the same challenge with another, valid factor: a fresh TOTP step …
         app.Time.Advance(TimeSpan.FromSeconds(30));
         var reused = await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = preAuth, code = Code(app, sharedKey) }, HttpStatusCode.Unauthorized);
-        Assert.Equal("invalid_token", reused.Str("status"));
+        Assert.Equal("invalid_token", reused.Str("code"));
         // … or a recovery code
         await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = preAuth, recoveryCode = recoveryCodes[0] }, HttpStatusCode.Unauthorized);
 
@@ -71,7 +71,7 @@ public sealed class ConcurrencyTests
         // no session cookie, no useCookies flag – only the signed challenge says "cookie mode"
         client.SendCsrfHeader = false;
         var missingHeader = await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = preAuth, code = Code(app, sharedKey) }, HttpStatusCode.Forbidden);
-        Assert.Equal("csrf_validation_failed", missingHeader.Str("status"));
+        Assert.Equal("csrf_validation_failed", missingHeader.Str("code"));
 
         client.SendCsrfHeader = true;
         client.Origin = "https://evil.example";

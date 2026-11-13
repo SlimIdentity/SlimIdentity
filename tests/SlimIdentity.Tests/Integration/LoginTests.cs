@@ -111,13 +111,46 @@ public sealed class LoginTests
         var client = app.CreateClient();
 
         var disabled = await client.PostJsonAsync("/auth/login", new { email = "inactive@test.local", password = "Inactive123!" }, HttpStatusCode.Forbidden);
-        Assert.Equal("account_disabled", disabled.Str("status"));
+        Assert.Equal("account_disabled", disabled.Str("code"));
 
         for (var i = 1; i <= 4; i++)
             await client.PostAsync("/auth/login", new { email = TestApp.UserEmail, password = $"wrong{i}" });
         var locked = await client.PostAsync("/auth/login", new { email = TestApp.UserEmail, password = "wrong5" });
         Assert.Equal((HttpStatusCode)423, locked.StatusCode);
         Assert.True(locked.Headers.RetryAfter is not null);
+        var problem = await ProblemAsync(locked);
+        Assert.Equal("locked_out", problem.Str("code"));
+        Assert.Equal(app.Users.Get(TestApp.UserEmail).LockoutEndUtc, problem.GetProperty("lockoutEndUtc").GetDateTimeOffset());
+    }
+
+    [Fact]
+    public async Task Every_error_is_a_problem_with_a_code()
+    {
+        await using var app = await TestApp.StartAsync(new TestAppOptions { Configure = o => o.RateLimit.PermitLimit = 3 });
+        var client = app.CreateClient();
+
+        var wrong = await ProblemAsync(await client.PostAsync("/auth/login", new { email = TestApp.UserEmail, password = "wrong" }));
+        Assert.Equal((401, "invalid_credentials"), (wrong.GetProperty("status").GetInt32(), wrong.Str("code")));
+        Assert.False(wrong.TryGetProperty("type", out _));
+
+        var invalid = await ProblemAsync(await client.PostAsync("/auth/register", new { email = "new@test.local", password = "x" }));
+        Assert.Equal("validation_failed", invalid.Str("code"));
+        Assert.True(invalid.GetProperty("errors").TryGetProperty("password", out _));
+
+        Assert.Equal("unauthenticated", (await ProblemAsync(await client.GetAsync("/auth/me"))).Str("code"));
+
+        HttpResponseMessage limited;
+        do limited = await client.PostAsync("/auth/login", new { email = TestApp.UserEmail, password = "wrong" });
+        while (limited.StatusCode != HttpStatusCode.TooManyRequests);
+        Assert.Equal("rate_limited", (await ProblemAsync(limited)).Str("code"));
+    }
+
+    private static async Task<System.Text.Json.JsonElement> ProblemAsync(HttpResponseMessage response)
+    {
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+        var problem = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+        Assert.Equal((int)response.StatusCode, problem.GetProperty("status").GetInt32());
+        return problem;
     }
 
     [Fact]

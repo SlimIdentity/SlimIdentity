@@ -173,7 +173,7 @@ public sealed class PasskeyTests
         await app.CreateClient().PostJsonAsync("/auth/register", new { email = "fresh@test.local", password = "Fresh-Pass-123!" });
         var fresh = await SignedInAsync(app, "fresh@test.local", "Fresh-Pass-123!");
         Assert.Equal("email_not_confirmed",
-            (await fresh.PostJsonAsync("/auth/passkeys/register/options", new { password = "Fresh-Pass-123!" }, HttpStatusCode.Forbidden)).Str("status"));
+            (await fresh.PostJsonAsync("/auth/passkeys/register/options", new { password = "Fresh-Pass-123!" }, HttpStatusCode.Forbidden)).Str("code"));
 
         var admin = await SignedInAsync(app, TestApp.AdminEmail, TestApp.AdminPassword);
         var impersonation = app.CreateClient();
@@ -239,7 +239,7 @@ public sealed class PasskeyTests
 
         var (status, body) = await LoginAsync(app, key, tamper);
         Assert.Equal(HttpStatusCode.Unauthorized, status);
-        Assert.Equal("invalid_passkey", body.Str("status"));
+        Assert.Equal("invalid_passkey", body.Str("code"));
     }
 
     [Fact]
@@ -297,7 +297,7 @@ public sealed class PasskeyTests
         await using var app = await TestApp.StartAsync(WithPasskeys());
         using var weak = new SoftwarePasskey(rsa: true, rsaBits: 1024);
         var refused = await RegisterAsync(app, await SignedInAsync(app), weak, expected: HttpStatusCode.BadRequest);
-        Assert.Equal("invalid_passkey", refused.Str("status"));
+        Assert.Equal("invalid_passkey", refused.Str("code"));
     }
 
     // ------------------------------------------------------------------ synced or device-bound (flags BE / BS)
@@ -328,7 +328,7 @@ public sealed class PasskeyTests
         await using var app = await TestApp.StartAsync(WithPasskeys());
         var me = await SignedInAsync(app);
         using var impossible = new SoftwarePasskey { BackupEligible = false, BackedUp = true };   // backed up but not eligible
-        Assert.Equal("invalid_passkey", (await RegisterAsync(app, me, impossible, expected: HttpStatusCode.BadRequest)).Str("status"));
+        Assert.Equal("invalid_passkey", (await RegisterAsync(app, me, impossible, expected: HttpStatusCode.BadRequest)).Str("code"));
 
         using var deviceBound = new SoftwarePasskey();
         await RegisterAsync(app, me, deviceBound);
@@ -353,7 +353,7 @@ public sealed class PasskeyTests
         var (status, body) = await LoginAsync(app, key);
 
         Assert.Equal(HttpStatusCode.Forbidden, status);
-        Assert.Equal("password_change_required", body.Str("status"));
+        Assert.Equal("password_change_required", body.Str("code"));
 
         // the way out: the start password, then an own one – afterwards the passkey works again
         var client = app.CreateClient();
@@ -477,7 +477,7 @@ public sealed class PasskeyTests
 
         me.BearerToken = (await me.PostJsonAsync("/auth/sign-in-methods/external/remove", new { provider = "Fake", providerKey = "google-1" })).Str("accessToken");
         var refused = await me.PostJsonAsync("/auth/sign-in-methods/passkeys/remove", new { id = key.IdBase64Url }, HttpStatusCode.Conflict);
-        Assert.Equal("last_sign_in_method", refused.Str("status"));
+        Assert.Equal("last_sign_in_method", refused.Str("code"));
         Assert.Equal(HttpStatusCode.OK, (await LoginAsync(app, key)).Status);
     }
 

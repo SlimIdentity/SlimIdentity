@@ -11,7 +11,10 @@ with a new major version.
 
 ### Added
 
-- `SlimErrorCodes`: all `status` codes of the JSON endpoints and `SlimAuthResult` as public constants.
+- Uniform error answers: every error is an RFC 9457 problem (`application/problem+json`) with a machine-readable `code`,
+  including validation errors, lockout (`lockoutEndUtc`), rate limiting (`429 rate_limited`) and unauthenticated or
+  forbidden cookie requests (`401`/`403` instead of a redirect); documented in OpenAPI as `SlimProblemResponse`.
+- `SlimErrorCodes`: all error codes of the JSON endpoints and `SlimAuthResult` as public constants.
 - Hardened JSON endpoints under `/auth`: login (cookie or JWT), 2FA, external login (OAuth/OIDC), refresh, logout,
   logout-all, sessions, register, e-mail verification, password reset/change, invitations, `/me`.
 - Database-agnostic stores: `ISlimUserStore` (required) and optional capabilities for refresh tokens, server-side

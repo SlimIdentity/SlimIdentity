@@ -165,7 +165,8 @@ internal sealed class SlimLoginHandlers(
         var challenge = await BeginTwoFactorAsync(user, cookies, rememberMe, ct);
         metrics.Login(SlimErrorCodes.RequiresTwoFactor, cookies);
         return challenge is null
-            ? Results.Problem(statusCode: 500, title: "Two-factor authentication is enabled for this user but ISlimTwoFactorStore is not registered.")
+            ? SlimResults.Problem(StatusCodes.Status500InternalServerError, SlimErrorCodes.TwoFactorUnavailable,
+                "Two-factor authentication is enabled for this user but ISlimTwoFactorStore is not registered.")
             : SlimResults.Challenge(challenge);
     }
 
@@ -440,12 +441,12 @@ internal sealed class SlimLoginHandlers(
     public async Task<IResult> LogoutAllAsync(CancellationToken ct)
     {
         var userId = Http.User.GetSlimUserId();
-        if (userId is null) return Results.Unauthorized();
+        if (userId is null) return SlimResults.Unauthenticated();
         if (Http.User.IsImpersonating())
             return SlimResults.Status(SlimErrorCodes.NotAllowedWhileImpersonating, "This action is not allowed during an impersonation session.", StatusCodes.Status403Forbidden);
 
         var user = await store.FindByIdAsync(userId, ct);
-        if (user is null) return Results.Unauthorized();
+        if (user is null) return SlimResults.Unauthenticated();
 
         await authManager.SignOutEverywhereAsync(user, ct);
         if (O.Endpoints.AllowCookieAuth) await Http.SignOutAsync(SlimIdentityDefaults.CookieScheme);

@@ -106,7 +106,7 @@ public sealed class ExternalLinkTests
         var (code, verifier) = await LinkCodeAsync(app);
         var taken = await me.PostJsonAsync("/auth/link/external", new { code, codeVerifier = verifier, password = TestApp.UserPassword }, HttpStatusCode.Conflict);
 
-        Assert.Equal("external_login_taken", taken.Str("status"));
+        Assert.Equal("external_login_taken", taken.Str("code"));
         Assert.Equal(app.Users.Get(TestApp.AdminEmail).Id, (await links.FindByExternalLoginAsync("Fake", "google-user", default))!.Id);
     }
 

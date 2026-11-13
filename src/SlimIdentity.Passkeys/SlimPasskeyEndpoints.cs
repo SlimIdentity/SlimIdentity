@@ -51,8 +51,8 @@ internal sealed class SlimPasskeyEndpoints : ISlimEndpointModule
             .WithName("SlimIdentity_PasskeyRegistrationOptions")
             .WithSummary("Start adding a passkey (password required if the account has one): options for navigator.credentials.create and a state.")
             .Produces<SlimPasskeyCreationOptionsResponse>()
-            .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
-            .Produces<SlimStatusResponse>(StatusCodes.Status403Forbidden)
+            .ProducesSlimProblem(StatusCodes.Status400BadRequest)
+            .ProducesSlimProblem(StatusCodes.Status403Forbidden)
             .RequireAuthorization(SlimIdentityEndpointExtensions.SlimAuthorize)
             .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy);
 
@@ -61,8 +61,8 @@ internal sealed class SlimPasskeyEndpoints : ISlimEndpointModule
             .WithName("SlimIdentity_PasskeyRegister")
             .WithSummary("Finish adding a passkey with the result of navigator.credentials.create.")
             .Produces<SlimPasskeyInfo>()
-            .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
-            .Produces<SlimStatusResponse>(StatusCodes.Status409Conflict)
+            .ProducesSlimProblem(StatusCodes.Status400BadRequest)
+            .ProducesSlimProblem(StatusCodes.Status409Conflict)
             .RequireAuthorization(SlimIdentityEndpointExtensions.SlimAuthorize)
             .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy);
 
@@ -78,9 +78,9 @@ internal sealed class SlimPasskeyEndpoints : ISlimEndpointModule
             .WithName("SlimIdentity_PasskeyLogin")
             .WithSummary("Sign in with the result of navigator.credentials.get. A passkey is multi-factor: no second factor follows.")
             .Produces<SlimAuthResponse>()
-            .Produces<SlimStatusResponse>(StatusCodes.Status401Unauthorized)
-            .Produces<SlimStatusResponse>(StatusCodes.Status403Forbidden)
-            .Produces(StatusCodes.Status429TooManyRequests)
+            .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
+            .ProducesSlimProblem(StatusCodes.Status403Forbidden)
+            .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
             .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
             .AllowAnonymous();
 
@@ -89,17 +89,17 @@ internal sealed class SlimPasskeyEndpoints : ISlimEndpointModule
             .WithName("SlimIdentity_RenamePasskey")
             .WithSummary("Rename a passkey of the account.")
             .Produces<SlimStatusResponse>()
-            .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
-            .Produces<SlimStatusResponse>(StatusCodes.Status404NotFound);
+            .ProducesSlimProblem(StatusCodes.Status400BadRequest)
+            .ProducesSlimProblem(StatusCodes.Status404NotFound);
 
         signInMethods.MapPost("/passkeys/remove", static ([FromBody] SlimRemovePasskeyRequest request,
                 [FromServices] SlimPasskeyHandlers h, CancellationToken ct) => h.RemoveAsync(request, ct))
             .WithName("SlimIdentity_RemovePasskey")
             .WithSummary("Remove a passkey (password required if the account has one) – never the last sign-in method.")
             .Produces<SlimStatusResponse>()
-            .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
-            .Produces<SlimStatusResponse>(StatusCodes.Status404NotFound)
-            .Produces<SlimStatusResponse>(StatusCodes.Status409Conflict)
+            .ProducesSlimProblem(StatusCodes.Status400BadRequest)
+            .ProducesSlimProblem(StatusCodes.Status404NotFound)
+            .ProducesSlimProblem(StatusCodes.Status409Conflict)
             .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy);
     }
 }

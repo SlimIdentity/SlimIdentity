@@ -5,10 +5,13 @@ metadata (tag `SlimIdentity`), so typed clients can be generated from `/openapi/
 
 **Conventions**
 
-- JSON bodies, camelCase. Errors use `{ "status": "<snake_case_code>", "message": "…" }`; validation errors are
-  RFC 9457 validation problems – there `status` is the HTTP status (400), the code is in `code` (`validation_failed`)
-  and the field errors in `errors`: `{ "status": 400, "code": "validation_failed", "errors": { "password": ["…"] } }`.
-  All codes are available as constants in `SlimErrorCodes`.
+- JSON bodies, camelCase. Errors are RFC 9457 problem details (`application/problem+json`) with a machine-readable
+  `code`: `{ "status": 401, "code": "invalid_credentials", "title": "Unauthorized", "detail": "…" }`. `status` is the
+  HTTP status number here, while success answers carry a text `status` (`"success"`, `"sent"`, …). `detail` is an
+  English hint for developers, not meant for display – map `code` to your own texts. Validation errors (400) add the
+  field errors in `errors` (`code` `validation_failed`), `423 locked_out` adds `lockoutEndUtc` and a `Retry-After`
+  header, the rate limiter answers `429 rate_limited` with `Retry-After`, and cookie sessions answer `401 unauthenticated`
+  or `403 forbidden` instead of redirecting. All codes are available as constants in `SlimErrorCodes`.
 - **Mode:** endpoints that sign in accept `?useCookies=true|false` (default `Endpoints.DefaultUseCookies`).
   Cookie mode answers `{ "status": "success", "mode": "cookie" }` and sets the cookie; bearer mode returns
   `accessToken`, `expiresIn`, `refreshToken` and expiry timestamps. A mode that is switched off answers

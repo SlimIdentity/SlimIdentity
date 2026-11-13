@@ -84,10 +84,10 @@ public sealed class ReviewRound4Tests
         var owner = await SocialOnlySessionAsync(app);   // fresh sign-in
 
         var passkey = await owner.PostJsonAsync("/auth/passkeys/register/options", new { }, HttpStatusCode.Forbidden);
-        Assert.Equal("password_required", passkey.Str("status"));
+        Assert.Equal("password_required", passkey.Str("code"));
         var change = await owner.PostJsonAsync("/auth/change-password",
             new { currentPassword = "anything", newPassword = "First-Password-123" }, HttpStatusCode.Conflict);
-        Assert.Equal("password_not_set", change.Str("status"));
+        Assert.Equal("password_not_set", change.Str("code"));
 
         await app.CreateClient().PostAsync("/auth/forgot-password", new { email = SocialEmail });
         await Task.Delay(200);   // background queue

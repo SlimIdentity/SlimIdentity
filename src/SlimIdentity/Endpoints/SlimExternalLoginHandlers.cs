@@ -288,7 +288,8 @@ internal sealed class SlimExternalLoginHandlers(
         {
             var challenge = await login.BeginTwoFactorAsync(user, useCookies: false, rememberMe: false, ct);
             return challenge is null
-                ? Results.Problem(statusCode: 500, title: "Two-factor authentication is enabled for this user but ISlimTwoFactorStore is not registered.")
+                ? SlimResults.Problem(StatusCodes.Status500InternalServerError, SlimErrorCodes.TwoFactorUnavailable,
+                "Two-factor authentication is enabled for this user but ISlimTwoFactorStore is not registered.")
                 : SlimResults.Challenge(challenge);
         }
 

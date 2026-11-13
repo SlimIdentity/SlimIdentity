@@ -34,9 +34,9 @@ internal sealed class SlimApiKeyHandler(
 
     protected override Task HandleChallengeAsync(AuthenticationProperties properties)
     {
-        Response.StatusCode = StatusCodes.Status401Unauthorized;
         Response.Headers.WWWAuthenticate = "ApiKey";
-        return Task.CompletedTask;
+        return Http.SlimResults.WriteProblemAsync(Response, StatusCodes.Status401Unauthorized, SlimErrorCodes.Unauthenticated,
+            "A valid API key is required.");
     }
 }
 

@@ -1,8 +1,8 @@
 namespace SlimIdentity;
 
 /// <summary>
-/// The machine-readable error codes of SlimIdentity: <c>status</c> (or <c>code</c> for validation problems) of error
-/// responses, <c>slim_error</c> of the external-login redirect, <see cref="SlimAuthResult.Error"/> and the
+/// The machine-readable error codes of SlimIdentity: <c>code</c> of the problem-details error responses
+/// (<see cref="Contracts.SlimProblemResponse"/>), <c>slim_error</c> of the external-login redirect, <see cref="SlimAuthResult.Error"/> and the
 /// <c>Reason</c> of <see cref="SlimEventTypes.SignInFailed"/>. A sign-in guard's veto carries its own code.
 /// </summary>
 public static class SlimErrorCodes
@@ -11,7 +11,7 @@ public static class SlimErrorCodes
 
     /// <summary>A required field is missing or malformed (400).</summary>
     public const string InvalidRequest = "invalid_request";
-    /// <summary>Field errors; RFC 9457 validation problem with <c>errors</c> (400).</summary>
+    /// <summary>Field errors in <c>errors</c> (400).</summary>
     public const string ValidationFailed = "validation_failed";
     /// <summary>A signed token or link is invalid, expired or already used.</summary>
     public const string InvalidToken = "invalid_token";
@@ -23,6 +23,14 @@ public static class SlimErrorCodes
     public const string JwtAuthDisabled = "jwt_auth_disabled";
     /// <summary>The account changed at the same time; nothing was saved (409).</summary>
     public const string ConcurrentChange = "concurrent_change";
+    /// <summary>The request needs a signed-in user or a valid API key (401).</summary>
+    public const string Unauthenticated = "unauthenticated";
+    /// <summary>The signed-in principal lacks the permission (403).</summary>
+    public const string Forbidden = "forbidden";
+    /// <summary>The rate limit of the endpoint is exhausted (429 with <c>Retry-After</c>).</summary>
+    public const string RateLimited = "rate_limited";
+    /// <summary>A dependency is temporarily unavailable; retry later (503).</summary>
+    public const string ServiceUnavailable = "service_unavailable";
 
     // ---------------------------------------------------------------- sign-in
 

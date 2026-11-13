@@ -57,7 +57,8 @@ internal sealed class SlimBackChannelLogoutHandler(
         catch (Exception ex) when (ex is InvalidOperationException or IOException or HttpRequestException)
         {
             Log.BackChannelMetadataFailed(logger, ex, provider);
-            return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);   // retried by the provider
+            return SlimResults.Problem(StatusCodes.Status503ServiceUnavailable, SlimErrorCodes.ServiceUnavailable,
+                "The provider metadata could not be loaded.");   // retried by the provider
         }
 
         var result = await new JsonWebTokenHandler().ValidateTokenAsync(token, new TokenValidationParameters

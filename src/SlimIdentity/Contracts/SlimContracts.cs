@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SlimIdentity.Contracts;
 
 // Wire types of the /auth endpoints. Property names are serialized in camelCase.
@@ -334,10 +336,28 @@ public sealed class SlimLoginChallengeResponse
     public int? ExpiresIn { get; init; }
 }
 
-/// <summary>423 body (only with <c>SignIn.RevealAccountState</c> or for already authenticated flows).</summary>
-/// <param name="Status">Always <c>locked_out</c>.</param>
-/// <param name="LockoutEndUtc">End of the lockout.</param>
-public sealed record SlimLockedResponse(string Status, DateTimeOffset LockoutEndUtc);
+/// <summary>
+/// Body of every error answer: RFC 9457 problem details (<c>application/problem+json</c>) with the machine-readable
+/// <see cref="Code"/> (<see cref="SlimErrorCodes"/>; host guards may add their own).
+/// </summary>
+public sealed class SlimProblemResponse
+{
+    /// <summary>HTTP status code.</summary>
+    public int Status { get; init; }
+    /// <summary>Machine-readable error code, snake_case. Clients evaluate this field only.</summary>
+    public required string Code { get; init; }
+    /// <summary>Reason phrase of the HTTP status.</summary>
+    public string? Title { get; init; }
+    /// <summary>English description for logs and developers, not meant for display.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Detail { get; init; }
+    /// <summary>423 <c>locked_out</c>: end of the lockout (also sent as <c>Retry-After</c>).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? LockoutEndUtc { get; init; }
+    /// <summary>400 <c>validation_failed</c>: messages per field.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IDictionary<string, string[]>? Errors { get; init; }
+}
 
 /// <summary>A claim of the current principal.</summary>
 /// <param name="Type">Claim type, e.g. <c>role</c>.</param>

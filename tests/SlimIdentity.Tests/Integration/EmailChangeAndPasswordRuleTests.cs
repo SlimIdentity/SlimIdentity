@@ -77,7 +77,7 @@ public sealed class EmailChangeTests
         app.Users.Seed("new@test.local", "Other1234!");
 
         var result = await app.CreateClient().PostJsonAsync("/auth/confirm-email-change", new { token }, HttpStatusCode.BadRequest);
-        Assert.Equal("email_taken", result.Str("status"));
+        Assert.Equal("email_taken", result.Str("code"));
     }
 }
 

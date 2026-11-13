@@ -354,7 +354,7 @@ internal sealed class SlimAccountHandlers(
     {
         var principal = Http.User;
         var id = principal.GetSlimUserId();
-        if (id is null) return Results.Unauthorized();
+        if (id is null) return SlimResults.Unauthenticated();
 
         var claims = principal.Claims
             .Where(c => c.Type is not (SlimClaimTypes.SecurityStamp or SlimClaimTypes.Actor)) // act carries the impersonator's stamp
@@ -388,7 +388,7 @@ internal sealed class SlimAccountHandlers(
     {
         var principal = Http.User;
         var id = principal.GetSlimUserId();
-        if (id is null) return (null, Results.Unauthorized());
+        if (id is null) return (null, SlimResults.Unauthenticated());
 
         if (forbidImpersonation && principal.IsImpersonating())
             return (null, SlimResults.Status(SlimErrorCodes.NotAllowedWhileImpersonating,
@@ -399,7 +399,7 @@ internal sealed class SlimAccountHandlers(
         var user = await store.FindByIdAsync(id, ct);
         return user is { IsActive: true } && SlimUser.IsSameSecurityState(user.SecurityStamp, principal.FindFirst(SlimClaimTypes.SecurityStamp)?.Value)
             ? (user, null)
-            : (null, Results.Unauthorized());
+            : (null, SlimResults.Unauthenticated());
     }
 
     private static bool IsValidEmail(string? email) => SlimRegistrationService.IsValidEmail(email);

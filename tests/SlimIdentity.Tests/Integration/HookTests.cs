@@ -89,8 +89,8 @@ public sealed class HookTests
         var answer = await app.CreateClient().PostJsonAsync("/auth/login?useCookies=false",
             new { email = TestApp.UserEmail, password = TestApp.UserPassword }, HttpStatusCode.Forbidden);
 
-        Assert.Equal("tenant_suspended", answer.Str("status"));
-        Assert.Equal("Your organization's access is suspended.", answer.Str("message"));
+        Assert.Equal("tenant_suspended", answer.Str("code"));
+        Assert.Equal("Your organization's access is suspended.", answer.Str("detail"));
         Assert.False(answer.TryGetProperty("accessToken", out _));
         await app.LoginBearerAsync(TestApp.AdminEmail, TestApp.AdminPassword);   // others are not affected
     }
@@ -113,7 +113,7 @@ public sealed class HookTests
         Assert.Equal(HttpStatusCode.Unauthorized, (await bearer.GetAsync("/auth/me")).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await browser.GetAsync("/auth/me")).StatusCode);
         var refresh = await app.CreateClient().PostJsonAsync("/auth/refresh", new { refreshToken = tokens.RefreshToken }, HttpStatusCode.Forbidden);
-        Assert.Equal("tenant_suspended", refresh.Str("status"));
+        Assert.Equal("tenant_suspended", refresh.Str("code"));
     }
 
     [Fact]
@@ -152,7 +152,7 @@ public sealed class HookTests
 
         var refused = await app.CreateClient().PostJsonAsync("/auth/register",
             new { email = "someone@gmail.test", password = "Some-Long-Pass-1" }, HttpStatusCode.Forbidden);
-        Assert.Equal("registration_not_allowed", refused.Str("status"));
+        Assert.Equal("registration_not_allowed", refused.Str("code"));
         Assert.Null(await app.Users.FindByEmailAsync("someone@gmail.test", default));
 
         await app.CreateClient().PostJsonAsync("/auth/register", new { email = "colleague@firma.test", password = "Some-Long-Pass-1" });
@@ -197,7 +197,7 @@ public sealed class HookTests
             new { email = "someone@gmail.test", password = "Some-Long-Pass-1" }, HttpStatusCode.Forbidden);
 
         Assert.NotNull(imported.User);
-        Assert.Equal("registration_not_allowed", refused.Str("status"));
+        Assert.Equal("registration_not_allowed", refused.Str("code"));
     }
 
     /// <summary>Self-service registration is closed; the host's own import (no request) is trusted.</summary>

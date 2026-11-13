@@ -59,7 +59,7 @@ public sealed class ReviewRound2Tests
         me.BearerToken = (await app.LoginBearerAsync(email, pass)).AccessToken;
 
         // unconfirmed: no second factor – nobody has proven the mailbox yet, a later proof would have to remove it
-        Assert.Equal("email_not_confirmed", (await me.PostJsonAsync("/auth/2fa/setup", null, HttpStatusCode.Forbidden)).Str("status"));
+        Assert.Equal("email_not_confirmed", (await me.PostJsonAsync("/auth/2fa/setup", null, HttpStatusCode.Forbidden)).Str("code"));
         await me.PostJsonAsync("/auth/2fa/enable-email", new { password = pass }, HttpStatusCode.Forbidden);
 
         await app.CreateClient().PostJsonAsync("/auth/verify-email", new { token = verifyToken });
@@ -112,7 +112,7 @@ public sealed class ReviewRound2Tests
         var refused = await attacker.PostJsonAsync("/auth/link/external",
             new { code, codeVerifier = verifier, password = "Attacker-Pass-123" }, HttpStatusCode.Forbidden);
 
-        Assert.Equal("email_not_confirmed", refused.Str("status"));
+        Assert.Equal("email_not_confirmed", refused.Str("code"));
         var links = app.App.Services.GetRequiredService<ISlimExternalLoginStore>();
         Assert.Null(await links.FindByExternalLoginAsync("Fake", "attacker-sub", default));
     }
