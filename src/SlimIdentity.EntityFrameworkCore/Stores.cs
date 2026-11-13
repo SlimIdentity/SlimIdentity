@@ -699,7 +699,7 @@ public class SlimEfSharedState<TContext>(SlimEfContext<TContext> context, TimePr
     }
 
     private Task CleanupSometimesAsync(long now, CancellationToken ct) =>
-        Random.Shared.Next(CleanupOneIn) == 0
+        System.Security.Cryptography.RandomNumberGenerator.GetInt32(CleanupOneIn) == 0
             ? context.Writing(Entries).Where(e => e.ExpiresAt <= now).ExecuteDeleteAsync(ct)
             : Task.CompletedTask;
 }
