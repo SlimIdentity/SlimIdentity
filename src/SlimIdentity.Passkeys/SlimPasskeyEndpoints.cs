@@ -85,7 +85,7 @@ internal sealed class SlimPasskeyEndpoints : ISlimEndpointModule
             .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
             .AllowAnonymous();
 
-        if (o.Endpoints.EnableRegistration && o.Email.Enabled)
+        if (o.Email.Enabled)
         {
             auth.MapPost("/register/passkey/options", static ([FromBody] SlimRegisterPasskeyOptionsRequest request,
                     [FromServices] SlimPasskeyHandlers h) => h.NewAccountOptions(request))

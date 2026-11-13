@@ -61,7 +61,7 @@ changes or detaches your entities.
 
 **Transactions:** for the same reason SlimIdentity's writes are never part of a transaction you opened (on your
 context or with a `TransactionScope`) – a rollback does not undo them, and they wait for rows your transaction locks.
-Commit first, then call `ISlimAuthManager` (create the company, commit, then `RegisterAsync`). To create account and
+Commit first, then call `ISlimAuthManager` (create the company, commit, then `CreateUserAsync`). To create account and
 business data together, use the registration profile below – it is written in the store's own `SaveChanges`. A write
 inside an open transaction throws on SQLite (one writer per database – it would wait until it times out) and logs
 a warning once (event id 8101) on other providers.

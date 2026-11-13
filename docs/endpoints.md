@@ -120,7 +120,9 @@ proof of the mailbox on, the link itself is valid for `Tokens.EmailVerificationT
 `/register/verify` and `/register/password` need `X-CSRF` like every cookie request. A flow token of a registration is
 accepted by no sign-in step, and a sign-in flow token by no registration step. `details.setCredential.kinds` lists the
 ways the account can start with: `["password"]`, or `["password", "passkey"]` with the passkey package – an account
-created with a passkey has no password until it sets one with `/forgot-password`.
+created with a passkey has no password until it sets one with `/forgot-password`. A host endpoint can replace the first
+step with `ISlimAuthManager.BeginRegistrationAsync` (same answer, same rules); the following steps stay mapped while
+mail is on, also with `EnableRegistration = false`.
 
 ## Invitations
 

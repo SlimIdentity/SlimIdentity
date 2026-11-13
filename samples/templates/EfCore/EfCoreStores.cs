@@ -48,7 +48,7 @@ public sealed class EfCoreUserStore(IdentityDb identity) : ISlimUserStore
             EmailConfirmed = newUser.EmailConfirmed,
             SecurityStamp = SlimUser.NewSecurityStamp(),
         };
-        // registration profile (ISlimRegistrationProfile / ISlimAuthManager.RegisterAsync): copy it into the entity or
+        // registration profile (ISlimRegistrationProfile / ISlimAuthManager.CreateUserAsync): copy it into the entity or
         // attach related entities here – the SaveChanges below writes them together with the account
         // if (newUser.Profile is SignUpProfile p) user.DisplayName = p.Name;
         db.Users.Add(user);

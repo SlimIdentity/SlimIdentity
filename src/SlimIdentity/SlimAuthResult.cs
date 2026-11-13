@@ -113,22 +113,23 @@ public sealed record SlimInvitation(string Token, string Link, DateTimeOffset Ex
 }
 
 /// <summary>
-/// Result of <see cref="ISlimAuthManager.RegisterAsync"/>. Return <see cref="Response"/> from a public endpoint: it does
-/// not reveal whether the address already had an account.
+/// Result of <see cref="ISlimAuthManager.CreateUserAsync"/>: the new account, or why there is none. It tells whether the
+/// address was taken – return it to an administrator, never from a public endpoint.
 /// </summary>
-public sealed class SlimRegistrationResult
+public sealed class SlimCreateUserResult
 {
-    internal SlimRegistrationResult(SlimUser? user, IResult? failure, IResult response) => (User, Failure, Response) = (user, failure, response);
+    internal SlimCreateUserResult(SlimUser? user, IResult? failure) => (User, Failure) = (user, failure);
 
-    /// <summary>
-    /// The new account – <c>null</c> if <see cref="Failure"/> is set or the address already has an account (its owner
-    /// got the "account exists" mail instead). Never tell the caller which of the two happened.
-    /// </summary>
+    /// <summary>The new account; <c>null</c> if <see cref="Failure"/> is set.</summary>
     public SlimUser? User { get; }
 
-    /// <summary><c>400</c> (address, password rules) or <c>403</c> (a registration guard's veto); <c>null</c> otherwise.</summary>
+    /// <summary>
+    /// <c>400</c> (address, password rules) or <c>409 email_taken</c> – to return as-is; <c>null</c> on success.
+    /// </summary>
     public IResult? Failure { get; }
 
-    /// <summary>The answer of a one-step registration: <see cref="Failure"/>, or the uniform <c>registration_accepted</c>.</summary>
-    public IResult Response { get; }
+    /// <summary>The account was created.</summary>
+    [System.Diagnostics.CodeAnalysis.MemberNotNullWhen(true, nameof(User))]
+    [System.Diagnostics.CodeAnalysis.MemberNotNullWhen(false, nameof(Failure))]
+    public bool Succeeded => User is not null;
 }

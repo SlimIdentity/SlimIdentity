@@ -93,8 +93,8 @@ whether a valid registration is wanted.
 
 ## Calls without a request
 
-Guards also run when your own code calls `ISlimAuthManager` outside a request – a background job, an import, a queue
-worker. They are then resolved from a scope of their own and `context.HttpContext` is `null`. A guard that reads the
+Guards also run when your own code calls `ISlimAuthManager.BeginRegistrationAsync` outside a request – a background
+job, an import, a queue worker (`CreateUserAsync` asks no guard). They are then resolved from a scope of their own and `context.HttpContext` is `null`. A guard that reads the
 request must handle that; whether such a call is trusted is your decision:
 
 ```csharp
@@ -124,7 +124,7 @@ public sealed class AuditTrail(AppDbContext db) : ISlimEventObserver
 | `signed_in` | method (`pwd`, `mfa`, `ext`, …); `ActorId` during an impersonation |
 | `sign_in_failed` | reason: `invalid_password`, `unknown_user` (no `UserId`), `locked_out`, `account_disabled`, `invalid_two_factor_code`, a guard's veto code |
 | `locked_out`, `unlocked` | – |
-| `user_created` | reason `registration` or `external` (method = provider) |
+| `user_created` | reason `registration`, `external` (method = provider) or `administrator` (`CreateUserAsync`) |
 | `email_confirmed`, `email_changed` | – |
 | `password_changed` | reason `changed`, `reset`, `invitation`, `forced_change`, `set_by_administrator` |
 | `two_factor_enabled` / `two_factor_disabled` | method `totp`/`email` / reason `user`, `administrator` |

@@ -34,7 +34,7 @@ All defaults are the secure choice. The options are listed in three tiers – mo
 
 | Option | Default | Description |
 | :--- | :--- | :--- |
-| `Endpoints.EnableRegistration` | `true` | `/register`, `/register/verify`, `/register/password`, the registration link at `/flow`. Disable for invite-only apps or custom registration. |
+| `Endpoints.EnableRegistration` | `true` | `/register`. Disable for invite-only apps or a first step of your own (`ISlimAuthManager.BeginRegistrationAsync`); the steps after it (`/register/verify`, `/register/password`, `/register/passkey`, the registration link at `/flow`) stay mapped while mail is on. |
 | `Endpoints.DefaultUseCookies` | `false` | Mode when the request has no `?useCookies=` (only relevant if both modes are available). |
 | `Password.MinimumLength` | `8` | At least 6; 12 or more is recommended without 2FA. |
 | `Tokens.AccessTokenLifetime` | `00:15:00` | Access token lifetime. |

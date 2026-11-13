@@ -216,33 +216,34 @@ public static class SlimIdentityEndpointExtensions
                 .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
                 .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
                 .AllowAnonymous();
+        }
 
-            if (o.Email.Enabled)
-            {
-                group.MapPost("/register/verify", static ([FromBody] SlimVerifyEmailLoginRequest request,
-                        [FromServices] SlimRegistrationFlow h, CancellationToken ct) => h.VerifyAsync(request, ct))
-                    .WithName("SlimIdentity_RegisterVerify")
-                    .WithSummary("Step verify_email of a registration: flowToken + the mailed code; next is set_credential.")
-                    .Produces<SlimActionRequiredResponse>()
-                    .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
-                    .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
-                    .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
-                    .AllowAnonymous();
+        // the steps of a registration with mail – also for flows a host's own endpoint started (ISlimAuthManager.BeginRegistrationAsync)
+        if (o.Email.Enabled)
+        {
+            group.MapPost("/register/verify", static ([FromBody] SlimVerifyEmailLoginRequest request,
+                    [FromServices] SlimRegistrationFlow h, CancellationToken ct) => h.VerifyAsync(request, ct))
+                .WithName("SlimIdentity_RegisterVerify")
+                .WithSummary("Step verify_email of a registration: flowToken + the mailed code; next is set_credential.")
+                .Produces<SlimActionRequiredResponse>()
+                .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
+                .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
+                .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
+                .AllowAnonymous();
 
-                group.MapPost("/register/password", static ([FromBody] SlimRegisterPasswordRequest request,
-                        [FromServices] SlimRegistrationFlow h, CancellationToken ct) => h.CompleteWithPasswordAsync(request, ct))
-                    .WithName("SlimIdentity_RegisterPassword")
-                    .WithSummary("Step set_credential with a password: creates the account; the session or the next step.")
-                    .Produces<SlimAuthResponse>()
-                    .Produces<SlimActionRequiredResponse>()
-                    .ProducesSlimProblem(StatusCodes.Status400BadRequest)
-                    .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
-                    .ProducesSlimProblem(StatusCodes.Status403Forbidden)
-                    .ProducesSlimProblem(StatusCodes.Status409Conflict)
-                    .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
-                    .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
-                    .AllowAnonymous();
-            }
+            group.MapPost("/register/password", static ([FromBody] SlimRegisterPasswordRequest request,
+                    [FromServices] SlimRegistrationFlow h, CancellationToken ct) => h.CompleteWithPasswordAsync(request, ct))
+                .WithName("SlimIdentity_RegisterPassword")
+                .WithSummary("Step set_credential with a password: creates the account; the session or the next step.")
+                .Produces<SlimAuthResponse>()
+                .Produces<SlimActionRequiredResponse>()
+                .ProducesSlimProblem(StatusCodes.Status400BadRequest)
+                .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
+                .ProducesSlimProblem(StatusCodes.Status403Forbidden)
+                .ProducesSlimProblem(StatusCodes.Status409Conflict)
+                .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
+                .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
+                .AllowAnonymous();
         }
 
         if (e.EnablePasswordReset && o.Email.Enabled)

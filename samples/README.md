@@ -53,7 +53,7 @@ against your real database checks all of the following, including the parallel c
 - `ISlimSessionStore`: `FindAsync` must not return revoked sessions (deleting the row is enough); clean up expired rows
   regularly (`DELETE … WHERE expires_utc < now()`). `UserAgent` / `IpAddress` are personal data – only store them if
   your device list needs them.
-- Invited users are created with an empty `passwordHash` (`CreateAsync(new SlimNewUser { Email = email })`) before calling
-  `CreateInvitationAsync`; a `null` result means the address is already registered.
+- Invited users are created without a password (`ISlimAuthManager.CreateUserAsync(email)`) before calling
+  `CreateInvitationAsync`; `409 email_taken` means the address is already registered.
 - Custom claims from `GetClaimsAsync`: `ClaimTypes.Role` is normalized to `role`; reserved claims
   (`sub`, `email`, `slim_stamp`, `amr`, `act`, `sid`, `auth_time`) are ignored.

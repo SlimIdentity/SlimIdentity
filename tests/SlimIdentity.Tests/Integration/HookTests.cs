@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Security.Claims;
 using System.Text.Json;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.DependencyInjection;
 using SlimIdentity.Tests.Infrastructure;
@@ -178,12 +179,13 @@ public sealed class HookTests
         await using var job = app.App.Services.CreateAsyncScope();   // a background job: no HttpContext
         var auth = job.ServiceProvider.GetRequiredService<ISlimAuthManager>();
 
-        var refused = await auth.RegisterAsync("imported@gmail.test", "Some-Long-Pass-1");
-        var allowed = await auth.RegisterAsync("imported@firma.test", "Some-Long-Pass-1");
+        var refused = await auth.BeginRegistrationAsync("imported@gmail.test");
+        var allowed = await auth.BeginRegistrationAsync("imported@firma.test");
 
-        Assert.Null(refused.User);
-        Assert.Null(await app.Users.FindByEmailAsync("imported@gmail.test", default));
-        Assert.NotNull(allowed.User);
+        Assert.Equal(StatusCodes.Status403Forbidden, ((IStatusCodeHttpResult)refused).StatusCode);
+        Assert.Equal(StatusCodes.Status200OK, ((IStatusCodeHttpResult)allowed).StatusCode ?? StatusCodes.Status200OK);
+        await app.Mail.WaitForAsync("verification", "imported@firma.test");
+        Assert.DoesNotContain(app.Mail.Mails, m => m.To == "imported@gmail.test");
     }
 
     [Fact]
@@ -192,11 +194,11 @@ public sealed class HookTests
         await using var app = await TestApp.StartAsync(With(b => b.AddRegistrationGuard<RequestsOnlyGuard>()));
         await using var job = app.App.Services.CreateAsyncScope();
 
-        var imported = await job.ServiceProvider.GetRequiredService<ISlimAuthManager>().RegisterAsync("imported@gmail.test", "Some-Long-Pass-1");
+        await job.ServiceProvider.GetRequiredService<ISlimAuthManager>().BeginRegistrationAsync("imported@gmail.test");
         var refused = await app.CreateClient().PostJsonAsync("/auth/register",
             new { email = "someone@gmail.test" }, HttpStatusCode.Forbidden);
 
-        Assert.NotNull(imported.User);
+        await app.Mail.WaitForAsync("verification", "imported@gmail.test");
         Assert.Equal("registration_not_allowed", refused.Str("code"));
     }
 

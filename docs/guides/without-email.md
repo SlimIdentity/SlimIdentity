@@ -36,6 +36,7 @@ All on `ISlimAuthManager` – **you** decide who may call them (role, [sudo mode
 | Method | Use |
 | :--- | :--- |
 | `CreatePasswordResetAsync(user, lifetime?)` | A single-use link (≤ 7 days) with which the user chooses a password. **Preferred** – the administrator never knows it. |
+| `CreateUserAsync(email, startPassword?, profile?)` | A new account, address confirmed (the administrator vouches for it); with a start password it must be changed at the first sign-in. `400` invalid address or password, `409 email_taken`. |
 | `SetPasswordAsync(user, password, mustChange: true)` | A start password, e.g. read out on the phone. With `mustChange` (default) the next sign-in yields no session until the user has chosen an own password. |
 | `CreateInvitationAsync(user, lifetime?)` | For accounts without a password: the link sets the first password. |
 | `ResetTwoFactorAsync(user)` | Phone and recovery codes lost: removes authenticator, recovery codes and remembered devices; all sessions end. |
@@ -43,18 +44,16 @@ All on `ISlimAuthManager` – **you** decide who may call them (role, [sudo mode
 | `SignOutEverywhereAsync(user)` | Ends every session (ban, suspected compromise). |
 
 The administrator calls are logged without passwords or links: 4007 password set, 4008 reset link created, 4009 2FA
-reset, 4010 unlocked; 3004 when all sessions are revoked, 4011 when the user replaces an administrator's password. A complete set of admin endpoints is in
+reset, 4010 unlocked, 4012 account created; 3004 when all sessions are revoked, 4011 when the user replaces an administrator's password. A complete set of admin endpoints is in
 [`samples/templates/Enterprise/AdminEndpoints.cs`](../../samples/templates/Enterprise/AdminEndpoints.cs).
 
 **Creating an account:**
 
 ```csharp
-if (await store.CreateAsync(new SlimNewUser { Email = email }, ct) is not { } user)   // Profile = your business data
-    return Results.Conflict();                  // address taken
-user.EmailConfirmed = true;                     // the administrator vouches for the address
-await store.UpdateSecurityStateAsync(user, user.SecurityStamp, ct);
-var reset = await auth.CreatePasswordResetAsync(user, TimeSpan.FromDays(3), ct);
-// hand reset.Link to the new colleague – or: await auth.SetPasswordAsync(user, startPassword, mustChange: true, ct);
+var created = await auth.CreateUserAsync(email, profile: new Employee(…), ct: ct);   // or with a start password
+if (!created.Succeeded) return created.Failure;                                      // 400 / 409 email_taken
+var reset = await auth.CreatePasswordResetAsync(created.User, TimeSpan.FromDays(3), ct);
+// hand reset.Link to the new colleague
 ```
 
 **Links and the mailbox:** a reset link the administrator hands over proves nothing about the mailbox. Unlike a mailed

@@ -107,7 +107,7 @@ public sealed class SlimRegistrationContext
     public string? Provider { get; init; }
     /// <summary>
     /// The request (client IP, captcha header, invitation code, …); <c>null</c> when your own code calls
-    /// <see cref="ISlimAuthManager.RegisterAsync"/> outside a request (a background job, an import) – guards run there
+    /// <see cref="ISlimAuthManager.BeginRegistrationAsync"/> outside a request (a background job, an import) – guards run there
     /// too, so decide yourself whether such a call is trusted.
     /// </summary>
     public HttpContext? HttpContext { get; init; }

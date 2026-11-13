@@ -104,6 +104,9 @@ internal static partial class Log
     [LoggerMessage(4007, LogLevel.Information, "SlimIdentity: administrator set the password of user {UserId} (change required: {MustChange}).")]
     public static partial void AdminPasswordSet(ILogger logger, string userId, bool mustChange);
 
+    [LoggerMessage(4012, LogLevel.Information, "SlimIdentity: administrator created user {UserId} (start password: {WithPassword}).")]
+    public static partial void UserCreatedByAdministrator(ILogger logger, string userId, bool withPassword);
+
     [LoggerMessage(4008, LogLevel.Information, "SlimIdentity: administrator created a password reset link for user {UserId}.")]
     public static partial void AdminPasswordResetCreated(ILogger logger, string userId);
 

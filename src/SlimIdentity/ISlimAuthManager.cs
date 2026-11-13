@@ -88,21 +88,52 @@ public interface ISlimAuthManager
     Task<IResult?> ConfirmPasswordAsync(SlimUser user, string? password, CancellationToken ct = default);
 
     /// <summary>
-    /// Registration for your own endpoint (several steps, captcha, your own form) with every rule of
-    /// <c>POST /register</c>: address and password rules, registration guards, no enumeration (an address that already
-    /// has an account gets the "account exists" mail, a new one the verification mail – the answer is the same),
-    /// the <c>user_created</c> event. <paramref name="profile"/> – your validated business data – reaches
-    /// <see cref="ISlimUserStore.CreateAsync"/> as <see cref="SlimNewUser.Profile"/>, so account and profile are
-    /// created together. Return <see cref="SlimRegistrationResult.Response"/>; <see cref="ISlimRegistrationProfile"/>
-    /// is not asked (validate your own input). Works on hosts with <c>Endpoints.EnableRegistration = false</c>.
+    /// Starts a registration from your own endpoint (captcha, your own form) exactly like <c>POST /register</c>: the
+    /// address rules, the <see cref="SlimRegistrationStage.Begin"/> guards, the same answer for a free and a taken
+    /// address (a code and a link, or the "account exists" mail). No account exists yet: return the result as-is – the
+    /// <c>action_required</c> answer with <c>verify_email</c> – and the client continues at <c>POST /register/verify</c>
+    /// (or the mailed link) and sets its first sign-in method at <c>/register/password</c> or <c>/register/passkey</c>,
+    /// where the profile is validated by <see cref="ISlimRegistrationProfile"/> and the
+    /// <see cref="SlimRegistrationStage.Complete"/> guards decide. Those steps are available with mail even with
+    /// <c>Endpoints.EnableRegistration = false</c>. Throws <see cref="InvalidOperationException"/> without mail – there
+    /// a registration is one step: create the account with <see cref="CreateUserAsync"/>.
     /// </summary>
+    /// <param name="email">The address as entered.</param>
+    /// <param name="useCookies">The mode of the session at the end; <c>null</c> for <c>Endpoints.DefaultUseCookies</c>.</param>
+    /// <param name="rememberMe">Persistent cookie once the registration is complete.</param>
+    /// <param name="ct">Cancellation.</param>
     /// <example><code>
-    /// var result = await auth.RegisterAsync(form.Email, form.Password, new SignUpProfile(form.Company), ct);
-    /// return result.Response;
+    /// if (!await captcha.VerifyAsync(form.Captcha, ct)) return Results.BadRequest();
+    /// return await auth.BeginRegistrationAsync(form.Email, ct: ct);
     /// </code></example>
-    Task<SlimRegistrationResult> RegisterAsync(string email, string password, object? profile = null, CancellationToken ct = default);
+    Task<IResult> BeginRegistrationAsync(string email, bool? useCookies = null, bool rememberMe = false, CancellationToken ct = default);
 
     // ---------------------------------------------------------------- administration (authorize the caller yourself!)
+
+    /// <summary>
+    /// Administrator: creates an account for <paramref name="email"/> with its address confirmed – you vouch for it. No
+    /// registration guard is asked, no mail is sent; the <c>user_created</c> event is raised (reason
+    /// <c>administrator</c>). Without <paramref name="initialPassword"/> the account has no sign-in method yet: hand
+    /// out <see cref="CreateInvitationAsync"/> or <see cref="CreatePasswordResetAsync"/>, or let the user sign in with
+    /// an external provider. With it, the password is a start password: checked against the password rules before
+    /// anything is written, and the first sign-in answers <c>password_change_required</c>.
+    /// <paramref name="profile"/> reaches <see cref="ISlimUserStore.CreateAsync"/> as <see cref="SlimNewUser.Profile"/>.
+    /// Fails with <c>400</c> (address, password rules) or <c>409 email_taken</c> – which tells whether the address has an
+    /// account: never return it from a public endpoint.
+    /// </summary>
+    /// <example><code>
+    /// var created = await auth.CreateUserAsync(form.Email, profile: new Member(form.Department), ct: ct);
+    /// if (!created.Succeeded) return created.Failure;
+    /// var invitation = await auth.CreateInvitationAsync(created.User, ct: ct);
+    /// </code></example>
+    Task<SlimCreateUserResult> CreateUserAsync(string email, string? initialPassword = null, object? profile = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Whether <paramref name="user"/> can sign in at all: a password (or one your <see cref="ISlimCustomPasswordValidator"/>
+    /// knows), an external login or a passkey. <c>false</c> for an account you created without a password and whose
+    /// invitation is still open.
+    /// </summary>
+    Task<bool> HasSignInMethodAsync(SlimUser user, CancellationToken ct = default);
 
     /// <summary>
     /// Administrator: sets the password of <paramref name="user"/> – e.g. a start password for an account you created,
@@ -156,7 +187,7 @@ public interface ISlimAuthManager
 
     /// <summary>
     /// Creates an invitation / "complete your registration" link for an existing user <b>without</b> password
-    /// (create it first via <see cref="ISlimUserStore.CreateAsync"/> with an empty hash, plus your own business data).
+    /// (create it first via <see cref="CreateUserAsync"/> without a start password, with your business data as profile).
     /// The link is stateless, bound to the user's security stamp and therefore single-use. Sending it is up to the host.
     /// Accepted via <c>POST /auth/invitation/accept</c>.
     /// </summary>

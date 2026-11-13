@@ -89,31 +89,34 @@ public async Task<SlimUser?> CreateAsync(SlimNewUser newUser, CancellationToken 
 }
 ```
 
-## Your own registration endpoint
+## Your own first step
 
-Several steps, a captcha, a form of your own? Turn off `/register` and call `ISlimAuthManager.RegisterAsync` – it
-applies every rule of the built-in endpoint: address normalization and validation, password rules, registration
-guards, the uniform answer with the "account exists" and verification mails, the `user_created` event. You validate the
-profile yourself (`ISlimRegistrationProfile` is not asked) and pass your typed object:
+A captcha, an invitation check, a form of your own before the address is entered? Turn off `/register` and call
+`ISlimAuthManager.BeginRegistrationAsync` – it applies every rule of the built-in endpoint: address normalization and
+validation, registration guards, the uniform `action_required` answer with the verification or "account exists" mail.
+The client continues with the built-in steps (`/register/verify`, `/register/password` or a passkey), which stay
+mapped while mail is on; the profile comes with the credential there and `ISlimRegistrationProfile` validates it as
+usual:
 
 ```csharp
 builder.Services.AddSlimIdentity(o => o.Endpoints.EnableRegistration = false);
 
 app.MapPost("/api/sign-up", async (SignUpForm form, ISlimAuthManager auth, CancellationToken ct) =>
 {
-    if (Validate(form) is { } errors) return Results.ValidationProblem(errors);   // before anything is looked up
-    var result = await auth.RegisterAsync(form.Email, form.Password, new SignUpProfile(form.Company, form.Name), ct);
-    return result.Response;   // 400 / 403, or the uniform registration_accepted
+    if (!await captcha.VerifyAsync(form.Captcha, ct)) return Results.BadRequest();
+    return await auth.BeginRegistrationAsync(form.Email, ct: ct);   // 400 / 403, or the uniform action_required
 });
 ```
 
-`result.User` is the new account (e.g. to start an onboarding job). It is `null` both when the address already had an
-account and when `result.Failure` is set – never tell the caller which, or the endpoint reveals registered addresses.
-
 ## Accounts you create yourself
 
-Administrators and invitations call the store directly and can pass a profile the same way:
+Administrators and imports call `ISlimAuthManager.CreateUserAsync` – a confirmed account without guards and without
+mail, optionally with a start password that must be changed at the first sign-in, and with your profile:
 
 ```csharp
-var user = await store.CreateAsync(new SlimNewUser { Email = request.Email, Profile = new SignUpProfile(…) }, ct);
+var result = await auth.CreateUserAsync(request.Email, profile: new SignUpProfile(…), ct: ct);
+if (!result.Succeeded) return result.Failure;   // 400 invalid address or password, 409 address taken
 ```
+
+Without a start password the account has no sign-in method yet: send an invitation or a password reset link next
+(`HasSignInMethodAsync` tells whether an account can sign in).

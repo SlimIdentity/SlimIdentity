@@ -11,7 +11,6 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 namespace MyApp.Enterprise;
 
@@ -98,15 +97,15 @@ public static class AdminEndpoints
         // The invitee opens it in the SPA, which calls POST /auth/invitation/info (shows the e-mail)
         // and POST /auth/invitation/accept { token, password } (sets the password, confirms the mail, signs in).
         admin.MapPost("/invitations", async (InviteRequest req, ClaimsPrincipal me,
-                ISlimUserStore store, ISlimAuthManager auth, IInvitationMailer mailer, CancellationToken ct) =>
+                ISlimAuthManager auth, IInvitationMailer mailer, CancellationToken ct) =>
             {
-                if (SlimEmailAddress.Normalize(req.Email) is not { } email) return InvalidEmail();
-                // CreateAsync returns null if the address is taken (unique index) – no check-then-act race
-                // the profile is written by the store together with the account (EF Core package: ISlimUserFactory)
-                if (await store.CreateAsync(new SlimNewUser { Email = email, Profile = req }, ct) is not { } user)
-                    return Results.Conflict(new { status = "already_exists" });
+                // 400 for an invalid address, 409 email_taken (unique index – no check-then-act race); the profile is
+                // written by the store together with the account (EF Core package: ISlimUserFactory)
+                var created = await auth.CreateUserAsync(req.Email, profile: req, ct: ct);
+                if (!created.Succeeded) return created.Failure;
+                var user = created.User;
                 var invitation = await auth.CreateInvitationAsync(user, TimeSpan.FromDays(14), ct); // link from Links.BaseUrl (or Links.InvitationUrl)
-                await mailer.SendInvitationAsync(email, req.DisplayName, me.GetSlimEmail(), invitation.Link, invitation.ExpiresAt, ct);
+                await mailer.SendInvitationAsync(user.Email, req.DisplayName, me.GetSlimEmail(), invitation.Link, invitation.ExpiresAt, ct);
                 return Results.Ok(new { status = "invited", user.Id, invitation.ExpiresAt });
             });
 
@@ -114,26 +113,17 @@ public static class AdminEndpoints
         var accounts = admin.MapGroup("/users").RequireAuthorization(SlimIdentityDefaults.SudoPolicy);
 
         // Create an account without mail: the admin vouches for the address and hands over a reset link
-        accounts.MapPost("/", async (CreateUserRequest req, ISlimUserStore store, ISlimAuthManager auth,
-                IOptions<SlimIdentityOptions> options, IEnumerable<ISlimPasswordRule> rules, CancellationToken ct) =>
+        accounts.MapPost("/", async (CreateUserRequest req, ISlimAuthManager auth, CancellationToken ct) =>
             {
-                // the same canonical form as the built-in endpoints – otherwise look-alike duplicates slip past the unique index
-                if (SlimEmailAddress.Normalize(req.Email) is not { } email) return InvalidEmail();
-                // the start password is checked BEFORE the account exists: a rejected one must not leave an orphan
-                // account behind that answers the corrected retry with 409
-                if (req.StartPassword is { } candidate && await CheckPasswordAsync(candidate, email, options.Value, rules, ct) is { } rejected)
-                    return rejected;
-
-                // business data (DisplayName, roles …) as Profile – never the request itself, it holds the start password
-                if (await store.CreateAsync(new SlimNewUser { Email = email }, ct) is not { } user)
-                    return Results.Conflict(new { status = "already_exists" });
-                user.EmailConfirmed = true;   // the administrator vouches for the address
-                await store.UpdateSecurityStateAsync(user, user.SecurityStamp, ct);   // a new account: nothing to lose against
-                // read out on the phone – the user must choose an own password at the first sign-in
-                if (req.StartPassword is { } start && await auth.SetPasswordAsync(user, start, mustChange: true, ct) is null)
+                // address confirmed (the administrator vouches for it); a start password is checked before the account
+                // exists and must be changed at the first sign-in (read out on the phone). Business data (DisplayName,
+                // roles …) as profile – never the request itself, it holds the start password.
+                var created = await auth.CreateUserAsync(req.Email, req.StartPassword, ct: ct);
+                if (!created.Succeeded) return created.Failure;   // 400 address or password, 409 email_taken
+                var user = created.User;
+                if (await auth.HasSignInMethodAsync(user, ct))
                     return Results.Ok(new { status = "created", user.Id });
-                // no start password – or a rule changed its mind since the check (e.g. a breach lookup): never an
-                // account nobody can sign in to, the user sets the first password with the link
+                // no start password: never an account nobody can sign in to – the user sets the first password with the link
                 var reset = await auth.CreatePasswordResetAsync(user, TimeSpan.FromDays(3), ct);
                 return Results.Ok(new { status = "created", user.Id, resetLink = reset.Link, reset.ExpiresAt });
             });
@@ -178,26 +168,6 @@ public static class AdminEndpoints
         return app;
     }
 
-    private static IResult InvalidEmail() =>
-        Results.ValidationProblem(new Dictionary<string, string[]> { ["email"] = ["A valid e-mail address is required."] },
-            extensions: new Dictionary<string, object?> { ["code"] = "validation_failed" });
-
-    // the rules SetPasswordAsync applies (length limits + every ISlimPasswordRule), in the same validation format
-    private static async Task<IResult?> CheckPasswordAsync(string password, string email, SlimIdentityOptions options,
-        IEnumerable<ISlimPasswordRule> rules, CancellationToken ct)
-    {
-        var p = options.Password;
-        var errors = new List<string>();
-        if (password.Length < p.MinimumLength) errors.Add($"Password must be at least {p.MinimumLength} characters long.");
-        if (password.Length > p.MaximumLength) errors.Add($"Password must be at most {p.MaximumLength} characters long.");
-        if (errors.Count == 0)
-            foreach (var rule in rules)
-                errors.AddRange(await rule.ValidateAsync(password, email, ct));
-        return errors.Count == 0
-            ? null
-            : Results.ValidationProblem(new Dictionary<string, string[]> { ["password"] = [.. errors] },
-                extensions: new Dictionary<string, object?> { ["code"] = "validation_failed" });
-    }
 
     private static string EscapeLogLineBreaks(string value) =>
         value.Replace("\r", "\\r", StringComparison.Ordinal)

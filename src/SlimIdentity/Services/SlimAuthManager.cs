@@ -66,12 +66,53 @@ internal sealed class SlimAuthManager(
         method is { Length: > 0 and <= 32 } && method != MethodImpersonation && method != "api_key"
         && method.All(c => c is (>= 'a' and <= 'z') or (>= '0' and <= '9') or '_');
 
-    public async Task<SlimRegistrationResult> RegisterAsync(string email, string password, object? profile = null, CancellationToken ct = default)
+    public Task<IResult> BeginRegistrationAsync(string email, bool? useCookies = null, bool rememberMe = false, CancellationToken ct = default)
     {
-        var registration = services.GetRequiredService<SlimRegistrationService>();
-        var (normalized, invalid) = await registration.ValidateAsync(email, password, ct);
-        if (invalid is not null) return new SlimRegistrationResult(null, invalid, invalid);
-        return await registration.CreateAsync(normalized!, password, profile, ct);
+        var o = options.Value;
+        if (!o.Email.Enabled)
+            throw new InvalidOperationException("SlimIdentity: BeginRegistrationAsync needs mail – without it, create the account with CreateUserAsync.");
+        if (!SlimIdentity.Endpoints.SlimModes.TryResolve(o, useCookies, out var cookies, out var modeError)) return Task.FromResult(modeError!);
+        return services.GetRequiredService<SlimRegistrationFlow>().BeginCoreAsync(email, cookies, rememberMe, ct);
+    }
+
+    public async Task<SlimCreateUserResult> CreateUserAsync(string email, string? initialPassword = null, object? profile = null, CancellationToken ct = default)
+    {
+        var normalized = SlimEmailAddress.Normalize(email);
+        if (!services.GetRequiredService<SlimRegistrationService>().IsValidAccountName(normalized))
+            return new SlimCreateUserResult(null, SlimRegistrationService.InvalidEmail("email"));
+        if (initialPassword is not null
+            && await services.GetRequiredService<SlimPasswordPolicy>().ValidateAsync(initialPassword, normalized, ct) is { } errors)
+            return new SlimCreateUserResult(null, SlimIdentity.Http.SlimResults.Validation(errors));
+
+        // without a hash first: the start password is written together with its change requirement – never one without the other
+        var user = await store.FindByEmailAsync(normalized, ct) is null
+            ? await store.CreateAsync(new SlimNewUser { Email = normalized, Profile = profile, EmailConfirmed = true }, ct)
+            : null;
+        if (user is null)
+            return new SlimCreateUserResult(null, SlimIdentity.Http.SlimResults.Status(SlimErrorCodes.EmailTaken,
+                "The address already has an account.", StatusCodes.Status409Conflict));
+
+        if (initialPassword is not null)
+        {
+            var credentials = services.GetRequiredService<SlimCredentialService>();
+            await store.WriteSecurityStateAsync(user, u =>
+            {
+                credentials.ApplyNewPassword(u, initialPassword);
+                u.PasswordChangeRequired = true;
+            }, ct);
+        }
+        Log.UserCreatedByAdministrator(logger, user.Id, initialPassword is not null);
+        metrics.Registration("created");
+        await Hooks.RaiseAsync(SlimEventTypes.UserCreated, user.Id, reason: "administrator", ct: ct);
+        return new SlimCreateUserResult(user, null);
+    }
+
+    public async Task<bool> HasSignInMethodAsync(SlimUser user, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+        if (await services.GetRequiredService<SlimCredentialService>().HasPasswordAsync(user, ct)) return true;
+        if (services.GetService<ISlimExternalLoginStore>() is { } external && (await external.GetExternalLoginsAsync(user.Id, ct)).Count > 0) return true;
+        return services.GetService<ISlimPasskeySignInMethods>() is { } passkeys && (await passkeys.GetPasskeysAsync(user.Id, ct)).Count > 0;
     }
 
     public async Task<SlimAuthResult> ImpersonateAsync(SlimUser targetUser, CancellationToken ct = default)

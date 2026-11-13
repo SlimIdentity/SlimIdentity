@@ -14,15 +14,13 @@ builder.Services.AddSlimIdentity(o =>
 
 ## Creating an invitation (host endpoint)
 
-```csharp
-app.MapPost("/api/admin/invitations", async (InviteRequest req, ISlimUserStore store, ISlimAuthManager auth,
-        IMyMailer mailer, CancellationToken ct) =>
+```csharpapp.MapPost("/api/admin/invitations", async (InviteRequest req, ISlimAuthManager auth, IMyMailer mailer,
+        CancellationToken ct) =>
     {
-        // no password yet; null = the address is already taken
-        // business data (tenant, roles, display name) goes in as Profile – written with the account
-        if (await store.CreateAsync(new SlimNewUser { Email = req.Email, Profile = req }, ct) is not { } user)
-            return Results.Conflict();
-        var invitation = await auth.CreateInvitationAsync(user, ct: ct);
+        // no password yet; business data (tenant, roles, display name) goes in as profile – written with the account
+        var created = await auth.CreateUserAsync(req.Email, profile: req, ct: ct);
+        if (!created.Succeeded) return created.Failure;   // 400 invalid address, 409 address taken
+        var invitation = await auth.CreateInvitationAsync(created.User, ct: ct);
         await mailer.SendInvitationAsync(req.Email, invitation.Link, invitation.ExpiresAt, ct);
         return Results.Ok();
     })

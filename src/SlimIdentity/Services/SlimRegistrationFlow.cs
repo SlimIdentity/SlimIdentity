@@ -46,7 +46,16 @@ internal sealed class SlimRegistrationFlow(
             return SlimResults.Validation(errors);
         }
 
-        var email = SlimEmailAddress.Normalize(request?.Email);
+        return await BeginCoreAsync(request?.Email, cookies, request?.RememberMe ?? false, ct);
+    }
+
+    /// <summary>
+    /// The start of a registration from an address alone – shared by <c>POST /register</c> and
+    /// <see cref="ISlimAuthManager.BeginRegistrationAsync"/>.
+    /// </summary>
+    internal async Task<IResult> BeginCoreAsync(string? address, bool cookies, bool rememberMe, CancellationToken ct)
+    {
+        var email = SlimEmailAddress.Normalize(address);
         if (!SlimRegistrationService.IsValidEmail(email)) return SlimRegistrationService.InvalidEmail("email");
 
         // the host's veto – decided from the request alone, before anything is looked up (no enumeration)
@@ -77,7 +86,7 @@ internal sealed class SlimRegistrationFlow(
             metrics.Registration("existing_account");
         }
 
-        var state = new SlimFlowPayload("", "", flowId, issuedAt, SlimSignInProofs.None, "", cookies, request!.RememberMe,
+        var state = new SlimFlowPayload("", "", flowId, issuedAt, SlimSignInProofs.None, "", cookies, rememberMe,
             Method: SlimSignInActions.VerifyEmail, CodeHash: codeHash, IssuedAt: issuedAt, Email: email);
         return Steps(state);
     }
@@ -120,8 +129,7 @@ internal sealed class SlimRegistrationFlow(
     public async Task<IResult> ExchangeAsync(string token, bool? useCookies, CancellationToken ct)
     {
         if (!SlimModes.TryResolve(O, useCookies, out var cookies, out var modeError)) return modeError!;
-        if (!O.Endpoints.EnableRegistration
-            || !workflow.TryUnprotect<SlimLinkPayload>(SlimWorkflowTokens.LinkPurpose, token, out var link)
+        if (!workflow.TryUnprotect<SlimLinkPayload>(SlimWorkflowTokens.LinkPurpose, token, out var link)
             || link.Kind != SlimLinkPayload.Registration || link.Email is null
             || await store.FindByEmailAsync(link.Email, ct) is not null)
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);

@@ -133,7 +133,7 @@ public sealed class SlimNewUser
 
     /// <summary>
     /// Your business data for the new account: what <see cref="ISlimRegistrationProfile"/> returned for the
-    /// <c>profile</c> of a registration, what your endpoint passed to <see cref="ISlimAuthManager.RegisterAsync"/>, or
+    /// <c>profile</c> of a registration, what your code passed to <see cref="ISlimAuthManager.CreateUserAsync"/>, or
     /// what you set yourself. <c>null</c> without a profile (always for an external login). Write it in the same
     /// transaction as the account.
     /// </summary>

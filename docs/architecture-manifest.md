@@ -69,9 +69,9 @@ No profile or business data – that stays in the host's own user model.
 | `ISlimRegistrationGuard` (any number) | – | veto against new accounts (company domains, captcha) |
 | `ISlimEventObserver` (any number) | – | security events for audit trails and alerts (observe only) |
 
-`ISlimAuthManager` is the service for host endpoints: `SignInAsync`, `RegisterAsync`, `ImpersonateAsync` /
+`ISlimAuthManager` is the service for host endpoints: `SignInAsync`, `BeginRegistrationAsync`, `ImpersonateAsync` /
 `EndImpersonationAsync`, `ElevateSessionAsync` (sudo) with `ConfirmPasswordAsync`, `SignOutAsync`,
-`SignOutEverywhereAsync`, `CreateInvitationAsync`, `RefreshClaimsAsync`, and for administrators `SetPasswordAsync`,
+`SignOutEverywhereAsync`, `CreateInvitationAsync`, `RefreshClaimsAsync`, and for administrators `CreateUserAsync`, `HasSignInMethodAsync`, `SetPasswordAsync`,
 `CreatePasswordResetAsync`, `ResetTwoFactorAsync` and `UnlockAsync`.
 
 ## 5. Security mechanisms

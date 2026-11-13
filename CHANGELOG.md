@@ -105,8 +105,7 @@ with a new major version.
 - Registration with business data: `/register` takes an optional `profile`, validated by the host's
   `ISlimRegistrationProfile` (`AddRegistrationProfile<T>()`) before anything is looked up (`400 profile.<field>`;
   refused without a hook) and passed to the store as `SlimNewUser.Profile` – account and profile are created together.
-  `ISlimAuthManager.RegisterAsync` gives host endpoints every rule of `/register` (validation, guards, uniform answer
-  and mails, event). **Breaking:** `ISlimUserStore.CreateAsync(SlimNewUser, ct)` replaces `(email, passwordHash, ct)`;
+  **Breaking:** `ISlimUserStore.CreateAsync(SlimNewUser, ct)` replaces `(email, passwordHash, ct)`;
   EF Core package `ISlimUserFactory<TUser>.Create(SlimNewUser)` (refuses a profile without a factory).
 - Passkeys (WebAuthn), opt-in, in the separate package `SlimIdentity.Passkeys` (the core contains no WebAuthn code;
   `AddPasskeyStore<T>()`, `AddPasskeys(o => …)`; checks at start-up that it has the core's version):
@@ -364,6 +363,15 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
   `Profile` and the `CredentialKind` of its first way in; a veto keeps the flow open) and `External` (automatic
   registration through an external login). Without mail `/register` asks `Begin` and `Complete`. Constants for the
   kinds: `SlimCredentialKinds`.
+- **Breaking** (`ISlimAuthManager`): `RegisterAsync` and `SlimRegistrationResult` are removed.
+  `BeginRegistrationAsync(email, useCookies?, rememberMe)` is the first step of `/register` for a host endpoint of its
+  own (address rules, `Begin` guards, uniform `action_required` answer and mails; requires mail). The following steps
+  (`/register/verify`, `/register/password`, `/register/passkey`, the registration link) are mapped whenever mail is
+  on; `Endpoints.EnableRegistration` controls only `/register`. `CreateUserAsync(email, initialPassword?, profile?)`
+  creates an account for administrators and imports – address confirmed, no guards, no mail, `user_created` with reason
+  `administrator`; a start password must be changed at the first sign-in (`SlimCreateUserResult`: `User` or `Failure`
+  with `400` / `409 email_taken`). `HasSignInMethodAsync(user)` tells whether an account has a password, an external
+  login or a passkey.
 - **Breaking** with `UseTenantKey`: the tenant of the request is part of the Data Protection purpose of every token
   (mail links, invitations, sign-in flows, refresh tokens, remembered devices, exchange and link codes, passkey
   ceremonies). A token of one tenant no longer decrypts in another; tokens issued before the update, or outside a

@@ -5,8 +5,8 @@ using SlimIdentity.Security;
 namespace SlimIdentity.Services;
 
 /// <summary>
-/// Creates accounts with the rules of <c>/register</c> – used by the endpoint and by
-/// <see cref="ISlimAuthManager.RegisterAsync"/>, so a host's own registration endpoint cannot skip one of them.
+/// The rules of a new account – the address or sign-in name, the profile – and the one-step registration of
+/// <c>/register</c> without mail.
 /// </summary>
 internal sealed class SlimRegistrationService(
     ISlimUserStore store,
@@ -74,14 +74,13 @@ internal sealed class SlimRegistrationService(
     /// Step 2: the host's veto, then the account – or, if the address is taken, the "account exists" mail and the same
     /// answer. <paramref name="email"/> and <paramref name="password"/> passed <see cref="ValidateAsync"/>.
     /// </summary>
-    public async Task<SlimRegistrationResult> CreateAsync(string email, string password, object? profile, CancellationToken ct)
+    public async Task<IResult> CreateAsync(string email, string password, object? profile, CancellationToken ct)
     {
         // the host's veto – decided from the request alone, before anything is looked up (no enumeration)
         if ((await hooks.CheckRegistrationAsync(email, SlimRegistrationStage.Begin, null, null, null, ct)
              ?? await hooks.CheckRegistrationAsync(email, SlimRegistrationStage.Complete, SlimCredentialKinds.Password, profile, null, ct)) is { } veto)
         {
-            var refused = SlimResults.Status(veto.Error, veto.Message ?? "Registration is not allowed.", StatusCodes.Status403Forbidden);
-            return new SlimRegistrationResult(null, refused, refused);
+            return SlimResults.Status(veto.Error, veto.Message ?? "Registration is not allowed.", StatusCodes.Status403Forbidden);
         }
 
         var existing = await store.FindByEmailAsync(email, ct);
@@ -105,14 +104,13 @@ internal sealed class SlimRegistrationService(
         metrics.Registration("created");
         await hooks.RaiseAsync(SlimEventTypes.UserCreated, user.Id, reason: "registration", ct: ct);
 
-        // with mail the address is confirmed at the first sign-in (step verify_email)
-        return new SlimRegistrationResult(user, null, Accepted);
+        return Accepted;
 
-        async Task<SlimRegistrationResult> AccountExistsAsync(string existingEmail, string? existingUserId)
+        async Task<IResult> AccountExistsAsync(string existingEmail, string? existingUserId)
         {
             metrics.Registration("existing_account");
             await mail.SendAsync(SlimEmailKinds.AccountExists, existingEmail, existingUserId, (s, x, c) => s.SendAccountExistsEmailAsync(x, existingEmail, c), ct);
-            return new SlimRegistrationResult(null, null, Accepted);
+            return Accepted;
         }
     }
 }

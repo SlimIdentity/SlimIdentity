@@ -5,6 +5,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
@@ -215,15 +216,17 @@ public sealed class TestApp : IAsyncDisposable
         link.IndexOf("token=", StringComparison.Ordinal) is var i and >= 0 ? Uri.UnescapeDataString(link[(i + 6)..]) : link;
 
     /// <summary>
-    /// An account whose address nobody proved – created through <see cref="ISlimAuthManager.RegisterAsync"/>, which
-    /// leaves the address unconfirmed.
+    /// An account with a password whose address nobody proved – an import, or an account of an earlier version that
+    /// created accounts before the mailbox was proven.
     /// </summary>
     public async Task PreRegisterUnconfirmedAsync(string email, string password)
     {
         await using var scope = App.Services.CreateAsyncScope();
-        var result = await scope.ServiceProvider.GetRequiredService<ISlimAuthManager>().RegisterAsync(email, password);
-        Assert.NotNull(result.User);
-        Assert.False(result.User.EmailConfirmed);
+        var normalized = SlimEmailAddress.Normalize(email)!;
+        var hash = scope.ServiceProvider.GetRequiredService<IPasswordHasher<SlimUser>>().HashPassword(new SlimUser { Email = normalized }, password);
+        var user = await Users.CreateAsync(new SlimNewUser { Email = normalized, PasswordHash = hash }, default);
+        Assert.NotNull(user);
+        Assert.False(user.EmailConfirmed);
     }
 
     public async ValueTask DisposeAsync()

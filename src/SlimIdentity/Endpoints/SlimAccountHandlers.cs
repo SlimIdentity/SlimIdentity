@@ -40,7 +40,7 @@ internal sealed class SlimAccountHandlers(
         var (profile, invalidProfile) = await registration.ValidateProfileAsync(email!, request!.Profile, ct);
         if (invalidProfile is not null) return invalidProfile;
 
-        return (await registration.CreateAsync(email!, request.Password!, profile, ct)).Response;
+        return await registration.CreateAsync(email!, request.Password!, profile, ct);
     }
 
     // ------------------------------------------------------------------ POST /forgot-password & /reset-password
