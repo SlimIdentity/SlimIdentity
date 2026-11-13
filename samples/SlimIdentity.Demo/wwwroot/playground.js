@@ -172,7 +172,15 @@ const actions = {
 
   async forgot() { await call("POST", "/auth/forgot-password", { email: email() }); $("mailboxAddress").value = email(); },
   async changePassword() { const r = await call("POST", "/auth/change-password", { currentPassword: password(), newPassword: $("newValue").value }); if (r.ok) storeSession(r.json); },
-  async changeEmail() { await call("POST", "/auth/change-email", { newEmail: $("newValue").value, password: password() }); $("mailboxAddress").value = $("newValue").value; },
+  async changeEmail() {
+    const r = await call("POST", "/auth/change-email", { newEmail: $("newValue").value, password: password() });
+    if (r.ok) state.emailChangeToken = r.json.token;
+    $("mailboxAddress").value = $("newValue").value;
+  },
+  async confirmEmailChange() {
+    const r = await call("POST", "/auth/change-email/confirm", { token: state.emailChangeToken, code: $("emailChangeCode").value });
+    if (r.ok) { storeSession(r.json); state.emailChangeToken = null; $("emailChangeCode").value = ""; $("email").value = $("newValue").value; }
+  },
 
   async mailbox() {
     const address = $("mailboxAddress").value.trim() || email();
@@ -440,7 +448,6 @@ async function handleLinkPage() {
     showSteps((await call("POST", "/auth/flow", { token })).json);
     history.replaceState(null, "", "/");
   }
-  else if (kind === "confirm-email-change") { await call("POST", "/auth/confirm-email-change", { token }); history.replaceState(null, "", "/"); }
 }
 
 // ------------------------------------------------------------------ virtual authenticator (RFC 6238, WebCrypto)

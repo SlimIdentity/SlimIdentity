@@ -92,9 +92,6 @@ reviewing an integration, focus on [assumptions](#assumptions), [host responsibi
 - A sign-in within the last 5 minutes stands in for the password of accounts without one: a session cookie stolen
   right after the owner signed in can change sign-in methods during that window. Accounts with a password are not
   affected.
-- An e-mail change to an address the attacker does not own needs the owner of that address to confirm a link they
-  never asked for; if they do, the account they then "own" keeps the attacker's passkeys and external logins
-  (comparable to E12 – the confirmation proves the mailbox, not who created the account).
 - Without `ISlimSessionStore` sessions are stateless: a copied cookie stays valid until it expires or the stamp
   rotates (`/logout-all`).
 - Cookie revocation takes effect at the next validation (`Cookies.SecurityStampValidationInterval`, default 1 min).

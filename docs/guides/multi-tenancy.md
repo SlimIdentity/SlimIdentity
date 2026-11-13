@@ -89,8 +89,7 @@ public sealed class TenantLinkBuilder(TenantDirectory tenants) : ISlimLinkBuilde
         {
             SlimLinkKind.EmailVerification => "verify-email",
             SlimLinkKind.PasswordReset => "reset-password",
-            SlimLinkKind.Invitation => "accept-invitation",
-            _ => "confirm-email-change",
+            _ => "accept-invitation",
         };
         return $"{tenant.FrontEndOrigin}/{path}#token={Uri.EscapeDataString(token)}";
     }

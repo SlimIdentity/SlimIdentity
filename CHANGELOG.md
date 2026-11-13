@@ -28,8 +28,8 @@ with a new major version.
   per user, replay protection for TOTP and e-mail codes (`ISlimTwoFactorStore.TryMarkCodeUsedAsync`).
 - Optional "remember this device" for 2FA (`TwoFactor.RememberDeviceLifetime`, off by default): cookie or bearer token
   bound to user and security stamp, `/2fa/forget-device` and `/2fa/forget-all-devices`.
-- E-mail change: `/change-email` (password confirmation) and `/confirm-email-change` (link to the new address,
-  notification of the old one, all sessions end).
+- E-mail change: `/change-email` (password confirmation, code to the new address) and `/change-email/confirm`
+  (notification of the old address, all other sessions end).
 - Pluggable password rules (`ISlimPasswordRule`, `AddPasswordRule<T>()`), e.g. a breached-password check, and
   `GET /password-policy` so front ends can show and live-check the active rules.
 - Metrics on the meter `SlimIdentity` (System.Diagnostics.Metrics, OpenTelemetry-ready) and source-generated logs with
@@ -395,6 +395,13 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
   Under a policy an e-mail code is no sufficient second factor; an authenticator or recovery code, a passkey, or a
   remembered device of an account with an authenticator is. New error code `two_factor_setup_required`. TypeScript
   client: `setupLoginAuthenticator`, `enableLoginAuthenticator`, `confirmRecoveryCodes`.
+- **Breaking:** an e-mail change is confirmed with a 6-digit code instead of a link. `/change-email` answers
+  `email_change_requested` with a `token` (15 minutes); a session of the same account sends it with the code from the
+  new address to `POST /auth/change-email/confirm`, which reissues that session and ends all others. Wrong codes count
+  like other codes (`400 invalid_verification_code`, then `429 too_many_attempts`). The anonymous
+  `/confirm-email-change`, `Links.EmailChangeUrl`, `SlimLinkOptions.EmailChangeTemplate` and `SlimLinkKind.EmailChange`
+  are removed; `ISlimEmailSender.SendEmailChangeConfirmationAsync` is replaced by `SendEmailChangeCodeAsync`.
+  TypeScript client: `changeEmail` returns the token, `confirmEmailChange(token, code)`.
 - **Breaking** with `UseTenantKey`: the tenant of the request is part of the Data Protection purpose of every token
   (mail links, invitations, sign-in flows, refresh tokens, remembered devices, exchange and link codes, passkey
   ceremonies). A token of one tenant no longer decrypts in another; tokens issued before the update, or outside a

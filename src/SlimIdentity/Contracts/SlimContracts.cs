@@ -290,7 +290,7 @@ public sealed record SlimExternalLinkRequest(string Code, string? CodeVerifier =
 }
 
 /// <summary>Body of <c>POST /auth/change-email</c>.</summary>
-/// <param name="NewEmail">The new e-mail address (receives the confirmation link).</param>
+/// <param name="NewEmail">The new e-mail address (receives the confirmation code).</param>
 /// <param name="Password">The current password.</param>
 public sealed record SlimChangeEmailRequest(string NewEmail, string Password)
 {
@@ -302,13 +302,27 @@ public sealed record SlimChangeEmailRequest(string NewEmail, string Password)
     }
 }
 
-/// <summary>Body of <c>POST /auth/confirm-email-change</c>.</summary>
-/// <param name="Token">Token from the confirmation mail sent to the new address.</param>
-public sealed record SlimConfirmEmailChangeRequest(string Token)
+/// <summary>Answer of <c>POST /auth/change-email</c>.</summary>
+/// <param name="Status"><c>email_change_requested</c>.</param>
+/// <param name="Token">Pass it with the mailed code to <c>POST /auth/change-email/confirm</c>.</param>
+/// <param name="ExpiresIn">Seconds until the token expires.</param>
+public sealed record SlimEmailChangeResponse(string Status, string Token, int ExpiresIn)
 {
     private bool PrintMembers(System.Text.StringBuilder builder)
     {
-        builder.Append("Token = ").Append(SlimRedaction.Mask(Token));
+        builder.Append("Status = ").Append(Status).Append(", Token = ").Append(SlimRedaction.Mask(Token)).Append(", ExpiresIn = ").Append(ExpiresIn);
+        return true;
+    }
+}
+
+/// <summary>Body of <c>POST /auth/change-email/confirm</c>.</summary>
+/// <param name="Token">The token of <c>POST /auth/change-email</c>.</param>
+/// <param name="Code">The 6-digit code mailed to the new address.</param>
+public sealed record SlimConfirmEmailChangeRequest(string Token, string Code)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Token = ").Append(SlimRedaction.Mask(Token)).Append(", Code = ").Append(SlimRedaction.Mask(Code));
         return true;
     }
 }

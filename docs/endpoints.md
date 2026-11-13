@@ -94,13 +94,13 @@ matched).
 | `POST /register/password` ⏱ | `flowToken`, `password`, `profile` (optional object – [business data](guides/registration-profile.md); refused after a reset) | `200` session – the account is created with its address confirmed; after a [reset](#password-reset) the new password is set and all other sessions end | `400` validation (`profile.<field>` from your profile hook; `profile` if none is registered), `401 invalid_token`, `403 <veto>` of a registration guard (the flow stays open), `409 email_taken` (completed already, or the address got an account meanwhile) |
 | `POST /forgot-password` ⏱ | `email` | `200 reset_requested` (always; no link for a pure SSO account) – the link continues at `/flow`, see [password reset](#password-reset) | – |
 | `POST /change-password` ⏱ 🔒 | `currentPassword`, `newPassword` | `200` new session for this device – others end | `400 invalid_password`, `400` validation, `403 not_allowed_while_impersonating`, `409 password_not_set`, `423 locked_out` |
-| `POST /change-email` ⏱ 🔒 | `newEmail`, `password` | `200 email_change_requested` (always – also for taken addresses); link goes to the new address | `400 email_unchanged`, `400 invalid_password`, `400` validation, `403` during impersonation, `423 locked_out` |
-| `POST /confirm-email-change` ⏱ | `token` | `200 email_changed` – address changed, confirmed, all sessions end, old address notified | `400 invalid_token`, `400 email_taken` |
+| `POST /change-email` ⏱ 🔒 | `newEmail`, `password` | `200 email_change_requested` + `token`, `expiresIn` (always – also for taken addresses); a 6-digit code goes to the new address | `400 email_unchanged`, `400 invalid_password`, `400` validation, `403` during impersonation, `423 locked_out` |
+| `POST /change-email/confirm` ⏱ 🔒 | `token`, `code` | `200` session (cookie or tokens) – address changed and confirmed, all other sessions end, old address notified; any session of the account may confirm | `400 invalid_token`, `400 invalid_verification_code` (also for a taken address), `400 email_taken`, `403` during impersonation, `409 concurrent_change`, `429 too_many_attempts` |
 | `GET /password-policy` | – | `200` `minimumLength`, `maximumLength`, `hasAdditionalRules` – for hints and live validation in the front end (no composition rules, NIST SP 800-63B) | – |
 | `GET /me` 🔒 | – | `200` `id`, `email`, `isImpersonating`, `impersonatorId`, `authenticationMethod`, `sudoUntil`, `claims` | `401` |
 
 With `WithoutEmail()` the mail-based routes are not mapped: `/forgot-password`, `/register/verify`,
-`/change-email`, `/confirm-email-change`, `/2fa/enable-email` and – unless `allowSelfRegistration` – `/register`.
+`/change-email`, `/change-email/confirm`, `/2fa/enable-email` and – unless `allowSelfRegistration` – `/register`.
 `/flow` and `/register/password` (or `/register/passkey`) stay for reset links an administrator hands over. Without mail, `/register` takes `email` (any identifier),
 `password` and `profile` and answers `200 registration_accepted`; the address stays unconfirmed.
 

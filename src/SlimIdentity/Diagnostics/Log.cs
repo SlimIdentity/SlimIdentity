@@ -203,8 +203,8 @@ internal static partial class Log
     [LoggerMessage(7108, LogLevel.Warning, "[SlimIdentity:NullEmailSender] Verification code for {Email}: {Code}")]
     public static partial void NullMailVerificationCode(ILogger logger, string email, string code);
 
-    [LoggerMessage(7104, LogLevel.Warning, "[SlimIdentity:NullEmailSender] E-mail change confirmation for {Email}: {Link}")]
-    public static partial void NullMailEmailChange(ILogger logger, string email, string link);
+    [LoggerMessage(7104, LogLevel.Warning, "[SlimIdentity:NullEmailSender] E-mail change code for {Email}: {Code}")]
+    public static partial void NullMailEmailChange(ILogger logger, string email, string code);
 
     [LoggerMessage(7105, LogLevel.Warning, "[SlimIdentity:NullEmailSender] Address {OldEmail} was changed to {NewEmail}")]
     public static partial void NullMailEmailChanged(ILogger logger, string oldEmail, string newEmail);

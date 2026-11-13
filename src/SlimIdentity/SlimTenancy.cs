@@ -27,8 +27,6 @@ public enum SlimLinkKind
     PasswordReset,
     /// <summary>Accepts an invitation (<c>POST /auth/flow</c> with its token, then step <c>set_credential</c>).</summary>
     Invitation,
-    /// <summary>Confirms a new address (<c>POST /auth/confirm-email-change</c>).</summary>
-    EmailChange,
 }
 
 /// <summary>

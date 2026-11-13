@@ -365,5 +365,5 @@ public sealed class EntityFrameworkStoreTests
         public Task SendPasswordResetEmailAsync(SlimEmailContext context, string email, string resetTokenOrLink, CancellationToken ct) => Task.CompletedTask;
         public Task SendTwoFactorCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) => Task.CompletedTask;
         public Task SendEmailVerificationCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) => Task.CompletedTask;
-        public Task SendEmailChangeConfirmationAsync(SlimEmailContext context, string newEmail, string confirmationTokenOrLink, CancellationToken ct) => Task.CompletedTask;
+        public Task SendEmailChangeCodeAsync(SlimEmailContext context, string newEmail, string code, CancellationToken ct) => Task.CompletedTask;
     }}

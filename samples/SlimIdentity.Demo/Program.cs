@@ -114,7 +114,7 @@ app.MapGet("/api/playground/info", async (DemoSettings settings, IOptions<SlimId
         [.. (await schemes.GetRequestHandlerSchemesAsync()).Select(s => s.Name)]));   // the configured external providers
 app.MapGet("/api/playground/mailbox", (string address, DemoMailbox mailbox) => mailbox.For(address))
     .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy);
-foreach (var page in new[] { "/verify-email", "/reset-password", "/accept-invitation", "/confirm-email-change" })
+foreach (var page in new[] { "/verify-email", "/reset-password", "/accept-invitation" })
     app.MapGet(page, (IWebHostEnvironment env) => Results.File(Path.Combine(env.WebRootPath, "index.html"), "text/html"));
 
 app.MapGet("/api/hello", (ClaimsPrincipal user) =>

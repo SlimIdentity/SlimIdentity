@@ -85,7 +85,6 @@ internal sealed class SlimIdentityOptionsValidator : IValidateOptions<SlimIdenti
         CheckTemplate(o.Links.EmailVerificationUrl, "Links.EmailVerificationUrl");
         CheckTemplate(o.Links.PasswordResetUrl, "Links.PasswordResetUrl");
         CheckTemplate(o.Links.InvitationUrl, "Links.InvitationUrl");
-        CheckTemplate(o.Links.EmailChangeUrl, "Links.EmailChangeUrl");
 
         return f.Count > 0
             ? ValidateOptionsResult.Fail(f.Select(x => "SlimIdentity: " + x))

@@ -365,8 +365,8 @@ public sealed class ConsoleEmailSender(DemoMailbox mailbox) : ISlimEmailSender
     public Task SendEmailVerificationCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) =>
         Write("Confirm your e-mail address", email, code);
 
-    public Task SendEmailChangeConfirmationAsync(SlimEmailContext context, string newEmail, string confirmationTokenOrLink, CancellationToken ct) =>
-        Write("Confirm your new e-mail address", newEmail, confirmationTokenOrLink);
+    public Task SendEmailChangeCodeAsync(SlimEmailContext context, string newEmail, string code, CancellationToken ct) =>
+        Write("Confirm your new e-mail address", newEmail, $"Your code: {code}");
 
     public Task SendEmailChangedNotificationAsync(SlimEmailContext context, string oldEmail, string newEmail, CancellationToken ct) =>
         Write("Your e-mail address was changed", oldEmail, $"The sign-in address of your account is now {newEmail}. Not you? Contact support.");

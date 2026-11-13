@@ -21,8 +21,7 @@ internal sealed class SlimLinks(IOptions<SlimIdentityOptions> options, IHttpCont
         {
             SlimLinkKind.EmailVerification => links.EmailVerificationTemplate,
             SlimLinkKind.PasswordReset => links.PasswordResetTemplate,
-            SlimLinkKind.Invitation => links.InvitationTemplate,
-            _ => links.EmailChangeTemplate,
+            _ => links.InvitationTemplate,
         };
         return SlimWorkflowTokens.BuildLink(template, token);
     }

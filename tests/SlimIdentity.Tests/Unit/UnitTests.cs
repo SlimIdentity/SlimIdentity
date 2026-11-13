@@ -163,7 +163,6 @@ public sealed class OptionsValidatorTests
         Assert.Equal("https://app.example.com/verify-email?token={token}", links.EmailVerificationTemplate);
         Assert.Equal("https://app.example.com/pw?t={token}", links.PasswordResetTemplate);
         Assert.Equal("https://app.example.com/accept-invitation?token={token}", links.InvitationTemplate);
-        Assert.Equal("https://app.example.com/confirm-email-change?token={token}", links.EmailChangeTemplate);
         Assert.Null(new SlimLinkOptions().InvitationTemplate);
     }
 

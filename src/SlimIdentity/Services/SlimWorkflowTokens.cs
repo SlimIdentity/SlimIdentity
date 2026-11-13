@@ -26,7 +26,7 @@ internal sealed class SlimWorkflowTokens(
     public const string ExternalExchangePurpose = "SlimIdentity.ExternalExchange.v1";
     public const string ExternalLinkPurpose = "SlimIdentity.ExternalLink.v1";
     public const string RefreshTokenPurpose = "SlimIdentity.RefreshToken.v1";
-    public const string EmailChangePurpose = "SlimIdentity.EmailChange.v1";
+    public const string EmailChangePurpose = "SlimIdentity.EmailChange.v2";
     public const string RememberDevicePurpose = "SlimIdentity.TwoFactorRememberDevice.v1";
 
     // AOT-safe: metadata comes from the source-generated context, never from reflection
@@ -139,7 +139,8 @@ internal sealed record SlimLinkPayload(string Kind, string FlowId, string? Email
 }
 /// <summary>"Remember this device" for 2FA; <c>ExpiresAt</c> (unix seconds) is checked against the injected clock.</summary>
 internal sealed record SlimRememberDevicePayload(string Uid, string Stamp, long ExpiresAt);
-internal sealed record SlimEmailChangePayload(string Uid, string OldEmail, string NewEmail, string Stamp);
+/// <summary>A requested e-mail change: the hash of the code mailed to <c>NewEmail</c> (<c>null</c> if none was sent).</summary>
+internal sealed record SlimEmailChangePayload(string Uid, string FlowId, string NewEmail, string Stamp, string? CodeHash, long IssuedAt);
 internal sealed record SlimTwoFactorSetupPayload(string Uid, string Secret, string Stamp);
 /// <summary>An external identity to be linked to the signed-in account; PKCE-bound like the exchange code.</summary>
 internal sealed record SlimExternalLinkPayload(string Provider, string ProviderKey, string Nonce, string CodeChallenge);

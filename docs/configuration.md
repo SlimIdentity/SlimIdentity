@@ -19,7 +19,7 @@ All defaults are the secure choice. The options are listed in three tiers – mo
 | Option | Default | Description |
 | :--- | :--- | :--- |
 | `Tokens.JwtSecret` | – | HMAC-SHA256 key, at least 32 bytes. **Setting it enables JWT bearer tokens** (mobile apps, SPAs with tokens, service clients); without it only cookie sessions exist and cookie mode is the default. Keep it out of source control. |
-| `Links.BaseUrl` | – | Your front end, e.g. `https://app.example.com`. Mail links then point to `/verify-email`, `/reset-password`, `/accept-invitation` and `/confirm-email-change` (each `?token=…`). Its origin counts as trusted. Without it the raw token is passed to the e-mail sender. |
+| `Links.BaseUrl` | – | Your front end, e.g. `https://app.example.com`. Mail links then point to `/verify-email`, `/reset-password` and `/accept-invitation` (each `?token=…`). Its origin counts as trusted. Without it the raw token is passed to the e-mail sender. |
 | `TrustedOrigins` | `[]` | Further front-end origins (e.g. `https://admin.example.com`). Used for the CSRF `Origin` check in cookie mode and as allowed `returnUrl` targets after external login. Configure CORS for the same origins. |
 | `TwoFactor.AuthenticatorIssuer` | `SlimIdentity` | Name shown in authenticator apps – set your product name. |
 
@@ -44,7 +44,7 @@ All defaults are the secure choice. The options are listed in three tiers – mo
 | `Cookies.Domain` | – | e.g. `.example.com` for cross-subdomain SPAs. |
 | `Cookies.SameSite` | `Strict` | `Lax` for `app.example.com → api.example.com`. |
 | `TwoFactor.RememberDeviceLifetime` | `null` (off) | "Remember this device": skip the second factor on a device for this long (max. 90 days). See the [2FA guide](guides/two-factor.md#remember-this-device-optional). |
-| `Links.EmailVerificationUrl`, `PasswordResetUrl`, `InvitationUrl`, `EmailChangeUrl` | – | Override single links (must contain `{token}`), e.g. `https://app.example.com/reset?token={token}`. |
+| `Links.EmailVerificationUrl`, `PasswordResetUrl`, `InvitationUrl` | – | Override single links (must contain `{token}`), e.g. `https://app.example.com/reset?token={token}`. |
 | `ExternalLogin.TrustedEmailProviders` | `[]` | Providers whose e-mail counts as verified without `email_verified=true` (e.g. `Google`). |
 
 ## 3. Rarely needed
@@ -54,7 +54,7 @@ All defaults are the secure choice. The options are listed in three tiers – mo
 | `RoutePrefix` | `/auth` | Prefix of all endpoints. |
 | `Endpoints.EnablePasswordReset` | `true` | `/forgot-password` (the link continues at `/flow`). |
 | `Endpoints.EnableChangePassword` | `true` | `/change-password`. Disable for LDAP-only setups. |
-| `Endpoints.EnableChangeEmail` | `true` | `/change-email`, `/confirm-email-change`. Disable if the login identifier is managed elsewhere (LDAP, SSO). |
+| `Endpoints.EnableChangeEmail` | `true` | `/change-email`, `/change-email/confirm`. Disable if the login identifier is managed elsewhere (LDAP, SSO). |
 | `Endpoints.AllowCookieAuth` | `true` | Cookie sessions on/off (e.g. off for pure APIs). |
 | `Endpoints.ConfigureDefaultAuthenticationScheme` | `true` | Makes the `SlimIdentity` policy scheme the default, so plain `[Authorize]` works. |
 | `SignIn.RevealAccountState` | `false` | `false`: inactive/locked accounts answer like a wrong password (401). `true`: `403 account_disabled` / `423` with `lockoutEndUtc`. |

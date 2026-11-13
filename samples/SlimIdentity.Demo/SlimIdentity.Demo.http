@@ -158,7 +158,7 @@ Content-Type: application/json
 
 { "flowToken": "<flowToken>", "password": "Invited123!" }
 
-### ---------------------------------------------------------------- E-mail change (link is printed to the console)
+### ---------------------------------------------------------------- E-mail change (code is printed to the console)
 
 POST {{auth}}/change-email
 Authorization: Bearer {{accessToken}}
@@ -167,10 +167,12 @@ Content-Type: application/json
 { "newEmail": "admin-new@demo.local", "password": "Admin123!" }
 
 ###
-POST {{auth}}/confirm-email-change
+# token from the answer above; any session of the account may confirm, it continues with new tokens
+POST {{auth}}/change-email/confirm
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
-{ "token": "<token from console>" }
+{ "token": "<token>", "code": "<code from console>" }
 
 ### ---------------------------------------------------------------- 2FA (TOTP)
 

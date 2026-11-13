@@ -49,6 +49,7 @@ public static class SlimIdentityDefaults
     // fixed protocol parameters (deliberately not configurable)
     /// <summary>A sign-in from its first factor to the session – every step together.</summary>
     internal static readonly TimeSpan SignInFlowLifetime = TimeSpan.FromMinutes(15);
+    internal static readonly TimeSpan EmailChangeLifetime = TimeSpan.FromMinutes(15);
     internal static readonly TimeSpan TwoFactorSetupTokenLifetime = TimeSpan.FromMinutes(10);
     internal static readonly TimeSpan ExternalExchangeCodeLifetime = TimeSpan.FromMinutes(1);
     internal const int RecoveryCodeCount = 10;

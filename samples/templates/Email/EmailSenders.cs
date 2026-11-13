@@ -50,9 +50,9 @@ public sealed class MailKitEmailSender(IOptions<SmtpSettings> settings) : ISlimE
             $"<p>Enter <b>{code}</b> to confirm this address and finish signing in. It expires in a few minutes.</p>" +
             "<p>If you did not try to sign in, you can ignore this e-mail.</p>", ct);
 
-    public Task SendEmailChangeConfirmationAsync(SlimEmailContext context, string newEmail, string link, CancellationToken ct) =>
-        SendAsync(newEmail, "Confirm your new e-mail address",
-            $"<p>Please confirm that this address should be used for your account:</p><p><a href=\"{link}\">Confirm address</a></p>" +
+    public Task SendEmailChangeCodeAsync(SlimEmailContext context, string newEmail, string code, CancellationToken ct) =>
+        SendAsync(newEmail, $"Confirm your new e-mail address: {code}",
+            $"<p>Enter <b>{code}</b> in your account settings to use this address for your account. It expires in 15 minutes.</p>" +
             "<p>If you did not request this, you can ignore this e-mail.</p>", ct);
 
     // Optional (default: no mail) – sent to the old address after the change. Encode user input in HTML!
@@ -107,8 +107,8 @@ public sealed class SendGridEmailSender(ISendGridClient client, ILogger<SendGrid
     public Task SendEmailVerificationCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) =>
         SendAsync(email, $"Confirm your e-mail address: {code}", $"Your confirmation code is <b>{code}</b>.", ct);
 
-    public Task SendEmailChangeConfirmationAsync(SlimEmailContext context, string newEmail, string link, CancellationToken ct) =>
-        SendAsync(newEmail, "Confirm your new e-mail address", $"<a href=\"{link}\">Confirm address</a>", ct);
+    public Task SendEmailChangeCodeAsync(SlimEmailContext context, string newEmail, string code, CancellationToken ct) =>
+        SendAsync(newEmail, $"Confirm your new e-mail address: {code}", $"Your confirmation code is <b>{code}</b>.", ct);
 
     private async Task SendAsync(string to, string subject, string html, CancellationToken ct)
     {
@@ -134,6 +134,6 @@ public sealed class LoggingEmailSender(ILogger<LoggingEmailSender> logger) : ISl
     public Task SendEmailVerificationCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct)
     { logger.LogInformation("Development mail sink: e-mail verification code."); return Task.CompletedTask; }
 
-    public Task SendEmailChangeConfirmationAsync(SlimEmailContext context, string newEmail, string link, CancellationToken ct)
-    { logger.LogInformation("Development mail sink: email change confirmation."); return Task.CompletedTask; }
+    public Task SendEmailChangeCodeAsync(SlimEmailContext context, string newEmail, string code, CancellationToken ct)
+    { logger.LogInformation("Development mail sink: e-mail change code."); return Task.CompletedTask; }
 }

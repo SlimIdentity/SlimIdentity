@@ -84,7 +84,7 @@ public sealed class SlimEndpointOptions
     public bool EnablePasswordReset { get; set; } = true;
     /// <summary><c>/change-password</c>. Disable for LDAP-only setups – the password then lives in the directory.</summary>
     public bool EnableChangePassword { get; set; } = true;
-    /// <summary><c>/change-email</c> and <c>/confirm-email-change</c>. Disable if the login identifier is managed elsewhere (LDAP, SSO).</summary>
+    /// <summary><c>/change-email</c> and <c>/change-email/confirm</c>. Disable if the login identifier is managed elsewhere (LDAP, SSO).</summary>
     public bool EnableChangeEmail { get; set; } = true;
 
     /// <summary>Allows cookie sessions (<c>?useCookies=true</c>). JWT bearer tokens are allowed when <see cref="SlimTokenOptions.JwtSecret"/> is set.</summary>
@@ -278,8 +278,7 @@ public sealed class SlimLinkOptions
 {
     /// <summary>
     /// Base address of your front end, e.g. <c>https://app.example.com</c>. Links then point to
-    /// <c>/verify-email</c>, <c>/reset-password</c>, <c>/accept-invitation</c> and <c>/confirm-email-change</c>
-    /// (each with <c>?token=…</c>). Its origin is trusted like an entry in <see cref="SlimIdentityOptions.TrustedOrigins"/>.
+    /// <c>/verify-email</c>, <c>/reset-password</c> and <c>/accept-invitation</c> (each with <c>?token=…</c>). Its origin is trusted like an entry in <see cref="SlimIdentityOptions.TrustedOrigins"/>.
     /// </summary>
     public string? BaseUrl { get; set; }
 
@@ -289,13 +288,10 @@ public sealed class SlimLinkOptions
     public string? PasswordResetUrl { get; set; }
     /// <summary>Overrides the invitation link, e.g. <c>https://app.example.com/invite?token={token}</c>.</summary>
     public string? InvitationUrl { get; set; }
-    /// <summary>Overrides the e-mail change link (sent to the new address), e.g. <c>https://app.example.com/change-email?token={token}</c>.</summary>
-    public string? EmailChangeUrl { get; set; }
 
     internal string? EmailVerificationTemplate => EmailVerificationUrl ?? FromBase("/verify-email");
     internal string? PasswordResetTemplate => PasswordResetUrl ?? FromBase("/reset-password");
     internal string? InvitationTemplate => InvitationUrl ?? FromBase("/accept-invitation");
-    internal string? EmailChangeTemplate => EmailChangeUrl ?? FromBase("/confirm-email-change");
 
     private string? FromBase(string path) =>
         string.IsNullOrWhiteSpace(BaseUrl) ? null : $"{BaseUrl.TrimEnd('/')}{path}?token={{token}}";

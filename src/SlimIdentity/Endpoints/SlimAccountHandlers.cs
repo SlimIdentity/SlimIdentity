@@ -16,6 +16,7 @@ internal sealed class SlimAccountHandlers(
     SlimHookRunner hooks,
     SlimRegistrationService registration,
     SlimLinks links,
+    SlimSharedStateAccess sharedState,
     SlimMetrics metrics,
     IOptions<SlimIdentityOptions> options,
     TimeProvider time,
@@ -66,7 +67,7 @@ internal sealed class SlimAccountHandlers(
         return SlimResults.Status("reset_requested", "If the account exists, a reset e-mail has been sent.");
     }
 
-    // ------------------------------------------------------------------ POST /change-email & /confirm-email-change
+    // ------------------------------------------------------------------ POST /change-email & /change-email/confirm
 
     public async Task<IResult> ChangeEmailAsync(SlimChangeEmailRequest? request, CancellationToken ct)
     {
@@ -81,67 +82,93 @@ internal sealed class SlimAccountHandlers(
         if (await credentials.ConfirmPasswordAsync(user, request!.Password, Http, ct) is { } failure)
             return failure;
 
-        // Enumeration prevention: same answer whether or not the new address is already used. Its owner
-        // gets either the confirmation link or an "account exists" notice.
+        // Enumeration prevention: same answer whether or not the new address is already used. Its owner gets an
+        // "account exists" notice instead of a code, so the confirmation fails like a wrong code.
         var target = newEmail!;
+        var issuedAt = time.GetUtcNow().ToUnixTimeMilliseconds();
+        string? codeHash = null;
         var owner = await store.FindByEmailAsync(target, ct);
         if (owner is null)
         {
-            var token = workflow.Protect(SlimWorkflowTokens.EmailChangePurpose,
-                new SlimEmailChangePayload(user.Id, user.Email, target, user.SecurityStamp), O.Tokens.EmailVerificationTokenLifetime);
-            var link = links.Build(SlimLinkKind.EmailChange, token);
-            await mail.SendAsync(SlimEmailKinds.EmailChange, target, user.Id, (s, x, c) => s.SendEmailChangeConfirmationAsync(x, target, link, c), ct);
+            var code = SlimTotp.GenerateNumericCode();
+            if (await mail.SendAsync(SlimEmailKinds.EmailChange, target, user.Id, (s, x, c) => s.SendEmailChangeCodeAsync(x, target, code, c), ct))
+                codeHash = HashEmailChangeCode(user.Id, target, code, issuedAt);
         }
         else
         {
             await mail.SendAsync(SlimEmailKinds.AccountExists, target, owner.Id, (s, x, c) => s.SendAccountExistsEmailAsync(x, target, c), ct);
         }
 
+        var lifetime = SlimIdentityDefaults.EmailChangeLifetime;
+        var flowId = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
+        var token = workflow.Protect(SlimWorkflowTokens.EmailChangePurpose,
+            new SlimEmailChangePayload(user.Id, flowId, target, user.SecurityStamp, codeHash, issuedAt), lifetime);
+
         Log.EmailChangeRequested(logger, user.Id);
         metrics.EmailChange("requested");
-        return SlimResults.Status("email_change_requested", "If the address can be used, a confirmation link has been sent to it.");
+        return Results.Ok(new SlimEmailChangeResponse("email_change_requested", token, (int)lifetime.TotalSeconds));
     }
 
+    // The code is bound to the account and its stamp, not to the session: every session of the account may enter it.
     public async Task<IResult> ConfirmEmailChangeAsync(SlimConfirmEmailChangeRequest? request, CancellationToken ct)
     {
-        if (!workflow.TryUnprotect<SlimEmailChangePayload>(SlimWorkflowTokens.EmailChangePurpose, request?.Token, out var payload))
-            return SlimResults.InvalidToken();
+        var (user, error) = await LoadCurrentUserAsync(forbidImpersonation: true, ct);
+        if (user is null) return error!;
 
-        var user = await store.FindByIdAsync(payload.Uid, ct);
-        if (user is null
-            || !user.IsActive
-            || !string.Equals(user.Email, payload.OldEmail, StringComparison.OrdinalIgnoreCase)
+        if (!workflow.TryUnprotect<SlimEmailChangePayload>(SlimWorkflowTokens.EmailChangePurpose, request?.Token, out var payload)
+            || !string.Equals(payload.Uid, user.Id, StringComparison.Ordinal)
             || !SlimUser.IsSameSecurityState(user.SecurityStamp, payload.Stamp))
             return SlimResults.InvalidToken();
 
-        // address, confirmation and a new stamp in one write: link single use; sessions carry the old address → sign in again
+        // counted before the check: of parallel guesses, at most the limit is checked
+        if (await sharedState.CountAsync(SlimSharedStateAccess.VerificationCodeFlow, payload.FlowId, SlimIdentityDefaults.EmailChangeLifetime, ct) > SlimLoginHandlers.VerificationAttemptsPerFlow
+            || await sharedState.CountAsync(SlimSharedStateAccess.VerificationCodeAddress, payload.NewEmail.Trim().ToUpperInvariant(), SlimLoginHandlers.VerificationAddressWindow, ct) > SlimLoginHandlers.VerificationAttemptsPerAddress)
+        {
+            metrics.EmailChange(SlimErrorCodes.TooManyAttempts);
+            return SlimResults.Status(SlimErrorCodes.TooManyAttempts, "Too many attempts. Request a new code.", StatusCodes.Status429TooManyRequests);
+        }
+
+        var code = SlimTotp.NormalizeCode(request!.Code);
+        if (code.Length != 6 || payload.CodeHash is null
+            || !SlimHashing.FixedTimeEquals(HashEmailChangeCode(user.Id, payload.NewEmail, code, payload.IssuedAt), payload.CodeHash))
+        {
+            metrics.EmailChange(SlimErrorCodes.InvalidVerificationCode);
+            return SlimResults.BadRequest(SlimErrorCodes.InvalidVerificationCode, "The code is invalid.");
+        }
+
+        // address, confirmation and a new stamp in one write: the code works once, other sessions end
+        var oldEmail = user.Email;
         var newStamp = SlimUser.NewSecurityStamp();
         for (var attempt = 0; ; attempt++)
         {
             var outcome = await store.UpdateEmailAsync(user, payload.NewEmail, user.SecurityStamp ?? string.Empty, newStamp, ct);
-            // the confirming person controls the new mailbox, so revealing that it is taken is fine here
+            // taken since the request: the confirming person controls the new mailbox, so revealing it is fine here
             if (outcome == SlimEmailUpdateResult.EmailTaken)
                 return SlimResults.BadRequest(SlimErrorCodes.EmailTaken, "The address is already used by another account.");
             if (outcome == SlimEmailUpdateResult.Updated) break;
-            // only the claims part changed in between: the link still stands for the current state
-            var current = await store.FindByIdAsync(payload.Uid, ct);
-            if (attempt == 2 || current is null
-                || !string.Equals(current.Email, payload.OldEmail, StringComparison.OrdinalIgnoreCase)
-                || !SlimUser.IsSameSecurityState(current.SecurityStamp, payload.Stamp))
-                return SlimResults.InvalidToken();
+            // only the claims part changed in between: the code still stands for the current state
+            var current = await store.FindByIdAsync(user.Id, ct);
+            if (attempt == 2 || current is null || !SlimUser.IsSameSecurityState(current.SecurityStamp, payload.Stamp))
+                return SlimResults.ConcurrentChange();
             user = current;
         }
         (user.Email, user.EmailConfirmed, user.SecurityStamp) = (payload.NewEmail, true, newStamp);
-        await authManager.RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
+        await authManager.RevokeSessionsAsync(user.Id, SlimAuthManager.CurrentSessionId(Http.User), ct);
 
-        var (oldEmail, newEmail) = (payload.OldEmail, payload.NewEmail);
+        var newEmail = payload.NewEmail;
         await mail.SendAsync(SlimEmailKinds.EmailChanged, oldEmail, user.Id, (s, x, c) => s.SendEmailChangedNotificationAsync(x, oldEmail, newEmail, c), ct);
 
         Log.EmailChanged(logger, user.Id);
         await hooks.RaiseAsync(SlimEventTypes.EmailChanged, user.Id, ct: ct);
         metrics.EmailChange("completed");
-        return SlimResults.Status("email_changed", "The e-mail address has been changed. Please sign in again.");
+
+        // keep the calling device signed in, with the new address in its claims
+        return SlimResults.ReissuedSession(await authManager.RefreshCurrentSessionAsync(user, ct));
     }
+
+    /// <summary>Bound to account and new address: the code proves this mailbox for this change only.</summary>
+    private static string HashEmailChangeCode(string userId, string email, string code, long issuedAt) =>
+        SlimHashing.Sha256Hex($"slimidentity.email-change-code.v1:{userId}:{email.Trim().ToUpperInvariant()}:{issuedAt}:{code}");
 
     // ------------------------------------------------------------------ GET /sessions & DELETE /sessions/{id}
 

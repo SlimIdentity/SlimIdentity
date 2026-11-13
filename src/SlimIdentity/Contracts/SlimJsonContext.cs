@@ -57,5 +57,6 @@ namespace SlimIdentity.Contracts;
 [JsonSerializable(typeof(SlimRememberDevicePayload))]
 [JsonSerializable(typeof(SlimChangeEmailRequest))]
 [JsonSerializable(typeof(SlimConfirmEmailChangeRequest))]
+[JsonSerializable(typeof(SlimEmailChangeResponse))]
 [JsonSerializable(typeof(Dictionary<string, string>))]
 internal sealed partial class SlimJsonContext : JsonSerializerContext;

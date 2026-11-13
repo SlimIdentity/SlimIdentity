@@ -28,10 +28,10 @@ public interface ISlimEmailSender
     Task SendEmailVerificationCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct);
 
     /// <summary>
-    /// Confirmation link for a requested e-mail change, sent to the <b>new</b> address
-    /// (<c>/change-email</c>, link from <c>Links.BaseUrl</c> or <c>Links.EmailChangeUrl</c>). The address changes only when the link is confirmed.
+    /// 6-digit code for a requested e-mail change, sent to the <b>new</b> address (<c>/change-email</c>). The address
+    /// changes only when a session of the account enters it at <c>/change-email/confirm</c>; the mail carries no link.
     /// </summary>
-    Task SendEmailChangeConfirmationAsync(SlimEmailContext context, string newEmail, string confirmationTokenOrLink, CancellationToken ct);
+    Task SendEmailChangeCodeAsync(SlimEmailContext context, string newEmail, string code, CancellationToken ct);
 
     /// <summary>
     /// Optional: informs the <b>old</b> address after the e-mail change was confirmed ("your address was changed –

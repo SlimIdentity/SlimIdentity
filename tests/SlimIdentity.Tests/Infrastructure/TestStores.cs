@@ -311,7 +311,7 @@ public sealed class CapturingEmailSender : ISlimEmailSender
     public Task SendPasswordResetEmailAsync(SlimEmailContext context, string email, string link, CancellationToken ct) => Add(context, "password-reset", email, link);
     public Task SendTwoFactorCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) => Add(context, "two-factor", email, code);
     public Task SendEmailVerificationCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) => Add(context, "verification-code", email, code);
-    public Task SendEmailChangeConfirmationAsync(SlimEmailContext context, string newEmail, string link, CancellationToken ct) => Add(context, "email-change", newEmail, link);
+    public Task SendEmailChangeCodeAsync(SlimEmailContext context, string newEmail, string code, CancellationToken ct) => Add(context, "email-change", newEmail, code);
     public Task SendEmailChangedNotificationAsync(SlimEmailContext context, string oldEmail, string newEmail, CancellationToken ct) => Add(context, "email-changed", oldEmail, newEmail);
     public Task SendAccountExistsEmailAsync(SlimEmailContext context, string email, CancellationToken ct) => Add(context, "account-exists", email, "");
     public Task SendLockoutNotificationEmailAsync(SlimEmailContext context, string email, DateTimeOffset lockoutEndUtc, CancellationToken ct) =>

@@ -13,27 +13,35 @@ public sealed class EmailChangeTests
         return client;
     }
 
+    private static async Task<string> RequestAsync(ApiClient client, string newEmail = "new@test.local")
+    {
+        var requested = await client.PostJsonAsync("/auth/change-email", new { newEmail, password = TestApp.UserPassword });
+        Assert.Equal("email_change_requested", requested.Str("status"));
+        return requested.Str("token")!;
+    }
+
     [Fact]
-    public async Task Email_changes_only_after_confirmation_by_the_new_address()
+    public async Task Email_changes_only_after_the_code_sent_to_the_new_address_is_entered()
     {
         await using var app = await TestApp.StartAsync();
         var client = await SignedInAsync(app);
         var otherDevice = await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword);
 
-        var requested = await client.PostJsonAsync("/auth/change-email", new { newEmail = "new@test.local", password = TestApp.UserPassword });
-        Assert.Equal("email_change_requested", requested.Str("status"));
+        var token = await RequestAsync(client);
         Assert.Equal(TestApp.UserEmail, app.Users.Get(TestApp.UserEmail).Email);   // not changed yet
+        var code = (await app.Mail.WaitForAsync("email-change", "new@test.local")).Payload;
 
-        var token = (await app.Mail.WaitForAsync("email-change", "new@test.local")).Payload;
-        var confirmed = await app.CreateClient().PostJsonAsync("/auth/confirm-email-change", new { token });
-        Assert.Equal("email_changed", confirmed.Str("status"));
+        var confirmed = await client.PostJsonAsync("/auth/change-email/confirm", new { token, code });
+        client.BearerToken = confirmed.Str("accessToken");
 
         var user = app.Users.Get("new@test.local");
         Assert.True(user.EmailConfirmed);
         await app.Mail.WaitForAsync("email-changed", TestApp.UserEmail);   // old address is informed
+        Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/hello")).StatusCode);   // calling session continues
 
-        // the link is single use and all sessions ended (they carry the old address)
-        await app.CreateClient().PostJsonAsync("/auth/confirm-email-change", new { token }, HttpStatusCode.BadRequest);
+        // single use (the stamp rotated) and all other sessions ended
+        var replay = await client.PostJsonAsync("/auth/change-email/confirm", new { token, code }, HttpStatusCode.BadRequest);
+        Assert.Equal("invalid_token", replay.Str("code"));
         var old = app.CreateClient();
         old.BearerToken = otherDevice.AccessToken;
         Assert.Equal(HttpStatusCode.Unauthorized, (await old.GetAsync("/api/hello")).StatusCode);
@@ -43,16 +51,55 @@ public sealed class EmailChangeTests
     }
 
     [Fact]
-    public async Task Taken_address_answers_identically_and_informs_its_owner()
+    public async Task Confirmation_needs_a_session_of_the_same_account_but_not_the_requesting_one()
+    {
+        await using var app = await TestApp.StartAsync();
+        var client = await SignedInAsync(app);
+        var token = await RequestAsync(client);
+        var code = (await app.Mail.WaitForAsync("email-change", "new@test.local")).Payload;
+
+        await app.CreateClient().PostJsonAsync("/auth/change-email/confirm", new { token, code }, HttpStatusCode.Unauthorized);
+
+        var admin = app.CreateClient();
+        admin.BearerToken = (await app.LoginBearerAsync(TestApp.AdminEmail, TestApp.AdminPassword)).AccessToken;
+        var foreign = await admin.PostJsonAsync("/auth/change-email/confirm", new { token, code }, HttpStatusCode.BadRequest);
+        Assert.Equal("invalid_token", foreign.Str("code"));
+
+        var otherDevice = await SignedInAsync(app);
+        await otherDevice.PostJsonAsync("/auth/change-email/confirm", new { token, code });
+        Assert.Equal("new@test.local", app.Users.Get("new@test.local").Email);
+    }
+
+    [Fact]
+    public async Task Wrong_codes_are_rejected_and_limited()
+    {
+        await using var app = await TestApp.StartAsync();
+        var client = await SignedInAsync(app);
+        var token = await RequestAsync(client);
+        var code = (await app.Mail.WaitForAsync("email-change", "new@test.local")).Payload;
+        var wrong = code == "000000" ? "111111" : "000000";
+
+        for (var i = 0; i < 5; i++)
+        {
+            var rejected = await client.PostJsonAsync("/auth/change-email/confirm", new { token, code = wrong }, HttpStatusCode.BadRequest);
+            Assert.Equal("invalid_verification_code", rejected.Str("code"));
+        }
+        await client.PostJsonAsync("/auth/change-email/confirm", new { token, code }, HttpStatusCode.TooManyRequests);
+        Assert.Equal(TestApp.UserEmail, app.Users.Get(TestApp.UserEmail).Email);
+    }
+
+    [Fact]
+    public async Task Taken_address_answers_identically_informs_its_owner_and_cannot_be_confirmed()
     {
         await using var app = await TestApp.StartAsync();
         var client = await SignedInAsync(app);
 
-        var response = await client.PostJsonAsync("/auth/change-email", new { newEmail = TestApp.AdminEmail, password = TestApp.UserPassword });
+        var token = await RequestAsync(client, TestApp.AdminEmail);
 
-        Assert.Equal("email_change_requested", response.Str("status"));
         await app.Mail.WaitForAsync("account-exists", TestApp.AdminEmail);
         Assert.DoesNotContain(app.Mail.Mails, m => m.Kind == "email-change");
+        var result = await client.PostJsonAsync("/auth/change-email/confirm", new { token, code = "123456" }, HttpStatusCode.BadRequest);
+        Assert.Equal("invalid_verification_code", result.Str("code"));
     }
 
     [Fact]
@@ -71,16 +118,15 @@ public sealed class EmailChangeTests
     {
         await using var app = await TestApp.StartAsync();
         var client = await SignedInAsync(app);
-        await client.PostJsonAsync("/auth/change-email", new { newEmail = "new@test.local", password = TestApp.UserPassword });
-        var token = (await app.Mail.WaitForAsync("email-change", "new@test.local")).Payload;
+        var token = await RequestAsync(client);
+        var code = (await app.Mail.WaitForAsync("email-change", "new@test.local")).Payload;
 
         app.Users.Seed("new@test.local", "Other1234!");
 
-        var result = await app.CreateClient().PostJsonAsync("/auth/confirm-email-change", new { token }, HttpStatusCode.BadRequest);
+        var result = await client.PostJsonAsync("/auth/change-email/confirm", new { token, code }, HttpStatusCode.BadRequest);
         Assert.Equal("email_taken", result.Str("code"));
     }
 }
-
 public sealed class PasswordRuleTests
 {
     private sealed class NoProductNameRule : ISlimPasswordRule

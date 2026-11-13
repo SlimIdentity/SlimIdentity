@@ -110,6 +110,17 @@ export type RecoveryCodesResult =
   | { ok: true; recoveryCodes: string[] }
   | { ok: false; status: string; errors?: Record<string, string[]> };
 
+/** E-mail change requested: pass the token with the code mailed to the new address to confirmEmailChange. */
+export type EmailChangeResult =
+  | { ok: true; token: string; expiresIn: number }
+  | { ok: false; status: string; errors?: Record<string, string[]> };
+
+async function toEmailChangeResult(r: Response): Promise<EmailChangeResult> {
+  const body = await r.json().catch(() => ({}));
+  if (r.ok) return { ok: true, token: body.token, expiresIn: body.expiresIn };
+  return { ok: false, status: codeOf(body, r), errors: body.errors };
+}
+
 /** Authenticator setup: QR code (data URL for an <img>), the key for manual entry and the token for enabling. */
 export type AuthenticatorSetupResult =
   | { ok: true; sharedKey: string; authenticatorUri: string; setupToken: string; qrCode: string }
@@ -246,14 +257,14 @@ export const cookieAuth = {
     await cookieFetch("/auth/2fa/forget-all-devices", { method: "POST", body: "{}" });
   },
 
-  /** E-mail change: confirmation link goes to the new address; the page behind it calls confirmEmailChange. */
-  async changeEmail(newEmail: string, password: string): Promise<FormResult> {
-    return toFormResult(await cookieFetch("/auth/change-email", { method: "POST", body: JSON.stringify({ newEmail, password }) }));
+  /** E-mail change: a 6-digit code goes to the new address; enter it with the token at confirmEmailChange. */
+  async changeEmail(newEmail: string, password: string): Promise<EmailChangeResult> {
+    return toEmailChangeResult(await cookieFetch("/auth/change-email", { method: "POST", body: JSON.stringify({ newEmail, password }) }));
   },
 
-  /** On success every session of the account ends – sign in again with the new address. */
-  async confirmEmailChange(token: string): Promise<FormResult> {
-    return toFormResult(await cookieFetch("/auth/confirm-email-change", { method: "POST", body: JSON.stringify({ token }) }));
+  /** Any session of the account may confirm; on success every other session ends and this one continues. */
+  async confirmEmailChange(token: string, code: string): Promise<FormResult> {
+    return toFormResult(await cookieFetch("/auth/change-email/confirm", { method: "POST", body: JSON.stringify({ token, code }) }));
   },
 
   /** Step "verify_email": the 6-digit code from the mail confirms the address. */
@@ -895,16 +906,16 @@ export const bearerAuth = {
     if (r.ok) storeTokens(await r.json());
   },
 
-  /** E-mail change: the confirmation link goes to the new address; the page behind it calls confirmEmailChange. */
-  async changeEmail(newEmail: string, password: string): Promise<FormResult> {
-    return toFormResult(await bearerFetch("/auth/change-email", { method: "POST", body: JSON.stringify({ newEmail, password }) }));
+  /** E-mail change: a 6-digit code goes to the new address; enter it with the token at confirmEmailChange. */
+  async changeEmail(newEmail: string, password: string): Promise<EmailChangeResult> {
+    return toEmailChangeResult(await bearerFetch("/auth/change-email", { method: "POST", body: JSON.stringify({ newEmail, password }) }));
   },
 
-  /** Anonymous; on success every session of the account ends – this client signs in again. */
-  async confirmEmailChange(token: string): Promise<FormResult> {
-    const result = await anonymousPost("/confirm-email-change", { token });
-    if (result.ok) bearerAuth.clear();
-    return result;
+  /** Any session of the account may confirm; on success every other session ends and this one gets new tokens. */
+  async confirmEmailChange(token: string, code: string): Promise<FormResult> {
+    const r = await bearerFetch("/auth/change-email/confirm", { method: "POST", body: JSON.stringify({ token, code }) });
+    if (r.ok) storeTokens(await r.clone().json());
+    return toFormResult(r);
   },
 
   /** "Sign out on all devices" – this one included. */

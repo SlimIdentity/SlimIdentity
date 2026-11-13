@@ -318,22 +318,25 @@ public static class SlimIdentityEndpointExtensions
             group.MapPost("/change-email", static ([FromBody] SlimChangeEmailRequest request,
                     [FromServices] SlimAccountHandlers h, CancellationToken ct) => h.ChangeEmailAsync(request, ct))
                 .WithName("SlimIdentity_ChangeEmail")
-                .WithSummary("Request an e-mail change (password required). A confirmation link is sent to the new address. Always 200.")
-                .Produces<SlimStatusResponse>()
+                .WithSummary("Request an e-mail change (password required). A code is sent to the new address; the answer carries the token for /change-email/confirm.")
+                .Produces<SlimEmailChangeResponse>()
                 .ProducesSlimProblem(StatusCodes.Status400BadRequest)
                 .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
                 .ProducesSlimProblem(StatusCodes.Status423Locked)
                 .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
                 .RequireAuthorization(SlimAuthorize);
 
-            group.MapPost("/confirm-email-change", static ([FromBody] SlimConfirmEmailChangeRequest request,
+            group.MapPost("/change-email/confirm", static ([FromBody] SlimConfirmEmailChangeRequest request,
                     [FromServices] SlimAccountHandlers h, CancellationToken ct) => h.ConfirmEmailChangeAsync(request, ct))
                 .WithName("SlimIdentity_ConfirmEmailChange")
-                .WithSummary("Confirm the e-mail change with the token from the mail; all sessions end.")
-                .Produces<SlimStatusResponse>()
+                .WithSummary("Confirm the e-mail change with the token and the mailed code; other sessions end, the calling one is renewed.")
+                .Produces<SlimAuthResponse>()
                 .ProducesSlimProblem(StatusCodes.Status400BadRequest)
+                .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
+                .ProducesSlimProblem(StatusCodes.Status409Conflict)
+                .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
                 .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
-                .AllowAnonymous();
+                .RequireAuthorization(SlimAuthorize);
         }
 
         group.MapGet("/password-policy", static ([FromServices] IOptions<SlimIdentityOptions> options,

@@ -37,7 +37,7 @@ public static class SlimEmailKinds
     public const string PasswordReset = "password-reset";
     /// <summary><see cref="ISlimEmailSender.SendAccountExistsEmailAsync"/>.</summary>
     public const string AccountExists = "account-exists";
-    /// <summary><see cref="ISlimEmailSender.SendEmailChangeConfirmationAsync"/>.</summary>
+    /// <summary><see cref="ISlimEmailSender.SendEmailChangeCodeAsync"/>.</summary>
     public const string EmailChange = "email-change";
     /// <summary><see cref="ISlimEmailSender.SendEmailChangedNotificationAsync"/>.</summary>
     public const string EmailChanged = "email-changed";
