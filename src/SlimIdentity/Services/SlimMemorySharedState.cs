@@ -26,6 +26,7 @@ internal sealed class SlimMemorySharedState(TimeProvider time, ILogger<SlimMemor
     }
 
     private readonly ConcurrentDictionary<string, Entry> _entries = new(StringComparer.Ordinal);
+    private int _count;               // ConcurrentDictionary.Count takes every lock – too expensive per request
     private long _nextPurgeTicks;     // 0: purge at the first opportunity
     private long _nextWarningTicks;
 
@@ -48,7 +49,7 @@ internal sealed class SlimMemorySharedState(TimeProvider time, ILogger<SlimMemor
             else
             {
                 if (!HasRoom(now)) return false;
-                if (_entries.TryAdd(key, added)) return true;
+                if (_entries.TryAdd(key, added)) { Interlocked.Increment(ref _count); return true; }
             }
         }
     }
@@ -68,15 +69,15 @@ internal sealed class SlimMemorySharedState(TimeProvider time, ILogger<SlimMemor
             else
             {
                 if (!HasRoom(now)) return long.MaxValue;
-                if (_entries.TryAdd(key, new Entry(1, now + window))) return 1;
+                if (_entries.TryAdd(key, new Entry(1, now + window))) { Interlocked.Increment(ref _count); return 1; }
             }
         }
     }
 
     private bool HasRoom(DateTimeOffset now)
     {
-        if (_entries.Count >= MaxEntries / 2) Purge(now);
-        if (_entries.Count < MaxEntries) return true;
+        if (Volatile.Read(ref _count) >= MaxEntries / 2) Purge(now);
+        if (Volatile.Read(ref _count) < MaxEntries) return true;
 
         var due = Interlocked.Read(ref _nextWarningTicks);
         if (logger is not null && now.UtcTicks >= due
@@ -90,6 +91,6 @@ internal sealed class SlimMemorySharedState(TimeProvider time, ILogger<SlimMemor
         var due = Interlocked.Read(ref _nextPurgeTicks);
         if (now.UtcTicks < due || Interlocked.CompareExchange(ref _nextPurgeTicks, (now + PurgeInterval).UtcTicks, due) != due) return;
         foreach (var entry in _entries)
-            if (entry.Value.ExpiresAt <= now) _entries.TryRemove(entry);   // only if not renewed meanwhile
+            if (entry.Value.ExpiresAt <= now && _entries.TryRemove(entry)) Interlocked.Decrement(ref _count);   // only if not renewed meanwhile
     }
 }
