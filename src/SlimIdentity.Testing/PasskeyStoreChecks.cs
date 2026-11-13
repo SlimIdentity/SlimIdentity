@@ -11,6 +11,7 @@ internal static class PasskeyStoreChecks
         PublicKey = RandomNumberGenerator.GetBytes(77),
         SignCount = signCount,
         BackupEligible = true,
+        UserHandle = RandomNumberGenerator.GetBytes(32),
         Name = "Conformance key",
         CreatedUtc = ConformanceRun.WholeSeconds(DateTimeOffset.UtcNow),
     };
@@ -37,6 +38,7 @@ internal static class PasskeyStoreChecks
                 Expect.Equal(7u, found?.SignCount, "SignCount");
                 Expect.Equal("Conformance key", found?.Name, "Name");
                 Expect.True(found is { BackupEligible: true, BackedUp: false }, "BackupEligible / BackedUp came back changed.");
+                Expect.True(found?.UserHandle is { } handle && handle.AsSpan().SequenceEqual(mine.UserHandle), "The user handle came back changed.");
                 Expect.SameInstant(mine.CreatedUtc, found?.CreatedUtc, "CreatedUtc");
 
                 var shorter = mine.CredentialId[..^1];

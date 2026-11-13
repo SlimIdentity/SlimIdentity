@@ -56,12 +56,13 @@ internal sealed class SlimPasskeyHandlers(
 
         var challenge = SlimWebAuthn.NewChallenge();
         var existing = await passkeys.GetPasskeysAsync(user.Id, ct);
-        var state = workflow.Protect(SlimPasskeyPurposes.Registration, new SlimPasskeyRegistrationPayload(user.Id, user.SecurityStamp, challenge),
+        var userHandle = Base64Url.EncodeToString(UserHandleFor(user.Id, existing));
+        var state = workflow.Protect(SlimPasskeyPurposes.Registration, new SlimPasskeyRegistrationPayload(user.Id, user.SecurityStamp, challenge, userHandle),
             CeremonyLifetime, SlimPasskeyJsonContext.Default.SlimPasskeyRegistrationPayload);
 
         return Results.Ok(new SlimPasskeyCreationOptionsResponse(new SlimPasskeyCreationOptions(
             new SlimPasskeyRelyingParty(RpId, passkeyOptions.Value.RelyingPartyName ?? O.TwoFactor.AuthenticatorIssuer),
-            new SlimPasskeyUser(Base64Url.EncodeToString(Encoding.UTF8.GetBytes(user.Id)), user.Email, user.Email),
+            new SlimPasskeyUser(userHandle, user.Email, user.Email),
             challenge,
             [new(PublicKey, SlimWebAuthn.Es256), new(PublicKey, SlimWebAuthn.Rs256)],
             (int)CeremonyLifetime.TotalMilliseconds,
@@ -104,6 +105,7 @@ internal sealed class SlimPasskeyHandlers(
         var passkey = new SlimPasskey
         {
             UserId = user.Id,
+            UserHandle = Base64Url.DecodeFromChars(state.UserHandle),
             CredentialId = credentialId,
             PublicKey = publicKey,
             SignCount = authData.SignCount,
@@ -158,7 +160,7 @@ internal sealed class SlimPasskeyHandlers(
             || await passkeys.FindPasskeyAsync(credentialId, ct) is not { } passkey)
             return Failed("unknown credential");
         if (response.UserHandle is { Length: > 0 } handle
-            && !string.Equals(handle, Base64Url.EncodeToString(Encoding.UTF8.GetBytes(passkey.UserId)), StringComparison.Ordinal))
+            && !string.Equals(handle, Base64Url.EncodeToString(passkey.UserHandle is { Length: > 0 } stored ? stored : Encoding.UTF8.GetBytes(passkey.UserId)), StringComparison.Ordinal))
             return Failed("user handle");
 
         // §7.2 step 20: the signature
@@ -248,6 +250,14 @@ internal sealed class SlimPasskeyHandlers(
     }
 
     // ------------------------------------------------------------------ helpers
+
+    /// <summary>
+    /// The handle of the account's passkeys, so an authenticator keeps one entry per account; random for the first
+    /// one – the user id (an e-mail address or a sequential number) never goes to the authenticator.
+    /// </summary>
+    private static byte[] UserHandleFor(string userId, IReadOnlyList<SlimPasskey> existing) =>
+        existing.FirstOrDefault(p => p.UserHandle is { Length: > 0 })?.UserHandle
+        ?? (existing.Count > 0 ? Encoding.UTF8.GetBytes(userId) : RandomNumberGenerator.GetBytes(32));
 
     /// <summary>The page that ran the ceremony: trusted (origin policy, or the API's own origin) and within the RP id.</summary>
     private bool OriginAllowed(SlimWebAuthn.ClientData clientData)

@@ -71,6 +71,45 @@ public sealed class PasskeyTests
     }
 
     [Fact]
+    public async Task The_user_handle_is_random_and_shared_by_the_passkeys_of_one_account()
+    {
+        await using var app = await TestApp.StartAsync(WithPasskeys());
+        var me = await SignedInAsync(app);
+        using var first = new SoftwarePasskey();
+        using var second = new SoftwarePasskey();
+        await RegisterAsync(app, me, first);
+        await RegisterAsync(app, me, second);
+
+        var userId = app.Users.Get(TestApp.UserEmail).Id;
+        Assert.Equal(32, System.Buffers.Text.Base64Url.DecodeFromChars(first.UserHandle).Length);
+        Assert.NotEqual(System.Buffers.Text.Base64Url.EncodeToString(System.Text.Encoding.UTF8.GetBytes(userId)), first.UserHandle);
+        Assert.Equal(first.UserHandle, second.UserHandle);
+        Assert.Equal(HttpStatusCode.OK, (await LoginAsync(app, first)).Status);
+        Assert.Equal(HttpStatusCode.OK, (await LoginAsync(app, second)).Status);
+    }
+
+    [Fact]
+    public async Task A_passkey_stored_without_a_user_handle_keeps_the_user_id_as_its_handle()
+    {
+        await using var app = await TestApp.StartAsync(WithPasskeys());
+        var me = await SignedInAsync(app);
+        using var legacy = new SoftwarePasskey();
+        await RegisterAsync(app, me, legacy);
+        var userId = app.Users.Get(TestApp.UserEmail).Id;
+        var store = app.App.Services.GetRequiredService<ISlimPasskeyStore>();
+        var stored = (await store.FindPasskeyAsync(legacy.CredentialId, default))!;
+        await store.RemovePasskeyAsync(userId, legacy.CredentialId, default);
+        stored.UserHandle = null;
+        await store.AddPasskeyAsync(stored, default);
+        legacy.UserHandle = System.Buffers.Text.Base64Url.EncodeToString(System.Text.Encoding.UTF8.GetBytes(userId));
+
+        Assert.Equal(HttpStatusCode.OK, (await LoginAsync(app, legacy)).Status);
+        using var added = new SoftwarePasskey();
+        await RegisterAsync(app, me, added);
+        Assert.Equal(legacy.UserHandle, added.UserHandle);   // the authenticator keeps one entry per account
+    }
+
+    [Fact]
     public async Task A_passkey_is_multi_factor_no_second_factor_follows()
     {
         await using var app = await TestApp.StartAsync(WithPasskeys());

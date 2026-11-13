@@ -80,6 +80,7 @@ public class UserPasskey
     public byte[] CredentialId { get; set; } = [];
     public Guid UserId { get; set; }
     public byte[] PublicKey { get; set; } = [];          // COSE key; the private key never leaves the device
+    public byte[]? UserHandle { get; set; }              // WebAuthn user handle (random, shared by the user's passkeys)
     public long SignCount { get; set; }
     public bool BackupEligible { get; set; }             // may be synced (iCloud Keychain, password manager) – fixed
     public bool BackedUp { get; set; }                   // currently synced, updated at every sign-in
@@ -184,6 +185,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             e.Property(x => x.CredentialIdHash).HasMaxLength(32);
             e.Property(x => x.CredentialId).HasMaxLength(1023);
             e.Property(x => x.Name).HasMaxLength(64);
+            e.Property(x => x.UserHandle).HasMaxLength(64);
             e.HasIndex(x => x.UserId);
             OwnedByUser(e);
         });

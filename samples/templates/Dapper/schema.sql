@@ -77,6 +77,7 @@ CREATE TABLE passkeys (
     sign_count         bigint       NOT NULL DEFAULT 0,
     backup_eligible    boolean      NOT NULL DEFAULT false,   -- may be synced – fixed for the passkey
     backed_up          boolean      NOT NULL DEFAULT false,   -- currently synced – updated at every sign-in
+    user_handle        bytea,                                 -- WebAuthn user handle (random, at most 64 bytes)
     last_challenge_at  bigint       NULL,
     name               varchar(64)  NOT NULL,
     created_utc        timestamptz  NOT NULL,

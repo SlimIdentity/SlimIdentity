@@ -442,7 +442,7 @@ public sealed class EfCorePasskeyStore(IdentityDb identity) : ISlimPasskeyStore
             CredentialIdHash = hash, CredentialId = passkey.CredentialId, UserId = Guid.Parse(passkey.UserId), PublicKey = passkey.PublicKey,
             SignCount = passkey.SignCount, LastChallengeAt = passkey.LastChallengeAt, Name = passkey.Name,
             CreatedUtc = passkey.CreatedUtc, LastUsedUtc = passkey.LastUsedUtc,
-            BackupEligible = passkey.BackupEligible, BackedUp = passkey.BackedUp,
+            BackupEligible = passkey.BackupEligible, BackedUp = passkey.BackedUp, UserHandle = passkey.UserHandle,
         };
         db.Passkeys.Add(row);
         try
@@ -495,6 +495,6 @@ public sealed class EfCorePasskeyStore(IdentityDb identity) : ISlimPasskeyStore
     {
         UserId = p.UserId.ToString(), CredentialId = p.CredentialId, PublicKey = p.PublicKey, SignCount = (uint)p.SignCount,
         LastChallengeAt = p.LastChallengeAt, Name = p.Name, CreatedUtc = p.CreatedUtc, LastUsedUtc = p.LastUsedUtc,
-        BackupEligible = p.BackupEligible, BackedUp = p.BackedUp,
+        BackupEligible = p.BackupEligible, BackedUp = p.BackedUp, UserHandle = p.UserHandle,
     };
 }

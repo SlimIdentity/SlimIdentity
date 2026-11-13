@@ -383,11 +383,11 @@ public sealed class DapperPasskeyStore(NpgsqlDataSource db) : ISlimPasskeyStore
     private const string Columns = """
         credential_id AS CredentialId, user_id::text AS UserId, public_key AS PublicKey, sign_count AS SignCount,
         last_challenge_at AS LastChallengeAt, name AS Name, created_utc AS CreatedUtc, last_used_utc AS LastUsedUtc,
-        backup_eligible AS BackupEligible, backed_up AS BackedUp
+        backup_eligible AS BackupEligible, backed_up AS BackedUp, user_handle AS UserHandle
         """;
 
     private sealed record Row(byte[] CredentialId, string UserId, byte[] PublicKey, long SignCount, long? LastChallengeAt,
-        string Name, DateTime CreatedUtc, DateTime? LastUsedUtc, bool BackupEligible, bool BackedUp);
+        string Name, DateTime CreatedUtc, DateTime? LastUsedUtc, bool BackupEligible, bool BackedUp, byte[]? UserHandle);
 
     private static byte[] Hash(byte[] credentialId) => System.Security.Cryptography.SHA256.HashData(credentialId);
 
@@ -412,14 +412,14 @@ public sealed class DapperPasskeyStore(NpgsqlDataSource db) : ISlimPasskeyStore
         await using var c = await db.OpenConnectionAsync(ct);
         return await c.ExecuteAsync(new CommandDefinition("""
             INSERT INTO passkeys (credential_id_hash, credential_id, user_id, public_key, sign_count, last_challenge_at, name, created_utc,
-                                  last_used_utc, backup_eligible, backed_up)
+                                  last_used_utc, backup_eligible, backed_up, user_handle)
             VALUES (@hash, @CredentialId, @UserId::uuid, @PublicKey, @SignCount, @LastChallengeAt, @Name, @CreatedUtc,
-                    @LastUsedUtc, @BackupEligible, @BackedUp)
+                    @LastUsedUtc, @BackupEligible, @BackedUp, @UserHandle)
             ON CONFLICT (credential_id_hash) DO NOTHING
             """, new
             {
                 hash = Hash(p.CredentialId), p.CredentialId, p.UserId, p.PublicKey, SignCount = (long)p.SignCount,
-                p.LastChallengeAt, p.Name, p.CreatedUtc, p.LastUsedUtc, p.BackupEligible, p.BackedUp,
+                p.LastChallengeAt, p.Name, p.CreatedUtc, p.LastUsedUtc, p.BackupEligible, p.BackedUp, p.UserHandle,
             }, cancellationToken: ct)) == 1;
     }
 
@@ -461,7 +461,7 @@ public sealed class DapperPasskeyStore(NpgsqlDataSource db) : ISlimPasskeyStore
     private static SlimPasskey Map(Row r) => new()
     {
         UserId = r.UserId, CredentialId = r.CredentialId, PublicKey = r.PublicKey, SignCount = (uint)r.SignCount,
-        LastChallengeAt = r.LastChallengeAt, Name = r.Name, BackupEligible = r.BackupEligible, BackedUp = r.BackedUp,
+        LastChallengeAt = r.LastChallengeAt, Name = r.Name, BackupEligible = r.BackupEligible, BackedUp = r.BackedUp, UserHandle = r.UserHandle,
         CreatedUtc = new DateTimeOffset(DateTime.SpecifyKind(r.CreatedUtc, DateTimeKind.Utc)),
         LastUsedUtc = r.LastUsedUtc is { } used ? new DateTimeOffset(DateTime.SpecifyKind(used, DateTimeKind.Utc)) : null,
     };

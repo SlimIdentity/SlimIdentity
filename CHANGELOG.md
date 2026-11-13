@@ -325,6 +325,19 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
   there), as for passkeys: there is nothing to guess. Block an account with `IsActive`.
 - Resetting the password by mail and `SetPasswordAsync` reset the password counter; `ResetTwoFactorAsync` resets the
   second-factor counter; `UnlockAsync` resets both.
+- **Breaking** (`ISlimUserStore`): security-state and e-mail writes are compare-and-set on the security stamp –
+  `UpdateSecurityStateAsync(user, expectedStamp)` and `UpdateEmailAsync(user, email, expectedStamp, newStamp)` return
+  `false` when the stamp changed in between. Signed-in endpoints answer `409 concurrent_change`; changes that apply to
+  any state (administrator actions, sign-out everywhere) are applied again on a fresh copy.
+- Removing a passkey or external login rotates the security stamp, ends the other sessions and answers `200` with a
+  new session (bearer: new tokens) instead of `204`. Two parallel removals can no longer take away the last two sign-in
+  methods, also across instances.
+- Account endpoints that load the current user (`/me`, sign-in methods, passkeys, 2FA setup) answer `401` when the
+  session's security stamp is no longer current.
+- The per-instance attempt gate is gone, and with it the `attempts_queued` result in metrics and `sign_in_failed`
+  events.
+- Passkeys get a random 32-byte WebAuthn user handle instead of the user id (`SlimPasskey.UserHandle`, new column in
+  the EF Core entity and the templates). Existing passkeys keep the user id as their handle.
 
 ### Fixed
 

@@ -552,7 +552,7 @@ public class SlimEfPasskeyStore<TContext, TKey>(SlimEfContext<TContext> context)
         {
             CredentialIdHash = hash, CredentialId = passkey.CredentialId, UserId = key, PublicKey = passkey.PublicKey,
             SignCount = passkey.SignCount, LastChallengeAt = passkey.LastChallengeAt, Name = passkey.Name,
-            BackupEligible = passkey.BackupEligible, BackedUp = passkey.BackedUp,
+            BackupEligible = passkey.BackupEligible, BackedUp = passkey.BackedUp, UserHandle = passkey.UserHandle,
             CreatedUtc = passkey.CreatedUtc, LastUsedUtc = passkey.LastUsedUtc,
         };
         context.BeforeWrite();
@@ -617,6 +617,6 @@ public class SlimEfPasskeyStore<TContext, TKey>(SlimEfContext<TContext> context)
     {
         UserId = SlimEf.KeyToString(p.UserId), CredentialId = p.CredentialId, PublicKey = p.PublicKey, SignCount = (uint)p.SignCount,
         LastChallengeAt = p.LastChallengeAt, Name = p.Name, CreatedUtc = p.CreatedUtc, LastUsedUtc = p.LastUsedUtc,
-        BackupEligible = p.BackupEligible, BackedUp = p.BackedUp,
+        BackupEligible = p.BackupEligible, BackedUp = p.BackedUp, UserHandle = p.UserHandle,
     };
 }

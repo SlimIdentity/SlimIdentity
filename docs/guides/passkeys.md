@@ -119,5 +119,7 @@ acceptable. Ed25519 keys are not offered – .NET has no built-in support, and p
 `SlimIdentity.Testing`. Three rules matter: credential ids are unique (`AddPasskeyAsync` returns `false`, also under
 concurrency), `TryRecordUseAsync` is a single compare-and-set statement (same counter **and** a newer challenge), and
 `RemovePasskeysAsync` removes every passkey of the user (account takeover above). Store `BackupEligible` and
-`BackedUp`; `TryRecordUseAsync` updates `BackedUp` in the same statement.
+`BackedUp`; `TryRecordUseAsync` updates `BackedUp` in the same statement. Store `UserHandle` (up to 64 bytes): the
+random WebAuthn user handle the authenticator returns on sign-in. Passkeys stored without one keep the UTF-8 bytes of
+the user id as their handle, so adding the column needs no data migration.
 Key the table by the SHA-256 of the credential id – ids can be up to 1023 bytes, more than SQL Server allows in a key.

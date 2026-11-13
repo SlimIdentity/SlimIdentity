@@ -8,6 +8,6 @@ internal static class SlimPasskeyPurposes
 }
 
 /// <summary>A pending passkey registration: the challenge, bound to the account and its security stamp.</summary>
-internal sealed record SlimPasskeyRegistrationPayload(string Uid, string Stamp, string Challenge);
+internal sealed record SlimPasskeyRegistrationPayload(string Uid, string Stamp, string Challenge, string UserHandle);
 /// <summary>A pending passkey sign-in: the challenge and when it was issued (unix ms – each counts once per passkey).</summary>
 internal sealed record SlimPasskeyLoginPayload(string Challenge, long IssuedAt);

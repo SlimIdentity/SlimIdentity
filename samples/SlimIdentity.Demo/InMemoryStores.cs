@@ -335,7 +335,7 @@ public sealed class InMemoryPasskeyStore : ISlimPasskeyStore
     private static SlimPasskey Copy(SlimPasskey p) => new()
     {
         UserId = p.UserId, CredentialId = p.CredentialId, PublicKey = p.PublicKey, SignCount = p.SignCount,
-        BackupEligible = p.BackupEligible, BackedUp = p.BackedUp, LastChallengeAt = p.LastChallengeAt, Name = p.Name,
+        UserHandle = p.UserHandle, BackupEligible = p.BackupEligible, BackedUp = p.BackedUp, LastChallengeAt = p.LastChallengeAt, Name = p.Name,
         CreatedUtc = p.CreatedUtc, LastUsedUtc = p.LastUsedUtc,
     };
 }

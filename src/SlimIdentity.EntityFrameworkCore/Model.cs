@@ -113,6 +113,8 @@ public sealed class SlimPasskeyEntity<TKey>
     public TKey UserId { get; set; } = default!;
     /// <summary>COSE public key.</summary>
     public byte[] PublicKey { get; set; } = [];
+    /// <summary>WebAuthn user handle (<c>null</c> for passkeys registered before it was stored).</summary>
+    public byte[]? UserHandle { get; set; }
     /// <summary>Signature counter.</summary>
     public long SignCount { get; set; }
     /// <summary>May be synced to other devices (WebAuthn flag BE).</summary>
@@ -203,6 +205,7 @@ public static class SlimModelBuilderExtensions
             e.Property(x => x.CredentialIdHash).HasMaxLength(32);
             e.Property(x => x.CredentialId).HasMaxLength(1023);
             e.Property(x => x.PublicKey).HasMaxLength(1024);
+            e.Property(x => x.UserHandle).HasMaxLength(64);
             e.Property(x => x.Name).HasMaxLength(64);
             e.HasIndex(x => x.UserId);
             e.HasOne<TUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
