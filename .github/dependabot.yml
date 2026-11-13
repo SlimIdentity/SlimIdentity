@@ -9,7 +9,24 @@ updates:
         patterns: ["Microsoft.AspNetCore.*", "Microsoft.Extensions.*", "Microsoft.EntityFrameworkCore*", "System.*"]
       test:
         patterns: ["xunit*", "Microsoft.NET.Test.Sdk"]
+    # the projects target net10.0 (LTS): no packages of the next .NET major until the target framework moves
+    ignore:
+      - dependency-name: "Microsoft.AspNetCore.*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Microsoft.Extensions.*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Microsoft.EntityFrameworkCore*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "System.*"
+        update-types: ["version-update:semver-major"]
     open-pull-requests-limit: 5
+
+  # the SDK is pinned in global.json: its runtime patch decides the implicit ILLink/ILCompiler
+  # packages in the lock files, so an SDK update needs a `dotnet restore --force-evaluate`
+  - package-ecosystem: dotnet-sdk
+    directory: /
+    schedule:
+      interval: weekly
 
   - package-ecosystem: github-actions
     directory: /

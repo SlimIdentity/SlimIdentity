@@ -13,7 +13,10 @@ Thanks for your interest! Bug reports, documentation fixes and pull requests are
 
 ## Building and testing
 
-Requirements: the .NET 10 SDK (or newer).
+Requirements: the .NET SDK pinned in `global.json` (a newer patch of the same feature band works too).
+Restores run against `packages.lock.json` (CI uses `--locked-mode`); the lock files also record the
+SDK's implicit ILLink/ILCompiler packages, so after changing the SDK version regenerate them with
+`dotnet restore SlimIdentity.slnx --force-evaluate`.
 
 ```bash
 dotnet build SlimIdentity.slnx
