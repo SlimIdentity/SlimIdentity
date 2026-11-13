@@ -8,7 +8,7 @@ using SlimIdentity.Tests.Infrastructure;
 namespace SlimIdentity.Tests.Integration;
 
 /// <summary>
-/// Attack scenario H6: logs end up in log aggregators, tickets and screenshots. Run every flow that handles a secret
+/// Logs end up in log aggregators, tickets and screenshots. Run every flow that handles a secret
 /// with all log levels on, then check that no password, token, link, recovery code, 2FA secret or e-mail address
 /// appears anywhere – neither in messages nor in structured state nor in logged exceptions.
 /// </summary>
@@ -27,9 +27,12 @@ public sealed class LogSecrecyTests
         secrets.AddRange([email, password, newPassword]);
 
         // registration, verification, login with wrong passwords (lockout path) and correct password
-        await client.PostJsonAsync("/auth/register", new { email, password });
-        var verify = (await app.Mail.WaitForAsync("verification", email)).Payload;
-        await client.PostJsonAsync("/auth/verify-email", new { token = verify });
+        var started = await client.PostJsonAsync("/auth/register", new { email });
+        var mail = await app.Mail.WaitForAsync("verification", email);
+        var verify = TestApp.LinkToken(mail.Link!);
+        var verified = await client.PostJsonAsync("/auth/register/verify", new { flowToken = started.Str("flowToken"), code = mail.Payload });
+        await client.PostJsonAsync("/auth/register/password", new { flowToken = verified.Str("flowToken"), password });
+        secrets.AddRange([mail.Payload, started.Str("flowToken"), verified.Str("flowToken")]);
         for (var i = 0; i < 3; i++)
             await client.PostAsync("/auth/login", new { email, password = "wrong-" + password });
         var tokens = await client.PostJsonAsync("/auth/login", new { email, password });
@@ -39,12 +42,12 @@ public sealed class LogSecrecyTests
         var refreshed = await client.PostJsonAsync("/auth/refresh", new { refreshToken = tokens.Str("refreshToken") });
         Collect(refreshed);
         await client.PostAsync("/auth/refresh", new { refreshToken = tokens.Str("refreshToken") });
-        await client.PostAsync("/auth/verify-email", new { token = "tampered" + verify });
+        await client.PostAsync("/auth/flow", new { token = "tampered" + verify });
 
         // password reset
         await client.PostAsync("/auth/forgot-password", new { email });
         var reset = (await app.Mail.WaitForAsync("password-reset", email)).Payload;
-        await client.PostJsonAsync("/auth/reset-password", new { token = reset, newPassword });
+        await client.ResetPasswordJsonAsync(reset, newPassword);
         secrets.AddRange([verify, reset]);
 
         // 2FA: setup, enable, challenge, wrong code, recovery code
@@ -58,12 +61,12 @@ public sealed class LogSecrecyTests
         var enabled = await me.PostJsonAsync("/auth/2fa/enable", new { setupToken = setup.Str("setupToken"), code, password = newPassword });
         var recovery = enabled.GetProperty("recoveryCodes").EnumerateArray().Select(c => c.GetString()!).ToArray();
         secrets.AddRange(recovery);
-        var challenge = await client.PostJsonAsync("/auth/login", new { email, password = newPassword }, HttpStatusCode.Unauthorized);
-        secrets.Add(challenge.Str("preAuthToken"));
-        await client.PostAsync("/auth/login/2fa", new { preAuthToken = challenge.Str("preAuthToken"), code = "000000" });
-        Collect(await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = challenge.Str("preAuthToken"), recoveryCode = recovery[0] }));
+        var challenge = await client.PostJsonAsync("/auth/login", new { email, password = newPassword });
+        secrets.Add(challenge.Str("flowToken"));
+        await client.PostAsync("/auth/login/2fa", new { flowToken = challenge.Str("flowToken"), code = "000000" });
+        Collect(await client.PostJsonAsync("/auth/login/2fa", new { flowToken = challenge.Str("flowToken"), recoveryCode = recovery[0] }));
 
-        await Task.Delay(200);   // background mail queue
+        await app.WaitForQueuedMailAsync();
         var all = string.Join("\n", logs.Entries);
         // the capture really sees SlimIdentity's own events (reuse detection, recovery code) – the test is not vacuous
         Assert.Contains(logs.Entries, e => e.Contains("refresh token reuse", StringComparison.Ordinal));

@@ -18,11 +18,29 @@ export interface AuthResponse {
   twoFactorRememberToken?: string;
 }
 
-export interface LoginChallenge {
-  status: "invalid_credentials" | "requires_two_factor" | "password_change_required";
-  preAuthToken?: string;
-  twoFactorMethod?: "totp" | "email" | "recovery";
-  passwordChangeToken?: string;
+/**
+ * The password (passkey, external login) was right, but steps follow before the session: "verify_email" (code from
+ * the mail) at verifyEmail, "second_factor" at loginTwoFactor / loginRecoveryCode, "change_password" (set by an administrator) at completePasswordChange. Each step
+ * answers with the remaining ones and a new flowToken – or with the session.
+ * A registration answers the same way: "verify_email" at verifyRegistration (or the mailed link at openLink),
+ * then "set_credential" at completeRegistration or completeRegistrationWithPasskey. A reset link (openLink) ends in
+ * "set_credential" as well – possibly after "verify_email" or "second_factor" – and so does an invitation link.
+ * If the server requires a second factor the account lacks: "setup_second_factor" at setupLoginAuthenticator +
+ * enableLoginAuthenticator (answers with `details.recoveryCodes` – show them once), then "confirm_recovery_codes" at
+ * confirmRecoveryCodes.
+ */
+export interface ActionRequired {
+  status: "action_required";
+  actions: string[];
+  flowToken: string;
+  expiresIn: number;
+  details?: {
+    secondFactor?: { methods: ("totp" | "email" | "recovery")[] };
+    setCredential?: { kinds: "password"[] };
+    setupSecondFactor?: { methods: ("totp" | "passkey")[] };
+    /** only in the answer of enableLoginAuthenticator */
+    recoveryCodes?: string[];
+  };
 }
 
 export interface SignInMethods {
@@ -68,11 +86,7 @@ export function checkPassword(password: string, p: PasswordPolicy): string[] {
 
 export type LoginResult =
   | { kind: "ok"; auth: AuthResponse }
-  | { kind: "two_factor"; preAuthToken: string; method: "totp" | "email" | "recovery" }
-  /** The password was set by an administrator: ask for an own one, then call completePasswordChange. */
-  | { kind: "password_change"; passwordChangeToken: string }
-  /** Accepted, but no session was issued (e.g. "invitation_accepted" for a 2FA account): show the sign-in form. */
-  | { kind: "sign_in_required"; status: string }
+  | { kind: "action_required"; steps: ActionRequired }
   | { kind: "locked"; until: string }
   | { kind: "error"; status: string };
 
@@ -96,18 +110,29 @@ export type RecoveryCodesResult =
   | { ok: true; recoveryCodes: string[] }
   | { ok: false; status: string; errors?: Record<string, string[]> };
 
+/** E-mail change requested: pass the token with the code mailed to the new address to confirmEmailChange. */
+export type EmailChangeResult =
+  | { ok: true; token: string; expiresIn: number }
+  | { ok: false; status: string; errors?: Record<string, string[]> };
+
+async function toEmailChangeResult(r: Response): Promise<EmailChangeResult> {
+  const body = await r.json().catch(() => ({}));
+  if (r.ok) return { ok: true, token: body.token, expiresIn: body.expiresIn };
+  return { ok: false, status: codeOf(body, r), errors: body.errors };
+}
+
 /** Authenticator setup: QR code (data URL for an <img>), the key for manual entry and the token for enabling. */
 export type AuthenticatorSetupResult =
   | { ok: true; sharedKey: string; authenticatorUri: string; setupToken: string; qrCode: string }
   | { ok: false; status: string; errors?: Record<string, string[]> };
 
 /**
- * The machine-readable code of an answer: `status` ("invalid_token", "locked_out", …) – for validation errors
- * (RFC 9457, where `status` is the HTTP status number) the `code` "validation_failed".
+ * The machine-readable code of an answer: errors are problem details (RFC 9457) carrying `code`
+ * ("invalid_token", "locked_out", "validation_failed", …); success answers carry it as text in `status`.
  */
 function codeOf(body: { status?: unknown; code?: unknown }, r: Response): string {
-  if (typeof body.status === "string") return body.status;
-  return typeof body.code === "string" ? body.code : `http_${r.status}`;
+  if (typeof body.code === "string") return body.code;
+  return typeof body.status === "string" ? body.status : `http_${r.status}`;
 }
 
 async function toFormResult(r: Response): Promise<FormResult> {
@@ -150,31 +175,10 @@ function anonymousPost(path: string, body: object): Promise<FormResult> {
 // =====================================================================================
 
 export const account = {
-  /**
-   * Registration. `profile` is your business data (company, name, …) – the server validates it with its
-   * ISlimRegistrationProfile; field errors come back as `errors["profile.<field>"]`.
-   */
-  register(email: string, password: string, profile?: object): Promise<FormResult> {
-    return anonymousPost("/register", profile === undefined ? { email, password } : { email, password, profile });
-  },
-
-  /** Page behind the verification link: /verify-email?token=… */
-  verifyEmail(token: string): Promise<FormResult> {
-    return anonymousPost("/verify-email", { token });
-  },
-
-  resendVerification(email: string): Promise<FormResult> {
-    return anonymousPost("/resend-verification", { email });
-  },
-
   forgotPassword(email: string): Promise<FormResult> {
     return anonymousPost("/forgot-password", { email });
   },
 
-  /** Page behind the reset link: /reset-password?token=… – all sessions of the account end. */
-  resetPassword(token: string, newPassword: string): Promise<FormResult> {
-    return anonymousPost("/reset-password", { token, newPassword });
-  },
 };
 
 // =====================================================================================
@@ -253,34 +257,98 @@ export const cookieAuth = {
     await cookieFetch("/auth/2fa/forget-all-devices", { method: "POST", body: "{}" });
   },
 
-  /** E-mail change: confirmation link goes to the new address; the page behind it calls confirmEmailChange. */
-  async changeEmail(newEmail: string, password: string): Promise<FormResult> {
-    return toFormResult(await cookieFetch("/auth/change-email", { method: "POST", body: JSON.stringify({ newEmail, password }) }));
+  /** E-mail change: a 6-digit code goes to the new address; enter it with the token at confirmEmailChange. */
+  async changeEmail(newEmail: string, password: string): Promise<EmailChangeResult> {
+    return toEmailChangeResult(await cookieFetch("/auth/change-email", { method: "POST", body: JSON.stringify({ newEmail, password }) }));
   },
 
-  /** On success every session of the account ends – sign in again with the new address. */
-  async confirmEmailChange(token: string): Promise<FormResult> {
-    return toFormResult(await cookieFetch("/auth/confirm-email-change", { method: "POST", body: JSON.stringify({ token }) }));
+  /** Any session of the account may confirm; on success every other session ends and this one continues. */
+  async confirmEmailChange(token: string, code: string): Promise<FormResult> {
+    return toFormResult(await cookieFetch("/auth/change-email/confirm", { method: "POST", body: JSON.stringify({ token, code }) }));
+  },
+
+  /** Step "verify_email": the 6-digit code from the mail confirms the address. */
+  async verifyEmail(flowToken: string, code: string): Promise<LoginResult> {
+    return toLoginResult(await cookieFetch("/auth/login/verify-email", { method: "POST", body: JSON.stringify({ flowToken, code }) }));
+  },
+
+  /**
+   * Registration: only the address. The answer is the same whether it has an account or not – the mail decides
+   * (a code and a link, or "you already have an account"). Continue with verifyRegistration.
+   */
+  async register(email: string, rememberMe = false): Promise<LoginResult> {
+    return toLoginResult(await cookieFetch("/auth/register?useCookies=true", { method: "POST", body: JSON.stringify({ email, rememberMe }) }));
+  },
+
+  /** Registration step "verify_email": the 6-digit code from the mail. Next is "set_credential". */
+  async verifyRegistration(flowToken: string, code: string): Promise<LoginResult> {
+    return toLoginResult(await cookieFetch("/auth/register/verify", { method: "POST", body: JSON.stringify({ flowToken, code }) }));
+  },
+
+  /**
+   * Page behind a link (/verify-email, /reset-password, /accept-invitation – each ?token=…) – also on another device.
+   * Next is "set_credential" (`details.setCredential.email` names the account); after a reset or an invitation all
+   * other sessions of the account end.
+   */
+  async openLink(token: string): Promise<LoginResult> {
+    return toLoginResult(await cookieFetch("/auth/flow?useCookies=true", { method: "POST", body: JSON.stringify({ token }) }));
+  },
+
+  /**
+   * Step "set_credential": creates the account (or sets the new password after a reset) and signs in. `profile` is your business data (company,
+   * name, …) – the server validates it with its ISlimRegistrationProfile; field errors come back as
+   * `errors["profile.<field>"]`.
+   */
+  async completeRegistration(flowToken: string, password: string, profile?: object): Promise<LoginResult> {
+    return toLoginResult(await cookieFetch("/auth/register/password", { method: "POST", body: JSON.stringify({ flowToken, password, profile }) }));
+  },
+
+  /**
+   * Registration step "set_credential" with a passkey instead of a password (offered when `details.setCredential.kinds`
+   * contains "passkey"): creates the account with the passkey and signs in. Errors: "cancelled", "unsupported", …
+   */
+  async completeRegistrationWithPasskey(flowToken: string, name?: string, profile?: object): Promise<LoginResult> {
+    const send = (path: string, init: RequestInit) => cookieFetch(path, init);
+    const created = await passkeyCreation(send, "/auth/register/passkey/options", { flowToken });
+    if (typeof created === "string") return { kind: "error", status: created };
+    return toLoginResult(await send("/auth/register/passkey", { method: "POST", body: JSON.stringify({ flowToken, ...created, name, profile }) }));
   },
 
   /** "Remember this device" sets a cookie (if TwoFactor.RememberDeviceLifetime is configured on the server). */
-  async loginTwoFactor(preAuthToken: string, code: string, rememberDevice = false): Promise<LoginResult> {
-    const r = await cookieFetch("/auth/login/2fa", { method: "POST", body: JSON.stringify({ preAuthToken, code, rememberDevice }) });
+  async loginTwoFactor(flowToken: string, code: string, rememberDevice = false): Promise<LoginResult> {
+    const r = await cookieFetch("/auth/login/2fa", { method: "POST", body: JSON.stringify({ flowToken, code, rememberDevice }) });
     return toLoginResult(r);
   },
 
   /** Second step with one of the recovery codes (single use) instead of an authenticator / e-mail code. */
-  async loginRecoveryCode(preAuthToken: string, recoveryCode: string): Promise<LoginResult> {
-    return toLoginResult(await cookieFetch("/auth/login/2fa", { method: "POST", body: JSON.stringify({ preAuthToken, recoveryCode }) }));
+  async loginRecoveryCode(flowToken: string, recoveryCode: string): Promise<LoginResult> {
+    return toLoginResult(await cookieFetch("/auth/login/2fa", { method: "POST", body: JSON.stringify({ flowToken, recoveryCode }) }));
   },
 
-  /** After { kind: "password_change" }: sets the own password – the result is the session or the 2FA challenge. */
-  async completePasswordChange(passwordChangeToken: string, newPassword: string): Promise<LoginResult> {
-    const r = await cookieFetch("/auth/login/password-change", {
-      method: "POST",
-      body: JSON.stringify({ token: passwordChangeToken, newPassword }),
-    });
+  /** Step "setup_second_factor": key and QR code of a new authenticator (see setupAuthenticator). */
+  async setupLoginAuthenticator(flowToken: string, toQrDataUrl: (text: string) => Promise<string>): Promise<AuthenticatorSetupResult> {
+    return toAuthenticatorSetup(await cookieFetch("/auth/login/2fa/setup", { method: "POST", body: JSON.stringify({ flowToken }) }), toQrDataUrl);
+  },
+
+  /** Enables the authenticator with its first code; the answer carries `details.recoveryCodes` – show them exactly once. */
+  async enableLoginAuthenticator(flowToken: string, setupToken: string, code: string): Promise<LoginResult> {
+    return toLoginResult(await cookieFetch("/auth/login/2fa/enable", { method: "POST", body: JSON.stringify({ flowToken, setupToken, code }) }));
+  },
+
+  /** Step "confirm_recovery_codes": the user has saved the codes – the result is the session or the remaining steps. */
+  async confirmRecoveryCodes(flowToken: string): Promise<LoginResult> {
+    return toLoginResult(await cookieFetch("/auth/login/2fa/recovery-codes-saved", { method: "POST", body: JSON.stringify({ flowToken }) }));
+  },
+
+  /** Step "change_password": sets the own password – the result is the session or the remaining steps. */
+  async completePasswordChange(flowToken: string, newPassword: string): Promise<LoginResult> {
+    const r = await cookieFetch("/auth/login/password-change", { method: "POST", body: JSON.stringify({ flowToken, newPassword }) });
     return toLoginResult(r);
+  },
+
+  /** The open steps of a flowToken again (e.g. after a reload); changes nothing. */
+  async readFlow(flowToken: string): Promise<LoginResult> {
+    return toLoginResult(await cookieFetch("/auth/flow", { method: "POST", body: JSON.stringify({ flowToken }) }));
   },
 
   /** Call after F5 to restore the session state. */
@@ -308,21 +376,6 @@ export const cookieAuth = {
     await cookieFetch(`/auth/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
 
-  /** Invitation page: /accept-invitation?token=... → show e-mail, ask for a password, then accept. */
-  async invitationInfo(token: string): Promise<{ email: string; expiresAt: string } | null> {
-    const r = await cookieFetch("/auth/invitation/info", { method: "POST", body: JSON.stringify({ token }) });
-    return r.ok ? r.json() : null;
-  },
-
-  /** Sets the password and signs in – or { kind: "sign_in_required" } for a 2FA account (sign in normally). */
-  async acceptInvitation(token: string, password: string): Promise<LoginResult> {
-    const r = await cookieFetch("/auth/invitation/accept?useCookies=true", {
-      method: "POST",
-      body: JSON.stringify({ token, password }),
-    });
-    return toLoginResult(r);
-  },
-
   /** Social login is a full-page navigation, not fetch. */
   loginWith(provider: string) {
     const returnUrl = encodeURIComponent(window.location.origin + "/after-login");
@@ -330,17 +383,16 @@ export const cookieAuth = {
   },
 
   /**
-   * On the /after-login page: the session cookie is set – unless 2FA is required; then the challenge arrives in the
-   * URL fragment (#slim_status=requires_two_factor&preAuthToken=…), which is never sent to a server. Errors come as
-   * ?slim_error=….
+   * On the /after-login page: the session cookie is set – unless steps follow (2FA, own password); then the flowToken
+   * arrives in the URL fragment (#slim_status=action_required&flowToken=…), which is never sent to a server, and
+   * /auth/flow names the steps. Errors come as ?slim_error=….
    */
-  readExternalLoginResult(): LoginResult {
+  async readExternalLoginResult(): Promise<LoginResult> {
     const fragment = new URLSearchParams(window.location.hash.slice(1));
     const error = new URLSearchParams(window.location.search).get("slim_error");
     history.replaceState(null, "", window.location.pathname);   // remove secrets from the address bar / history
     if (error) return { kind: "error", status: error };
-    if (fragment.get("slim_status") === "requires_two_factor")
-      return { kind: "two_factor", preAuthToken: fragment.get("preAuthToken") ?? "", method: toTwoFactorMethod(fragment.get("method")) };
+    if (fragment.get("slim_status") === "action_required") return cookieAuth.readFlow(fragment.get("flowToken") ?? "");
     return { kind: "ok", auth: { status: "success", mode: "cookie" } as AuthResponse };
   },
 
@@ -397,12 +449,12 @@ export const cookieAuth = {
     return statusOf(cookieFetch("/auth/sign-in-methods/passkeys/rename", { method: "POST", body: JSON.stringify({ id, name }) }));
   },
 
-  /** "passkey_removed", or last_sign_in_method / invalid_password. */
+  /** "success" (other devices are signed out), or last_sign_in_method / invalid_password / concurrent_change. */
   removePasskey(id: string, password?: string): Promise<string> {
     return statusOf(cookieFetch("/auth/sign-in-methods/passkeys/remove", { method: "POST", body: JSON.stringify({ id, password }) }));
   },
 
-  /** "external_login_removed", or an error code – last_sign_in_method: add another way in first. */
+  /** "success" (other devices are signed out), or an error code – last_sign_in_method: add another way in first. */
   removeExternalLogin(provider: string, providerKey: string, password?: string): Promise<string> {
     return removeExternal((path, init) => cookieFetch(path, init), provider, providerKey, password);
   },
@@ -466,7 +518,17 @@ async function statusOf(response: Promise<Response>): Promise<string> {
 }
 
 async function addPasskeyWith(send: (path: string, init: RequestInit) => Promise<Response>, name?: string, password?: string): Promise<string> {
-  const start = await send("/auth/passkeys/register/options", { method: "POST", body: JSON.stringify({ password }) });
+  const created = await passkeyCreation(send, "/auth/passkeys/register/options", { password });
+  if (typeof created === "string") return created;
+  return statusOf(send("/auth/passkeys/register", { method: "POST", body: JSON.stringify({ ...created, name }) }))
+    .then(status => (status === "http_200" ? "passkey_added" : status));
+}
+
+/** navigator.credentials.create with the options of the server: the state and the credential to post, or an error code. */
+async function passkeyCreation(send: (path: string, init: RequestInit) => Promise<Response>, optionsPath: string,
+    body: object): Promise<{ state: string; credential: object } | string> {
+  if (typeof PublicKeyCredential === "undefined") return "unsupported";
+  const start = await send(optionsPath, { method: "POST", body: JSON.stringify(body) });
   if (!start.ok) return statusOf(Promise.resolve(start));
   const { options, state } = await start.json();
 
@@ -481,23 +543,19 @@ async function addPasskeyWith(send: (path: string, init: RequestInit) => Promise
   if (!credential) return "cancelled";
 
   const response = credential.response as AuthenticatorAttestationResponse;
-  return statusOf(send("/auth/passkeys/register", {
-    method: "POST",
-    body: JSON.stringify({
-      state,
-      name,
-      credential: {
-        id: credential.id,
-        rawId: toBase64Url(credential.rawId),
-        type: credential.type,
-        response: {
-          clientDataJSON: toBase64Url(response.clientDataJSON),
-          attestationObject: toBase64Url(response.attestationObject),
-          transports: response.getTransports?.() ?? [],
-        },
+  return {
+    state,
+    credential: {
+      id: credential.id,
+      rawId: toBase64Url(credential.rawId),
+      type: credential.type,
+      response: {
+        clientDataJSON: toBase64Url(response.clientDataJSON),
+        attestationObject: toBase64Url(response.attestationObject),
+        transports: response.getTransports?.() ?? [],
       },
-    }),
-  })).then(status => (status === "http_200" ? "passkey_added" : status));
+    },
+  };
 }
 
 async function passkeyAssertion(send: (path: string, init: RequestInit) => Promise<Response>, useCookies: boolean,
@@ -564,11 +622,13 @@ async function enableTwoFactorWith(path: string, body: object): Promise<Recovery
 async function removeExternal(send: (path: string, init: RequestInit) => Promise<Response>,
   provider: string, providerKey: string, password?: string): Promise<string> {
   const r = await send("/auth/sign-in-methods/external/remove", { method: "POST", body: JSON.stringify({ provider, providerKey, password }) });
-  return codeOf(await r.json().catch(() => ({})), r);
+  const body = await r.json().catch(() => ({}));
+  if (r.ok && body.accessToken) storeTokens(body);
+  return codeOf(body, r);
 }
 
-async function twoFactorStep(body: { preAuthToken: string; code?: string; recoveryCode?: string; rememberDevice?: boolean }): Promise<LoginResult> {
-  const r = await fetch(`${AUTH}/login/2fa`, { method: "POST", headers: jsonHeaders, body: JSON.stringify(body) });
+async function flowStep(path: string, body: { flowToken: string } & Record<string, unknown>): Promise<LoginResult> {
+  const r = await fetch(`${AUTH}${path}`, { method: "POST", headers: jsonHeaders, body: JSON.stringify(body) });
   const result = await toLoginResult(r);
   if (result.kind === "ok") storeTokens(result.auth);
   return result;
@@ -626,25 +686,70 @@ export const bearerAuth = {
     return result;
   },
 
-  async loginTwoFactor(preAuthToken: string, code: string, rememberDevice = false): Promise<LoginResult> {
-    return twoFactorStep({ preAuthToken, code, rememberDevice });
+  /** Step "verify_email": the 6-digit code from the mail confirms the address. */
+  async verifyEmail(flowToken: string, code: string): Promise<LoginResult> {
+    return flowStep("/login/verify-email", { flowToken, code });
+  },
+
+  /** Registration: only the address; the same answer for every address – the mail decides. */
+  async register(email: string): Promise<LoginResult> {
+    return toLoginResult(await fetch(`${AUTH}/register?useCookies=false`, { method: "POST", headers: jsonHeaders, body: JSON.stringify({ email }) }));
+  },
+
+  /** Registration step "verify_email": the 6-digit code from the mail. */
+  async verifyRegistration(flowToken: string, code: string): Promise<LoginResult> {
+    return flowStep("/register/verify", { flowToken, code });
+  },
+
+  /** Page behind a link (/verify-email, /reset-password, /accept-invitation – each ?token=…) – also on another device. */
+  async openLink(token: string): Promise<LoginResult> {
+    return toLoginResult(await fetch(`${AUTH}/flow?useCookies=false`, { method: "POST", headers: jsonHeaders, body: JSON.stringify({ token }) }));
+  },
+
+  /** Step "set_credential": creates the account or sets the new password, then signs in (profile: see cookieAuth.completeRegistration). */
+  async completeRegistration(flowToken: string, password: string, profile?: object): Promise<LoginResult> {
+    return flowStep("/register/password", { flowToken, password, profile });
+  },
+
+  /** Registration step "set_credential" with a passkey – see cookieAuth.completeRegistrationWithPasskey. */
+  async completeRegistrationWithPasskey(flowToken: string, name?: string, profile?: object): Promise<LoginResult> {
+    const created = await passkeyCreation(anonymousFetch, "/auth/register/passkey/options", { flowToken });
+    if (typeof created === "string") return { kind: "error", status: created };
+    return flowStep("/register/passkey", { flowToken, ...created, name, profile });
+  },
+
+  async loginTwoFactor(flowToken: string, code: string, rememberDevice = false): Promise<LoginResult> {
+    return flowStep("/login/2fa", { flowToken, code, rememberDevice });
   },
 
   /** Second step with one of the recovery codes (single use) instead of an authenticator / e-mail code. */
-  async loginRecoveryCode(preAuthToken: string, recoveryCode: string): Promise<LoginResult> {
-    return twoFactorStep({ preAuthToken, recoveryCode });
+  async loginRecoveryCode(flowToken: string, recoveryCode: string): Promise<LoginResult> {
+    return flowStep("/login/2fa", { flowToken, recoveryCode });
   },
 
-  /** After { kind: "password_change" }: sets the own password – the result is the session or the 2FA challenge. */
-  async completePasswordChange(passwordChangeToken: string, newPassword: string): Promise<LoginResult> {
-    const r = await fetch(`${AUTH}/login/password-change`, {
-      method: "POST",
-      headers: jsonHeaders,
-      body: JSON.stringify({ token: passwordChangeToken, newPassword }),
-    });
-    const result = await toLoginResult(r);
-    if (result.kind === "ok") storeTokens(result.auth);
-    return result;
+  /** Step "setup_second_factor": key and QR code of a new authenticator (see setupAuthenticator). */
+  async setupLoginAuthenticator(flowToken: string, toQrDataUrl: (text: string) => Promise<string>): Promise<AuthenticatorSetupResult> {
+    return toAuthenticatorSetup(await fetch(`${AUTH}/login/2fa/setup`, { method: "POST", headers: jsonHeaders, body: JSON.stringify({ flowToken }) }), toQrDataUrl);
+  },
+
+  /** Enables the authenticator with its first code; the answer carries `details.recoveryCodes` – show them exactly once. */
+  async enableLoginAuthenticator(flowToken: string, setupToken: string, code: string): Promise<LoginResult> {
+    return flowStep("/login/2fa/enable", { flowToken, setupToken, code });
+  },
+
+  /** Step "confirm_recovery_codes": the user has saved the codes – the result is the session or the remaining steps. */
+  async confirmRecoveryCodes(flowToken: string): Promise<LoginResult> {
+    return flowStep("/login/2fa/recovery-codes-saved", { flowToken });
+  },
+
+  /** Step "change_password": sets the own password – the result is the session or the remaining steps. */
+  async completePasswordChange(flowToken: string, newPassword: string): Promise<LoginResult> {
+    return flowStep("/login/password-change", { flowToken, newPassword });
+  },
+
+  /** The open steps of a flowToken again (e.g. after a reload); changes nothing. */
+  async readFlow(flowToken: string): Promise<LoginResult> {
+    return flowStep("/flow", { flowToken });
   },
 
   /**
@@ -740,8 +845,12 @@ export const bearerAuth = {
     return statusOf(bearerFetch("/auth/sign-in-methods/passkeys/rename", { method: "POST", body: JSON.stringify({ id, name }) }));
   },
 
-  removePasskey(id: string, password?: string): Promise<string> {
-    return statusOf(bearerFetch("/auth/sign-in-methods/passkeys/remove", { method: "POST", body: JSON.stringify({ id, password }) }));
+  /** Other devices are signed out; this client gets new tokens. */
+  async removePasskey(id: string, password?: string): Promise<string> {
+    const r = await bearerFetch("/auth/sign-in-methods/passkeys/remove", { method: "POST", body: JSON.stringify({ id, password }) });
+    const body = await r.json().catch(() => ({}));
+    if (r.ok) storeTokens(body);
+    return codeOf(body, r);
   },
 
   removeExternalLogin(provider: string, providerKey: string, password?: string): Promise<string> {
@@ -797,16 +906,16 @@ export const bearerAuth = {
     if (r.ok) storeTokens(await r.json());
   },
 
-  /** E-mail change: the confirmation link goes to the new address; the page behind it calls confirmEmailChange. */
-  async changeEmail(newEmail: string, password: string): Promise<FormResult> {
-    return toFormResult(await bearerFetch("/auth/change-email", { method: "POST", body: JSON.stringify({ newEmail, password }) }));
+  /** E-mail change: a 6-digit code goes to the new address; enter it with the token at confirmEmailChange. */
+  async changeEmail(newEmail: string, password: string): Promise<EmailChangeResult> {
+    return toEmailChangeResult(await bearerFetch("/auth/change-email", { method: "POST", body: JSON.stringify({ newEmail, password }) }));
   },
 
-  /** Anonymous; on success every session of the account ends – this client signs in again. */
-  async confirmEmailChange(token: string): Promise<FormResult> {
-    const result = await anonymousPost("/confirm-email-change", { token });
-    if (result.ok) bearerAuth.clear();
-    return result;
+  /** Any session of the account may confirm; on success every other session ends and this one gets new tokens. */
+  async confirmEmailChange(token: string, code: string): Promise<FormResult> {
+    const r = await bearerFetch("/auth/change-email/confirm", { method: "POST", body: JSON.stringify({ token, code }) });
+    if (r.ok) storeTokens(await r.clone().json());
+    return toFormResult(r);
   },
 
   /** "Sign out on all devices" – this one included. */
@@ -825,41 +934,15 @@ export const bearerAuth = {
     await bearerFetch(`/auth/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
 
-  /** Invitation page: show the address, ask for a password, then accept. */
-  async invitationInfo(token: string): Promise<{ email: string; expiresAt: string } | null> {
-    const r = await fetch(`${AUTH}/invitation/info`, { method: "POST", headers: jsonHeaders, body: JSON.stringify({ token }) });
-    return r.ok ? r.json() : null;
-  },
-
-  /** Sets the password and signs in – or { kind: "sign_in_required" } for a 2FA account (sign in normally). */
-  async acceptInvitation(token: string, password: string): Promise<LoginResult> {
-    const r = await fetch(`${AUTH}/invitation/accept?useCookies=false`, {
-      method: "POST",
-      headers: jsonHeaders,
-      body: JSON.stringify({ token, password }),
-    });
-    const result = await toLoginResult(r);
-    if (result.kind === "ok") storeTokens(result.auth);
-    return result;
-  },
-
   api: bearerFetch,
 };
 
 // =====================================================================================
 
-function toTwoFactorMethod(method: string | null): "totp" | "email" | "recovery" {
-  return method === "totp" || method === "recovery" ? method : "email";
-}
-
 async function toLoginResult(r: Response): Promise<LoginResult> {
   const body = await r.json().catch(() => ({}));
   if (r.ok && body.status === "success") return { kind: "ok", auth: body as AuthResponse };
-  if (r.ok) return { kind: "sign_in_required", status: body.status ?? "ok" };
-  if (r.status === 401 && body.status === "requires_two_factor")
-    return { kind: "two_factor", preAuthToken: body.preAuthToken, method: body.twoFactorMethod };
-  if (r.status === 401 && body.status === "password_change_required")
-    return { kind: "password_change", passwordChangeToken: body.passwordChangeToken };
+  if (r.ok && body.status === "action_required") return { kind: "action_required", steps: body as ActionRequired };
   // only with SignIn.RevealAccountState = true – by default locked accounts answer like a wrong password
   if (r.status === 423) return { kind: "locked", until: body.lockoutEndUtc };
   return { kind: "error", status: codeOf(body, r) };

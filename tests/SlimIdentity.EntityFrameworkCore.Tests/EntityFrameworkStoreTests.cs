@@ -27,6 +27,8 @@ public class GuidUser : ISlimUserEntity<Guid>
     public bool EmailConfirmed { get; set; }
     public int FailedLoginAttempts { get; set; }
     public DateTimeOffset? LockoutEndUtc { get; set; }
+    public int FailedSecondFactorAttempts { get; set; }
+    public DateTimeOffset? SecondFactorLockoutEndUtc { get; set; }
     public bool TwoFactorEnabled { get; set; }
     public bool PasswordChangeRequired { get; set; }
     public string? TotpSecret { get; set; }
@@ -58,6 +60,8 @@ public class IntUser : ISlimUserEntity<int>
     public bool EmailConfirmed { get; set; }
     public int FailedLoginAttempts { get; set; }
     public DateTimeOffset? LockoutEndUtc { get; set; }
+    public int FailedSecondFactorAttempts { get; set; }
+    public DateTimeOffset? SecondFactorLockoutEndUtc { get; set; }
     public bool TwoFactorEnabled { get; set; }
     public bool PasswordChangeRequired { get; set; }
     public string? TotpSecret { get; set; }
@@ -78,6 +82,8 @@ public abstract class KeyedUser<TKey> : ISlimUserEntity<TKey>
     public bool EmailConfirmed { get; set; }
     public int FailedLoginAttempts { get; set; }
     public DateTimeOffset? LockoutEndUtc { get; set; }
+    public int FailedSecondFactorAttempts { get; set; }
+    public DateTimeOffset? SecondFactorLockoutEndUtc { get; set; }
     public bool TwoFactorEnabled { get; set; }
     public bool PasswordChangeRequired { get; set; }
     public string? TotpSecret { get; set; }
@@ -162,13 +168,16 @@ public sealed class EntityFrameworkStoreTests
         return sp;
     }
 
+    // SQLite serializes all writes, so repeated race rounds find little there; the server databases run the default.
+    private static readonly SlimConformanceOptions Sqlite = new() { RaceRounds = 2 };
+
     [Fact]
     public async Task Guid_keys_honour_all_store_contracts_on_SQLite()
     {
         var file = SqliteFile();   // once – the options callback runs per scope
         await using var sp = await BuildAsync<GuidContext, GuidUser, Guid>(o => o.UseSqlite(file), wal: true);
-        var report = await SlimStoreConformance.VerifyAsync(sp);
-        Assert.Equal(6, report.Results.Select(r => r.Store).Distinct().Count());   // user, 2FA, refresh, sessions, external logins, passkeys
+        var report = await SlimStoreConformance.VerifyAsync(sp, Sqlite);
+        Assert.Equal(7, report.Results.Select(r => r.Store).Distinct().Count());   // user, 2FA, refresh, sessions, external logins, passkeys, shared state
     }
 
     [Fact]
@@ -195,7 +204,7 @@ public sealed class EntityFrameworkStoreTests
     }
 
     [Fact]
-    public async Task Counting_a_failure_of_a_user_deleted_meanwhile_is_no_error()
+    public async Task Reserving_an_attempt_for_a_user_deleted_meanwhile_returns_null()
     {
         var file = SqliteFile();
         await using var sp = await BuildAsync<GuidContext, GuidUser, Guid>(o => o.UseSqlite(file));
@@ -204,7 +213,7 @@ public sealed class EntityFrameworkStoreTests
         var user = (await store.CreateAsync(new SlimNewUser { Email = "gone@test.local" }, default))!;
         await scope.ServiceProvider.GetRequiredService<GuidContext>().Users.ExecuteDeleteAsync();   // deleted during the sign-in
 
-        Assert.Equal(0, await store.IncrementFailedLoginAttemptsAsync(user, default));
+        Assert.Null(await store.TryBeginAttemptAsync(user, new SlimAttemptRequest(SlimAttemptFactor.Password, DateTimeOffset.UtcNow, new SlimLockoutOptions()), default));
     }
 
     [Fact]
@@ -242,7 +251,7 @@ public sealed class EntityFrameworkStoreTests
     {
         var file = SqliteFile();
         await using var sp = await BuildAsync<IntContext, IntUser, int>(o => o.UseSqlite(file), wal: true);
-        await SlimStoreConformance.VerifyAsync(sp);
+        await SlimStoreConformance.VerifyAsync(sp, Sqlite);
     }
 
     [Fact]
@@ -250,7 +259,7 @@ public sealed class EntityFrameworkStoreTests
     {
         var file = SqliteFile();
         await using var sp = await BuildAsync<LongContext, LongUser, long>(o => o.UseSqlite(file), wal: true);
-        await SlimStoreConformance.VerifyAsync(sp);
+        await SlimStoreConformance.VerifyAsync(sp, Sqlite);
     }
 
     [Fact]
@@ -258,7 +267,7 @@ public sealed class EntityFrameworkStoreTests
     {
         var file = SqliteFile();
         await using var sp = await BuildAsync<StringContext, StringUser, string>(o => o.UseSqlite(file), wal: true);
-        await SlimStoreConformance.VerifyAsync(sp);
+        await SlimStoreConformance.VerifyAsync(sp, Sqlite);
     }
 
     [SkippableFact]
@@ -308,7 +317,7 @@ public sealed class EntityFrameworkStoreTests
         // no Links.BaseUrl / relying party: passkeys are opt-in, the default setup must start without them
         builder.Services.AddSlimIdentity(o => o.Tokens.JwtSecret = new string('x', 32))
             .AddEntityFrameworkStores<GuidContext, GuidUser, Guid>()
-            .AddNullEmailSender();
+            .AddEmailSender<CodeSender>(ServiceLifetime.Singleton);
 
         await using var app = builder.Build();
         app.UseRateLimiter();
@@ -321,7 +330,12 @@ public sealed class EntityFrameworkStoreTests
         await app.StartAsync();
         var http = app.GetTestClient();
 
-        Assert.Equal(HttpStatusCode.OK, (await http.PostAsJsonAsync("/auth/register", new { email = "ef@test.local", password = "EfCore-Pass-123" })).StatusCode);
+        var started = await http.PostAsJsonAsync("/auth/register", new { email = "ef@test.local" });
+        var flowToken = JsonDocument.Parse(await started.Content.ReadAsStringAsync()).RootElement.GetProperty("flowToken").GetString();
+        var code = await ((CodeSender)app.Services.GetRequiredService<ISlimEmailSender>()).Code.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var verified = await http.PostAsJsonAsync("/auth/register/verify", new { flowToken, code });
+        flowToken = JsonDocument.Parse(await verified.Content.ReadAsStringAsync()).RootElement.GetProperty("flowToken").GetString();
+        Assert.Equal(HttpStatusCode.OK, (await http.PostAsJsonAsync("/auth/register/password", new { flowToken, password = "EfCore-Pass-123" })).StatusCode);
         var login = await http.PostAsJsonAsync("/auth/login", new { email = "EF@test.local", password = "EfCore-Pass-123" });
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
         var tokens = JsonDocument.Parse(await login.Content.ReadAsStringAsync()).RootElement;
@@ -342,4 +356,14 @@ public sealed class EntityFrameworkStoreTests
         Assert.Equal("new member", stored.DisplayName);   // user factory
         Assert.Equal("EF@TEST.LOCAL", stored.NormalizedEmail);
     }
-}
+
+    /// <summary>Captures the registration code; every other mail is dropped.</summary>
+    private sealed class CodeSender : ISlimEmailSender
+    {
+        public TaskCompletionSource<string> Code { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string code, string verificationTokenOrLink, CancellationToken ct) { Code.TrySetResult(code); return Task.CompletedTask; }
+        public Task SendPasswordResetEmailAsync(SlimEmailContext context, string email, string resetTokenOrLink, CancellationToken ct) => Task.CompletedTask;
+        public Task SendTwoFactorCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) => Task.CompletedTask;
+        public Task SendEmailVerificationCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) => Task.CompletedTask;
+        public Task SendEmailChangeCodeAsync(SlimEmailContext context, string newEmail, string code, CancellationToken ct) => Task.CompletedTask;
+    }}

@@ -31,7 +31,7 @@ public sealed class SoftwarePasskey : IDisposable
     /// <summary>Flags BE / BS: a synced passkey (iCloud Keychain, password manager) – or not.</summary>
     public bool BackupEligible { get; set; }
     public bool BackedUp { get; set; }
-    /// <summary>The user handle (base64url of the user id) remembered from the registration – sent on sign-in.</summary>
+    /// <summary>The user handle (base64url) remembered from the registration – sent on sign-in.</summary>
     public string? UserHandle { get; set; }
 
     public sealed record Tamper(string? Origin = null, string? RpId = null, string? Type = null, string? Challenge = null,
@@ -198,6 +198,6 @@ public sealed class TestPasskeyStore : ISlimPasskeyStore
     {
         UserId = p.UserId, CredentialId = p.CredentialId, PublicKey = p.PublicKey, SignCount = p.SignCount,
         LastChallengeAt = p.LastChallengeAt, Name = p.Name, CreatedUtc = p.CreatedUtc, LastUsedUtc = p.LastUsedUtc,
-        BackupEligible = p.BackupEligible, BackedUp = p.BackedUp,
+        BackupEligible = p.BackupEligible, BackedUp = p.BackedUp, UserHandle = p.UserHandle,
     };
 }

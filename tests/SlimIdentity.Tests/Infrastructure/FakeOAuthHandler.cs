@@ -31,3 +31,14 @@ public sealed class FakeOAuthHandler(IOptionsMonitor<FakeOAuthOptions> options, 
         Response.Redirect(properties.RedirectUri!);
     }
 }
+
+/// <summary>A PKCE pair (S256) as a bearer client creates it for the external sign-in.</summary>
+public static class Pkce
+{
+    public static (string Verifier, string Challenge) Create()
+    {
+        var verifier = System.Buffers.Text.Base64Url.EncodeToString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+        var challenge = System.Buffers.Text.Base64Url.EncodeToString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.ASCII.GetBytes(verifier)));
+        return (verifier, challenge);
+    }
+}

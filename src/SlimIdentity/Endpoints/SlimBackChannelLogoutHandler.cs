@@ -24,7 +24,7 @@ internal sealed class SlimBackChannelLogoutHandler(
     IOptionsMonitor<SlimBackChannelLogoutOptions> providerOptions,
     SlimBackChannelProviders providers,
     SlimBackChannelConfigurations configurations,
-    SlimLocalNonceRegistry nonces,
+    SlimSharedStateAccess sharedState,
     IServiceProvider services,
     SlimAuthManager authManager,
     IOptions<SlimIdentityOptions> options,
@@ -40,7 +40,7 @@ internal sealed class SlimBackChannelLogoutHandler(
     public async Task<IResult> LogoutAsync(string provider, CancellationToken ct)
     {
         if (!providers.Names.Contains(provider))
-            return SlimResults.Status("unknown_provider", $"Provider '{provider}' has no back-channel logout.", StatusCodes.Status404NotFound);
+            return SlimResults.Status(SlimErrorCodes.UnknownProvider, $"Provider '{provider}' has no back-channel logout.", StatusCodes.Status404NotFound);
 
         var request = httpContextAccessor.HttpContext!.Request;
         if (!request.HasFormContentType) return Invalid(provider, "expected application/x-www-form-urlencoded");
@@ -57,7 +57,8 @@ internal sealed class SlimBackChannelLogoutHandler(
         catch (Exception ex) when (ex is InvalidOperationException or IOException or HttpRequestException)
         {
             Log.BackChannelMetadataFailed(logger, ex, provider);
-            return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);   // retried by the provider
+            return SlimResults.Problem(StatusCodes.Status503ServiceUnavailable, SlimErrorCodes.ServiceUnavailable,
+                "The provider metadata could not be loaded.");   // retried by the provider
         }
 
         var result = await new JsonWebTokenHandler().ValidateTokenAsync(token, new TokenValidationParameters
@@ -83,7 +84,7 @@ internal sealed class SlimBackChannelLogoutHandler(
         if (issuedAt > now + skew || now - issuedAt > MaxTokenAge + skew) return Invalid(provider, "iat outside the accepted window");
         // jti is required (OIDC Back-Channel Logout §2.4) – without it the token could be replayed within its lifetime
         if (!jwt.TryGetPayloadValue<string>("jti", out var jti) || string.IsNullOrEmpty(jti)) return Invalid(provider, "jti missing");
-        if (!nonces.TryConsume($"backchannel:{provider}:{jti}", issuedAt + MaxTokenAge + skew)) return Invalid(provider, "replayed");
+        if (!await sharedState.TryConsumeAsync(SlimSharedStateAccess.BackChannelToken, $"{provider}:{jti}", issuedAt + MaxTokenAge + skew, ct)) return Invalid(provider, "replayed");
 
         // sid-only tokens would need the provider's session id per local session – not tracked; providers send sub
         if (!jwt.TryGetPayloadValue<string>("sub", out var sub) || string.IsNullOrEmpty(sub)) return Invalid(provider, "sub missing");
@@ -106,7 +107,7 @@ internal sealed class SlimBackChannelLogoutHandler(
     private IResult Invalid(string provider, string reason)
     {
         Log.BackChannelTokenRejected(logger, provider, reason);
-        return SlimResults.BadRequest("invalid_request", "The logout token was rejected.");
+        return SlimResults.BadRequest(SlimErrorCodes.InvalidRequest, "The logout token was rejected.");
     }
 }
 

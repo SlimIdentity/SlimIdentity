@@ -46,6 +46,11 @@ public sealed class SlimPasskey
     public required byte[] CredentialId { get; set; }
     /// <summary>The credential's public key, COSE-encoded as received.</summary>
     public required byte[] PublicKey { get; set; }
+    /// <summary>
+    /// WebAuthn user handle given to the authenticator at registration (random, at most 64 bytes, shared by the
+    /// passkeys of one account); <c>null</c> for passkeys registered before it was stored – those carry the UTF-8 user id.
+    /// </summary>
+    public byte[]? UserHandle { get; set; }
     /// <summary>Signature counter of the authenticator (0 for most synced passkeys).</summary>
     public uint SignCount { get; set; }
     /// <summary>

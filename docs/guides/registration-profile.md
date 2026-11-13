@@ -1,18 +1,18 @@
 # Registration with business data
 
-Many applications need more than an address and a password to create an account: a company, a name, accepted terms,
-a customer number. SlimIdentity takes this data with the registration and hands it to your store, so **the account and
-its profile are created together – or not at all**. No account without a profile, no half-finished sign-up, no second
-round trip.
+A company, a name, accepted terms: SlimIdentity takes this data with the registration and hands it to your store, so
+**account and profile are created together – or not at all**. The profile comes with the credential in the last step
+of the [registration](../endpoints.md#registration), once the mailbox is proven:
 
 ```http
-POST /auth/register
-{ "email": "ada@acme.example", "password": "…", "profile": { "company": "ACME", "name": "Ada" } }
+POST /auth/register/password
+{ "flowToken": "…", "password": "…", "profile": { "company": "ACME", "name": "Ada" } }
 ```
 
-## 1. Validate the profile
+`/register/passkey` takes it the same way; without mail (`WithoutEmail(allowSelfRegistration: true)`) it comes with
+`/register` itself.
 
-`ISlimRegistrationProfile` turns the free-form `profile` object into your typed, validated profile – or refuses it:
+## 1. Validate the profile
 
 ```csharp
 public sealed record SignUpProfile(string Company, string Name);
@@ -34,28 +34,24 @@ public sealed class SignUpProfileValidator : ISlimRegistrationProfile
     }
 }
 
-builder.Services.AddSlimIdentity(…)
-    .AddRegistrationProfile<SignUpProfileValidator>();
+builder.Services.AddSlimIdentity(…).AddRegistrationProfile<SignUpProfileValidator>();
 ```
 
-- **Errors answer `400`** with the keys prefixed: `profile.company`, `profile.name` (`""` → `profile`).
-- **Asked before anything is looked up** – after the address and password rules, before the registration guards and
-  before SlimIdentity checks whether the address already has an account. Decide from the request only (you may check a
-  customer number or an invitation code, never the address against your users), otherwise the answer reveals which
-  addresses are registered.
-- **Also asked without a profile** (`context.Profile` is `null`): you decide whether one is required.
-- **Only what you return reaches the store** – never the raw JSON. Copy field by field into your own type; a client
-  that sends `"isAdmin": true` changes nothing (no mass assignment).
-- **Without this hook a `profile` is refused** (`400 profile`), so nothing unvalidated is ever passed on.
-- If the address already has an account, the profile is discarded: the owner gets the "account exists" mail, the
-  caller the same `registration_accepted` as everyone else, and the existing account is not touched.
+- Errors answer `400` with prefixed keys: `profile.company`, `profile.name` (`""` → `profile`).
+- Asked after the password rules, before the account is written – also when no profile was sent (`context.Profile` is
+  `null`), so you decide whether one is required.
+- Decide from the request; without mail the address is not proven – never check it against your users.
+- Only the returned object reaches the store, never the raw JSON (no mass assignment).
+- Without this hook a `profile` is refused (`400 profile`).
+- If the address already has an account, nothing is written: with mail the owner gets the "account exists" mail and
+  the flow never gets here; without mail the caller gets the usual `registration_accepted` and the profile is dropped.
 
 ## 2. Write it with the account
 
 The validated profile reaches `ISlimUserStore.CreateAsync` as `SlimNewUser.Profile`.
 
-**EF Core package** – your `ISlimUserFactory<TUser>` copies it into the new entity. Related entities set as
-navigation properties are inserted in the same `SaveChanges`:
+**EF Core package:** an `ISlimUserFactory<TUser>` copies it into the entity; related entities set as navigation
+properties are inserted in the same `SaveChanges`. A profile without a factory throws instead of being dropped.
 
 ```csharp
 public sealed class AppUsers : ISlimUserFactory<AppUser>
@@ -68,48 +64,25 @@ public sealed class AppUsers : ISlimUserFactory<AppUser>
 builder.Services.AddSingleton<ISlimUserFactory<AppUser>, AppUsers>();
 ```
 
-If the address was taken by a concurrent registration, nothing is written – neither the account nor the company. A
-profile without a factory is refused with an exception instead of being lost silently.
+**Own store:** write account and profile in one transaction (e.g. `INSERT … ON CONFLICT (normalized_email) DO NOTHING
+RETURNING …`, then the profile row); return `null` with nothing written when the address is taken.
 
-**Your own store** – write account and profile in one transaction:
+## Your own first step
 
-```csharp
-public async Task<SlimUser?> CreateAsync(SlimNewUser newUser, CancellationToken ct)
-{
-    await using var tx = await connection.BeginTransactionAsync(ct);
-    var user = /* INSERT … ON CONFLICT (normalized_email) DO NOTHING RETURNING … */;
-    if (user is null) return null;                        // taken: roll back, nothing written
-    if (newUser.Profile is SignUpProfile p) /* INSERT INTO profiles (user_id, company, name) … */;
-    await tx.CommitAsync(ct);
-    return user;
-}
-```
-
-## Your own registration endpoint
-
-Several steps, a captcha, a form of your own? Turn off `/register` and call `ISlimAuthManager.RegisterAsync` – it
-applies every rule of the built-in endpoint: address normalization and validation, password rules, registration
-guards, the uniform answer with the "account exists" and verification mails, the `user_created` event. You validate the
-profile yourself (`ISlimRegistrationProfile` is not asked) and pass your typed object:
+For a captcha or an own form, turn off `/register` and call `ISlimAuthManager.BeginRegistrationAsync`. It applies the
+address rules, registration guards and the uniform `action_required` answer; `/register/verify`,
+`/register/password` and `/register/passkey` stay mapped while mail is on.
 
 ```csharp
 builder.Services.AddSlimIdentity(o => o.Endpoints.EnableRegistration = false);
 
 app.MapPost("/api/sign-up", async (SignUpForm form, ISlimAuthManager auth, CancellationToken ct) =>
 {
-    if (Validate(form) is { } errors) return Results.ValidationProblem(errors);   // before anything is looked up
-    var result = await auth.RegisterAsync(form.Email, form.Password, new SignUpProfile(form.Company, form.Name), ct);
-    return result.Response;   // 400 / 403, or the uniform registration_accepted
+    if (!await captcha.VerifyAsync(form.Captcha, ct)) return Results.BadRequest();
+    return await auth.BeginRegistrationAsync(form.Email, ct: ct);   // 400 / 403, or the uniform action_required
 });
 ```
 
-`result.User` is the new account (e.g. to start an onboarding job). It is `null` both when the address already had an
-account and when `result.Failure` is set – never tell the caller which, or the endpoint reveals registered addresses.
-
-## Accounts you create yourself
-
-Administrators and invitations call the store directly and can pass a profile the same way:
-
-```csharp
-var user = await store.CreateAsync(new SlimNewUser { Email = request.Email, Profile = new SignUpProfile(…) }, ct);
-```
+Accounts created by administrators or imports use `CreateUserAsync(email, startPassword?, profile)` – no guards, no
+mail ([without e-mail](without-email.md#the-administrators-tools)). Without a start password, follow up with an
+invitation or reset link (`HasSignInMethodAsync` tells whether an account can sign in).

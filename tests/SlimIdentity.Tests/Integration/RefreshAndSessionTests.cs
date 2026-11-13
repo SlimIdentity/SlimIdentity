@@ -189,5 +189,82 @@ public sealed class RefreshAndSessionTests
             new { email = TestApp.UserEmail, password = TestApp.UserPassword })).StatusCode);
     }
 
+    [Fact]
+    public async Task Logout_with_only_the_refresh_token_ends_its_session()
+    {
+        await using var app = await TestApp.StartAsync();
+        var tokens = await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword);
+
+        await app.CreateClient().PostJsonAsync("/auth/logout", new { refreshToken = tokens.RefreshToken });   // e.g. app closed, access token gone
+
+        Assert.Equal(HttpStatusCode.Unauthorized, await Hello(app, tokens.AccessToken));
+        Assert.Equal(HttpStatusCode.Unauthorized, (await Refresh(app, tokens.RefreshToken)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Logout_cannot_end_other_users_sessions()
+    {
+        await using var app = await TestApp.StartAsync();
+        var victim = await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword);
+        var attacker = app.CreateClient();
+        attacker.BearerToken = (await app.LoginBearerAsync(TestApp.AdminEmail, TestApp.AdminPassword)).AccessToken;
+
+        await attacker.PostJsonAsync("/auth/logout", new { refreshToken = "garbage" });
+        await attacker.PostJsonAsync("/auth/logout", new { refreshToken = victim.RefreshToken + "x" });
+        await app.CreateClient().PostJsonAsync("/auth/logout", new { refreshToken = victim.RefreshToken![..20] });
+
+        Assert.Equal(HttpStatusCode.OK, await Hello(app, victim.AccessToken));
+        await app.CreateClient().PostJsonAsync("/auth/refresh", new { refreshToken = victim.RefreshToken });
+    }
+
+    [Fact]
+    public async Task A_refresh_token_from_before_a_password_change_cannot_end_the_renewed_session()
+    {
+        await using var app = await TestApp.StartAsync();
+        var initial = await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword);
+
+        // the password is changed on this device: the stamp rotates, the session (sid) continues with new tokens
+        var me = app.CreateClient();
+        me.BearerToken = initial.AccessToken;
+        var changed = await me.PostJsonAsync("/auth/change-password", new { currentPassword = TestApp.UserPassword, newPassword = "New-Secure-Pass-123!" });
+
+        // whoever kept the old refresh token sends it to the anonymous logout
+        await app.CreateClient().PostJsonAsync("/auth/logout", new { refreshToken = initial.RefreshToken });
+
+        Assert.Equal(HttpStatusCode.OK, await Hello(app, changed.Str("accessToken")));
+        await app.CreateClient().PostJsonAsync("/auth/refresh", new { refreshToken = changed.Str("refreshToken") });
+    }
+
+    [Fact]
+    public async Task An_already_rotated_refresh_token_cannot_end_the_session_through_logout()
+    {
+        await using var app = await TestApp.StartAsync();
+        var initial = await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword);
+        var rotated = await app.CreateClient().PostJsonAsync("/auth/refresh", new { refreshToken = initial.RefreshToken });
+
+        await app.CreateClient().PostJsonAsync("/auth/logout", new { refreshToken = initial.RefreshToken });
+
+        Assert.Equal(HttpStatusCode.OK, await Hello(app, rotated.Str("accessToken")));
+    }
+
+    [Fact]
+    public async Task A_password_change_at_the_end_of_the_refresh_chain_reports_that_the_session_ended()
+    {
+        await using var app = await TestApp.StartAsync(new TestAppOptions
+        {
+            Sessions = false,   // with a session store the session itself ends with the chain
+            Configure = o => (o.Tokens.RefreshTokenLifetime, o.Tokens.RefreshTokenAbsoluteLifetime) = (TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(10)),
+        });
+        var me = app.CreateClient();
+        me.BearerToken = (await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword)).AccessToken;
+        app.Time.Advance(TimeSpan.FromMinutes(11));   // the access token is still valid, the chain is not
+
+        var response = await me.SendRawAsync("/auth/change-password", """{"currentPassword":"User1234!","newPassword":"Changed-Pass-123"}""", "application/json");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Contains("session_expired", await response.Content.ReadAsStringAsync());
+        await app.LoginBearerAsync(TestApp.UserEmail, "Changed-Pass-123");   // the change itself was saved
+    }
+
     private sealed record SessionDto(string Id, bool IsCurrent);
 }

@@ -5,7 +5,7 @@ using SlimIdentity.Tests.Infrastructure;
 namespace SlimIdentity.Tests.Integration;
 
 /// <summary>
-/// The first administrator, created by code at start-up – outside any request – exactly as docs/guides/seeding.md shows.
+/// The first administrator, created by code at start-up – outside any request.
 /// </summary>
 public sealed class SeedingTests
 {
@@ -23,7 +23,7 @@ public sealed class SeedingTests
         if (admin is null) return;                                                         // created in parallel by another instance
 
         admin.EmailConfirmed = true;                                                       // you vouch for the address
-        await store.UpdateSecurityStateAsync(admin, ct);
+        await store.UpdateSecurityStateAsync(admin, admin.SecurityStamp, ct);
         if (await auth.SetPasswordAsync(admin, startPassword, mustChange: true, ct) is not null)   // 400 with the violated rules
             throw new InvalidOperationException("The start password does not meet the password rules.");
     }
@@ -37,11 +37,11 @@ public sealed class SeedingTests
         await SeedAdministratorAsync(app.App.Services, AdminEmail, "Another-Start-456", default);   // idempotent
 
         var client = app.CreateClient();
-        var first = await client.PostJsonAsync("/auth/login", new { email = AdminEmail, password = "Start-Password-123" }, HttpStatusCode.Unauthorized);
-        Assert.Equal("password_change_required", first.Str("status"));
+        var first = await client.PostJsonAsync("/auth/login", new { email = AdminEmail, password = "Start-Password-123" });
+        Assert.Equal("change_password", first.GetProperty("actions")[0].GetString());
 
         var session = await client.PostJsonAsync("/auth/login/password-change",
-            new { token = first.Str("passwordChangeToken"), newPassword = "Own-Admin-Password-789" });
+            new { flowToken = first.Str("flowToken"), newPassword = "Own-Admin-Password-789" });
         Assert.False(string.IsNullOrEmpty(session.Str("accessToken")));
         Assert.True(app.Users.Get(AdminEmail).EmailConfirmed);
     }
@@ -59,7 +59,14 @@ public sealed class SeedingTests
             token = (await auth.CreatePasswordResetAsync(admin, TimeSpan.FromDays(1))).Token;   // log or print the link once
         }
 
-        await app.CreateClient().PostJsonAsync("/auth/reset-password", new { token, newPassword = "Own-Admin-Password-789" });
+        // an administrator's link proves no mailbox: the address is confirmed with a mailed code first
+        var client = app.CreateClient();
+        var started = await client.PostJsonAsync("/auth/flow", new { token });
+        Assert.Equal("verify_email", started.GetProperty("actions")[0].GetString());
+        var code = (await app.Mail.WaitForAsync("verification-code", AdminEmail)).Payload;
+        var verified = await client.PostJsonAsync("/auth/login/verify-email", new { flowToken = started.Str("flowToken"), code });
+        Assert.Equal("set_credential", verified.GetProperty("actions")[0].GetString());
+        await client.PostJsonAsync("/auth/register/password", new { flowToken = verified.Str("flowToken"), password = "Own-Admin-Password-789" });
 
         await app.CreateClient().PostJsonAsync("/auth/login", new { email = AdminEmail, password = "Own-Admin-Password-789" });
     }

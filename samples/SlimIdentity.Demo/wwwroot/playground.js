@@ -4,7 +4,7 @@
 import { installVirtualPasskey } from "./virtual-passkey.js";
 
 const $ = (id) => document.getElementById(id);
-const state = { accessToken: null, refreshToken: null, preAuthToken: null, rememberToken: null, totpSecret: null, link: null };
+const state = { accessToken: null, refreshToken: null, flowToken: null, step: null, rememberToken: null, totpSecret: null };
 
 // ------------------------------------------------------------------ HTTP
 
@@ -13,7 +13,7 @@ function mode() { return $("mode").value; }
 async function call(method, path, body) {
   const headers = { "Content-Type": "application/json", "X-CSRF": "1" };   // CSRF header: required in cookie mode
   if (mode() === "bearer" && state.accessToken) headers.Authorization = `Bearer ${state.accessToken}`;
-  const url = path.startsWith("/auth/") && ["/auth/login", "/auth/invitation/accept"].includes(path) ? `${path}?useCookies=${mode() === "cookie"}` : path;
+  const url = path.startsWith("/auth/") && ["/auth/login", "/auth/register", "/auth/flow"].includes(path) ? `${path}?useCookies=${mode() === "cookie"}` : path;
   const response = await fetch(url, { method, headers, credentials: "same-origin", body: body === undefined ? undefined : JSON.stringify(body) });
   const text = await response.text();
   let json = null;
@@ -65,23 +65,21 @@ const password = () => $("password").value;
 // ------------------------------------------------------------------ actions
 
 const actions = {
+  // registration: the address first, the password once the mailbox is proven (code or link)
   async register() {
-    await call("POST", "/auth/register", { email: email(), password: password() });
+    state.registration = true;
+    const r = await call("POST", "/auth/register", { email: email(), rememberMe: $("rememberMe").checked });
+    showSteps(r.json);
     $("mailboxAddress").value = email();
   },
 
   async login() {
+    state.registration = false;
     const r = await call("POST", "/auth/login", {
       email: email(), password: password(), rememberMe: $("rememberMe").checked,
       twoFactorRememberToken: mode() === "bearer" ? state.rememberToken : null,
     });
-    if (r.status === 401 && r.json?.status === "requires_two_factor") {
-      state.preAuthToken = r.json.preAuthToken;
-      $("challengeMethod").textContent = r.json.twoFactorMethod === "totp" ? "authenticator app" : "code sent by e-mail";
-      $("challenge").hidden = false;
-      $("mailboxAddress").value = email();
-      return;
-    }
+    if (showSteps(r.json)) { $("mailboxAddress").value = email(); return; }
     $("challenge").hidden = true;
     if (r.ok) storeSession(r.json);
     await updateWho();
@@ -93,11 +91,16 @@ const actions = {
   },
 
   async secondFactor() {
-    const r = await call("POST", "/auth/login/2fa", {
-      preAuthToken: state.preAuthToken, code: $("code").value || null, recoveryCode: $("recoveryCode").value || null,
-      rememberDevice: $("rememberDevice").checked,
-    });
-    if (r.ok) { storeSession(r.json); $("challenge").hidden = true; $("code").value = ""; $("recoveryCode").value = ""; }
+    const r = state.step === "set_credential"
+      ? await call("POST", "/auth/register/password", { flowToken: state.flowToken, password: password() })
+      : state.step === "verify_email"
+      ? await call("POST", state.registration ? "/auth/register/verify" : "/auth/login/verify-email", { flowToken: state.flowToken, code: $("code").value || null })
+      : await call("POST", "/auth/login/2fa", {
+        flowToken: state.flowToken, code: $("code").value || null, recoveryCode: $("recoveryCode").value || null,
+        rememberDevice: $("rememberDevice").checked,
+      });
+    if (r.ok) { $("code").value = ""; $("recoveryCode").value = ""; }
+    if (r.ok && !showSteps(r.json)) { storeSession(r.json); $("challenge").hidden = true; }
     await updateWho();
   },
 
@@ -121,7 +124,6 @@ const actions = {
     await updateWho();
   },
 
-  async resendVerification() { await call("POST", "/auth/resend-verification", { email: email() }); },
 
   async setup2fa() {
     const r = await call("POST", "/auth/2fa/setup", {});
@@ -170,7 +172,15 @@ const actions = {
 
   async forgot() { await call("POST", "/auth/forgot-password", { email: email() }); $("mailboxAddress").value = email(); },
   async changePassword() { const r = await call("POST", "/auth/change-password", { currentPassword: password(), newPassword: $("newValue").value }); if (r.ok) storeSession(r.json); },
-  async changeEmail() { await call("POST", "/auth/change-email", { newEmail: $("newValue").value, password: password() }); $("mailboxAddress").value = $("newValue").value; },
+  async changeEmail() {
+    const r = await call("POST", "/auth/change-email", { newEmail: $("newValue").value, password: password() });
+    if (r.ok) state.emailChangeToken = r.json.token;
+    $("mailboxAddress").value = $("newValue").value;
+  },
+  async confirmEmailChange() {
+    const r = await call("POST", "/auth/change-email/confirm", { token: state.emailChangeToken, code: $("emailChangeCode").value });
+    if (r.ok) { storeSession(r.json); state.emailChangeToken = null; $("emailChangeCode").value = ""; $("email").value = $("newValue").value; }
+  },
 
   async mailbox() {
     const address = $("mailboxAddress").value.trim() || email();
@@ -189,15 +199,6 @@ const actions = {
       if (link) li.append(button("Open link", () => { location.href = link; }));
       list.append(li);
     }
-  },
-
-  async completeLink() {
-    const { kind, token } = state.link ?? {};
-    if (kind === "reset-password") await call("POST", "/auth/reset-password", { token, newPassword: $("linkPassword").value });
-    if (kind === "accept-invitation") { const r = await call("POST", "/auth/invitation/accept", { token, password: $("linkPassword").value }); if (r.ok) storeSession(r.json); }
-    $("linkForm").hidden = true;
-    history.replaceState(null, "", "/");
-    await updateWho();
   },
 
   async users() {
@@ -220,7 +221,11 @@ const actions = {
 
   async addPasskey() {
     stopAutofill();   // the browser runs one WebAuthn request at a time
-    const start = await call("POST", "/auth/passkeys/register/options", { password: password() || null });
+    // in the registration step set_credential the passkey becomes the first sign-in method of the new account
+    const registering = state.step === "set_credential" && !$("challenge").hidden;
+    const start = registering
+      ? await call("POST", "/auth/register/passkey/options", { flowToken: state.flowToken })
+      : await call("POST", "/auth/passkeys/register/options", { password: password() || null });
     if (start.ok) {
       const { options, state: ceremony } = start.json;
       const credential = await navigator.credentials.create({
@@ -232,7 +237,8 @@ const actions = {
         },
       }).catch((e) => { log("WebAuthn", "create", 0, e.message); return null; });
       if (credential) {
-        await call("POST", "/auth/passkeys/register", {
+        const r = await call("POST", registering ? "/auth/register/passkey" : "/auth/passkeys/register", {
+          flowToken: registering ? state.flowToken : undefined,
           state: ceremony,
           name: $("passkeyName").value || null,
           credential: {
@@ -244,7 +250,11 @@ const actions = {
             },
           },
         });
-        await actions.signInMethods();
+        if (registering) {
+          if (r.ok && !showSteps(r.json)) { storeSession(r.json); $("challenge").hidden = true; }
+          await updateWho();
+        }
+        else await actions.signInMethods();
       }
     }
     startAutofill();
@@ -385,6 +395,25 @@ async function externalLogin(provider) {
   location.href = `/auth/login/${provider}?useCookies=false&returnUrl=${returnUrl}&code_challenge=${challenge}&code_challenge_method=S256`;
 }
 
+// a sign-in with open steps ("action_required"): the playground shows the mailbox and second-factor steps; others only in the log
+function showSteps(json) {
+  if (json?.status !== "action_required") return false;
+  state.flowToken = json.flowToken;
+  state.step = json.actions[0];
+  if (state.step === "verify_email" || state.step === "second_factor") {
+    const method = state.step === "verify_email" ? "email" : json.details?.secondFactor?.methods?.[0];
+    $("challengeTitle").textContent = state.step === "verify_email" ? "Confirm your e-mail address" : "Second factor required";
+    $("challengeMethod").textContent = method === "totp" ? "authenticator app" : method === "email" ? "code sent by e-mail" : "recovery code";
+    $("challenge").hidden = false;
+  }
+  else if (state.step === "set_credential") {
+    $("challengeTitle").textContent = "Address confirmed – enter a password above, then Continue (or Add passkey)";
+    $("challengeMethod").textContent = "registration";
+    $("challenge").hidden = false;
+  }
+  return true;
+}
+
 // back from the provider: an error in the query, secrets in the fragment (never sent to a server)
 async function handleExternalReturn() {
   const error = new URLSearchParams(location.search).get("slim_error");
@@ -395,20 +424,15 @@ async function handleExternalReturn() {
   sessionStorage.removeItem("slim.mode");
   if (started) { $("mode").value = started; document.body.classList.toggle("bearer", started === "bearer"); }
   if (error) { log("GET", "external login", 0, `slim_error=${error}`); return; }
-  if (fragment.get("slim_status") === "requires_two_factor") {
-    state.preAuthToken = fragment.get("preAuthToken");
-    $("challengeMethod").textContent = fragment.get("method") === "totp" ? "authenticator app" : "code sent by e-mail";
-    $("challenge").hidden = false;
+  if (fragment.get("slim_status") === "action_required") {
+    const r = await call("POST", "/auth/flow", { flowToken: fragment.get("flowToken") });   // names the open steps
+    showSteps(r.json);
     return;
   }
   if (fragment.get("code")) {
     const r = await call("POST", "/auth/login/external/exchange", { code: fragment.get("code"), codeVerifier: sessionStorage.getItem("slim.pkce") });
     sessionStorage.removeItem("slim.pkce");
-    if (r.status === 401 && r.json?.status === "requires_two_factor") {
-      state.preAuthToken = r.json.preAuthToken;
-      $("challengeMethod").textContent = r.json.twoFactorMethod === "totp" ? "authenticator app" : "code sent by e-mail";
-      $("challenge").hidden = false;
-    } else if (r.ok) storeSession(r.json);
+    if (!showSteps(r.json) && r.ok) storeSession(r.json);
   }
 }
 
@@ -418,16 +442,11 @@ async function handleLinkPage() {
   const kind = location.pathname.slice(1);
   const token = new URLSearchParams(location.search).get("token");
   if (!token) return;
-  if (kind === "verify-email") { await call("POST", "/auth/verify-email", { token }); history.replaceState(null, "", "/"); }
-  else if (kind === "confirm-email-change") { await call("POST", "/auth/confirm-email-change", { token }); history.replaceState(null, "", "/"); }
-  else if (kind === "reset-password" || kind === "accept-invitation") {
-    state.link = { kind, token };
-    $("linkTitle").textContent = kind === "reset-password" ? "Set a new password" : "Accept the invitation – choose a password";
-    if (kind === "accept-invitation") {
-      const info = await call("POST", "/auth/invitation/info", { token });
-      if (info.ok) $("linkTitle").textContent += ` for ${info.json.email}`;
-    }
-    $("linkForm").hidden = false;
+  if (kind === "verify-email" || kind === "reset-password" || kind === "accept-invitation") {
+    // every link continues as a flow ending in set_credential, like a registration
+    state.registration = kind === "verify-email";
+    showSteps((await call("POST", "/auth/flow", { token })).json);
+    history.replaceState(null, "", "/");
   }
 }
 

@@ -1,123 +1,84 @@
 # Passkeys
 
-Passkeys (WebAuthn) sign users in with Face ID, a fingerprint or a device PIN – no password, nothing to phish:
-the browser only offers a passkey to the site it was created for. A passkey with user verification is **multi-factor
-on its own** (possession of the device + biometrics / PIN), so no second factor follows.
+Passkeys (WebAuthn) sign users in with Face ID, a fingerprint or a device PIN. A passkey with user verification is
+multi-factor on its own, so no second factor follows.
 
 ## Setup
 
-Passkeys are a package of their own – the core contains no WebAuthn code:
-
 ```bash
-dotnet add package SlimIdentity.Passkeys --prerelease   # always the same version as SlimIdentity
+dotnet add package SlimIdentity.Passkeys --prerelease   # same version as SlimIdentity
 ```
 
 ```csharp
-builder.Services.AddSlimIdentity(o => o.Links.BaseUrl = "https://app.example.com")   // front end – trusted origin, default RP id
-    .AddEntityFrameworkStores<AppDbContext, AppUser, Guid>(o => o.Passkeys = true)   // opt in; the SlimPasskeys table is always in the model
-    // or .AddPasskeyStore<MyPasskeyStore>() – templates for EF Core and Dapper in samples/templates
+builder.Services.AddSlimIdentity(o => o.Links.BaseUrl = "https://app.example.com")   // trusted origin, default RP id
+    .AddEntityFrameworkStores<AppDbContext, AppUser, Guid>(o => o.Passkeys = true)   // or .AddPasskeyStore<MyPasskeyStore>()
     .AddPasskeys(o =>                                                                // optional
     {
-        o.RelyingPartyId = "example.com";     // a parent domain shared by several front ends (default: host of Links.BaseUrl)
+        o.RelyingPartyId = "example.com";     // parent domain of several front ends (default: host of Links.BaseUrl)
         o.RelyingPartyName = "Example";       // shown by the authenticator (default: TwoFactor.AuthenticatorIssuer)
     });
 ```
 
-- **Opt-in** – passkeys are off until you register a passkey store (EF Core: `o.Passkeys = true`): they need the
-  decision below and a front end that offers them. The package checks at start-up that it has the core's version.
-- **Relying party id (RP id)** – the domain passkeys are bound to: the front end's host or a parent domain of it.
-  **Choose it once:** changing it later makes every registered passkey unusable. Without it the start fails.
-- **Origins** – the page that runs the ceremony must be a trusted origin ([`TrustedOrigins`, `Links.BaseUrl` or your
-  origin policy](multi-tenancy.md)) and lie within the RP id.
+- **Opt-in:** off until a passkey store is registered. The package checks at startup that it matches the core version.
+- **RP id:** the front end's host or a parent domain. **Choose it once** – changing it makes all passkeys unusable.
+  Without it the start fails.
+- **Origins:** the page running the ceremony must be a trusted origin (`TrustedOrigins`, `Links.BaseUrl` or an
+  [origin policy](multi-tenancy.md)) within the RP id.
 
 ## Flows
 
-All bodies are WebAuthn's JSON form with base64url fields; the TypeScript client converts them.
+Bodies are WebAuthn's JSON form with base64url fields; the TypeScript client converts them. Each ceremony is an
+`…/options` call returning `options` and a `state` (valid 5 minutes) followed by the call with `state` and
+`credential` – routes and bodies in the [endpoint reference](../endpoints.md#passkeys-package-slimidentitypasskeys).
 
-**Add a passkey** (signed in):
+- **Adding** requires an existing local sign-in method (password or passkey; a pure SSO account gets
+  `403 password_required`), the password or a sign-in within 5 minutes (`403 reauthentication_required`), a confirmed
+  address, and no impersonation.
+- **Registering** ([registration](../endpoints.md#registration); step `set_credential` with `passkey` in
+  `details.setCredential.kinds`) creates a confirmed account with the passkey as its
+  only way in. The ceremony is bound to the flow; an already registered credential is refused before the account is
+  created. Recovery is `/forgot-password`.
+- **Signing in** gives `amr: passkey`. Guards, inactive accounts, `verify_email` and `change_password` apply as for
+  every sign-in; a password or second-factor lockout does not block passkeys.
+- **Autofill** (conditional UI): mark the e-mail input `autocomplete="username webauthn"` and start
+  `loginWithPasskeyAutofill(signal)` when the page opens; it refreshes the challenge every 4 minutes. Abort the signal
+  before any other sign-in on the page – browsers run one WebAuthn request at a time.
+- **Synced or device-bound:** `backupEligible` (may sync) is fixed per passkey – a sign-in reporting a change is
+  refused; `backedUp` is updated at each sign-in.
+- **Manage** via `GET /auth/sign-in-methods`, `/sign-in-methods/passkeys/rename` and `/remove` (password or recent
+  sign-in; the last way in is never removed).
+- A mailed password reset that first confirms an account removes all its passkeys with the password, 2FA and external
+  logins (pre-account hijacking).
 
-```http
-POST /auth/passkeys/register/options   { "password": "…" }        → { "options": { …creation options… }, "state": "…" }
-     navigator.credentials.create({ publicKey: options })
-POST /auth/passkeys/register            { "state", "credential", "name": "Laptop" }   → { "id", "name", "createdUtc", "backupEligible", "backedUp" }
-```
-
-A passkey adds to a password: the account needs one (`403 password_required` otherwise – a pure SSO account gets no
-local sign-in method), and the password is asked – a stolen session must not add a permanent way in; the address
-must be confirmed, and not during an impersonation – the same rules as for 2FA and linking.
-
-**Sign in** (anonymous, no e-mail needed – discoverable credentials):
-
-```http
-POST /auth/passkeys/login/options                                   → { "options": { …request options… }, "state": "…" }
-     navigator.credentials.get({ publicKey: options })
-POST /auth/passkeys/login?useCookies=true|false   { "state", "credential", "rememberMe" }   → session
-```
-
-The session has `amr: passkey`. Sign-in guards, inactive accounts, `RequireConfirmedEmail` and a forced password
-change (`403 password_change_required` – sign in with the start password once) apply as for every
-sign-in; a running password lockout does not block passkeys (there is nothing to guess).
-
-**Autofill** (conditional UI) – the browser offers the passkeys of the site right in the e-mail field, no extra button:
-mark the input `autocomplete="username webauthn"` and start `loginWithPasskeyAutofill(signal)` of the TypeScript client
-when the sign-in page opens. It calls the same two endpoints with `mediation: "conditional"`, fetches a fresh challenge
-every 4 minutes (a state lives 5) and returns once the user picks a passkey. Abort the signal before any other sign-in on
-the page – the browser runs one WebAuthn request at a time.
-
-```html
-<input type="email" name="email" autocomplete="username webauthn">
-```
-
-```ts
-const autofill = new AbortController();
-cookieAuth.loginWithPasskeyAutofill(autofill.signal).then(r => r.kind === "ok" && goHome());
-// password form or "sign in with passkey" button: autofill.abort() first
-```
-
-**Synced or device-bound** – `backupEligible` says whether a passkey may be synced to other devices (iCloud Keychain,
-Google Password Manager, password managers) or stays on one device (security key); `backedUp` whether it currently is
-(updated at every sign-in). Show it next to the name ("synced" / "this device only"). Eligibility is fixed for a
-passkey: a sign-in that reports a change is refused.
-
-**Manage** – passkeys appear in `GET /auth/sign-in-methods` and are renamed or removed there
-(`/sign-in-methods/passkeys/rename`, `/sign-in-methods/passkeys/remove`); removing needs the password (or a recent sign-in) if the account has
-one and never removes the last way in.
-
-TypeScript: `addPasskey(name, password)`, `loginWithPasskey()`, `loginWithPasskeyAutofill(signal)`, `signInMethods()`,
-`renamePasskey(id, name)`, `removePasskey(id, password)`.
-
-**Taking over an account** – when the owner of an address proves the mailbox for the first time (password reset of an
-unconfirmed account, verified external sign-in), every passkey of the account is removed together with the password,
-2FA and external logins: whoever registered the address before keeps no way in. Passkeys can only be added to confirmed
-accounts anyway; this covers accounts imported or created while mail was off.
+TypeScript: `addPasskey(name, password)`, `completeRegistrationWithPasskey(flowToken, name, profile)`,
+`loginWithPasskey()`, `loginWithPasskeyAutofill(signal)`, `signInMethods()`, `renamePasskey(id, name)`,
+`removePasskey(id, password)`.
 
 ## What is checked
 
-Following Web Authentication Level 2 (§7.1 registration, §7.2 authentication):
+Following Web Authentication Level 2 (§7.1, §7.2):
 
 | Check | Registration | Sign-in |
 | :--- | :---: | :---: |
-| `type` (`webauthn.create` / `webauthn.get`), challenge from the signed state, not `crossOrigin` | ✓ | ✓ |
-| Origin trusted and within the RP id | ✓ | ✓ |
-| RP id hash in the authenticator data | ✓ | ✓ |
-| User present **and** verified (biometrics / PIN) | ✓ | ✓ |
-| Backup flags consistent (backed up only if eligible); eligibility unchanged since registration | ✓ | ✓ |
-| Public key: ES256 (P-256) or RS256 (modulus of at least 2048 bit – zero padding does not count); credential id unique | ✓ | |
-| Registration state bound to the account and its security stamp | ✓ | |
-| Signature over authenticator data + client data hash with the stored key | | ✓ |
-| Account active and (with `RequireConfirmedEmail`) confirmed – before the use is recorded | | ✓ |
-| User handle matches the passkey's owner | | ✓ |
-| Signature counter increases (if the authenticator counts) – else a cloned key is assumed | | ✓ |
-| Each challenge counts once per passkey (atomic in the store) – no replay | | ✓ |
+| `type`, challenge from the signed state, not `crossOrigin` | ✓ | ✓ |
+| Origin trusted and within the RP id; RP id hash in the authenticator data | ✓ | ✓ |
+| User present **and** verified | ✓ | ✓ |
+| Backup flags consistent; eligibility unchanged since registration | ✓ | ✓ |
+| ES256 (P-256) or RS256 (≥ 2048-bit modulus, padding not counted); credential id unique | ✓ | |
+| State bound to the account and its security stamp, or to the registration flow | ✓ | |
+| Signature with the stored key; user handle matches the owner | | ✓ |
+| Account active, address confirmed – before the use is recorded | | ✓ |
+| Signature counter increases (if counted) – else a cloned key is assumed | | ✓ |
+| Each challenge counts once per passkey (atomic in the store) | | ✓ |
 
-Attestation is not evaluated (`attestation: "none"`): SlimIdentity does not decide which authenticator models are
-acceptable. Ed25519 keys are not offered – .NET has no built-in support, and passkeys use ES256.
+Attestation is not evaluated (`attestation: "none"`). Ed25519 is not offered (no built-in .NET support).
 
 ## Your own store
 
-`ISlimPasskeyStore` – start from the templates (`EfCorePasskeyStore`, `DapperPasskeyStore`) and verify it with
-`SlimIdentity.Testing`. Three rules matter: credential ids are unique (`AddPasskeyAsync` returns `false`, also under
-concurrency), `TryRecordUseAsync` is a single compare-and-set statement (same counter **and** a newer challenge), and
-`RemovePasskeysAsync` removes every passkey of the user (account takeover above). Store `BackupEligible` and
-`BackedUp`; `TryRecordUseAsync` updates `BackedUp` in the same statement.
-Key the table by the SHA-256 of the credential id – ids can be up to 1023 bytes, more than SQL Server allows in a key.
+Start from the templates (`EfCorePasskeyStore`, `DapperPasskeyStore`) and verify with `SlimIdentity.Testing`:
+
+- credential ids are unique – `AddPasskeyAsync` returns `false`, also under concurrency;
+- `TryRecordUseAsync` is one compare-and-set (same counter **and** newer challenge) and updates `BackedUp`;
+- `RemovePasskeysAsync` removes every passkey of the user;
+- store `BackupEligible`, `BackedUp` and `UserHandle` (≤ 64 bytes; rows without one use the UTF-8 user id);
+- key the table by the SHA-256 of the credential id (ids reach 1023 bytes).

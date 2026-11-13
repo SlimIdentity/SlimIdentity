@@ -31,10 +31,11 @@ namespace MyApp.Mail;
 /// <summary>Writes every mail into the outbox table – nothing is sent inside the request.</summary>
 public sealed class OutboxEmailSender(AppDbContext db, TimeProvider time) : ISlimEmailSender
 {
-    public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string link, CancellationToken ct) => AddAsync(context, email, link, ct);
+    public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string code, string link, CancellationToken ct) => AddAsync(context, email, code + " " + link, ct);
     public Task SendPasswordResetEmailAsync(SlimEmailContext context, string email, string link, CancellationToken ct) => AddAsync(context, email, link, ct);
     public Task SendTwoFactorCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) => AddAsync(context, email, code, ct);
-    public Task SendEmailChangeConfirmationAsync(SlimEmailContext context, string newEmail, string link, CancellationToken ct) => AddAsync(context, newEmail, link, ct);
+    public Task SendEmailVerificationCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) => AddAsync(context, email, code, ct);
+    public Task SendEmailChangeCodeAsync(SlimEmailContext context, string newEmail, string code, CancellationToken ct) => AddAsync(context, newEmail, code, ct);
     public Task SendEmailChangedNotificationAsync(SlimEmailContext context, string oldEmail, string newEmail, CancellationToken ct) => AddAsync(context, oldEmail, newEmail, ct);
     public Task SendAccountExistsEmailAsync(SlimEmailContext context, string email, CancellationToken ct) => AddAsync(context, email, "", ct);
     public Task SendLockoutNotificationEmailAsync(SlimEmailContext context, string email, DateTimeOffset lockoutEndUtc, CancellationToken ct) =>
@@ -157,10 +158,12 @@ public sealed class OutboxMailWorker<TTransport>(IServiceScopeFactory scopes, Ti
         };
         return mail.Kind switch
         {
-            SlimEmailKinds.Verification => transport.SendVerificationEmailAsync(context, mail.To, mail.Payload, ct),
+            SlimEmailKinds.Verification => transport.SendVerificationEmailAsync(context, mail.To,
+                mail.Payload[..mail.Payload.IndexOf(' ')], mail.Payload[(mail.Payload.IndexOf(' ') + 1)..], ct),
             SlimEmailKinds.PasswordReset => transport.SendPasswordResetEmailAsync(context, mail.To, mail.Payload, ct),
             SlimEmailKinds.TwoFactorCode => transport.SendTwoFactorCodeAsync(context, mail.To, mail.Payload, ct),
-            SlimEmailKinds.EmailChange => transport.SendEmailChangeConfirmationAsync(context, mail.To, mail.Payload, ct),
+            SlimEmailKinds.VerificationCode => transport.SendEmailVerificationCodeAsync(context, mail.To, mail.Payload, ct),
+            SlimEmailKinds.EmailChange => transport.SendEmailChangeCodeAsync(context, mail.To, mail.Payload, ct),
             SlimEmailKinds.EmailChanged => transport.SendEmailChangedNotificationAsync(context, mail.To, mail.Payload, ct),
             SlimEmailKinds.AccountExists => transport.SendAccountExistsEmailAsync(context, mail.To, ct),
             SlimEmailKinds.LockoutNotification => transport.SendLockoutNotificationEmailAsync(context, mail.To,

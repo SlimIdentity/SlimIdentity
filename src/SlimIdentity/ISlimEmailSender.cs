@@ -9,8 +9,11 @@ namespace SlimIdentity;
 /// </summary>
 public interface ISlimEmailSender
 {
-    /// <summary>E-mail verification after registration or on <c>/resend-verification</c>.</summary>
-    Task SendVerificationEmailAsync(SlimEmailContext context, string email, string verificationTokenOrLink, CancellationToken ct);
+    /// <summary>
+    /// The mail of a registration (<c>POST /register</c>): a 6-digit <paramref name="code"/> for
+    /// <c>POST /auth/register/verify</c> and a link whose token <c>POST /auth/flow</c> redeems – both prove the mailbox.
+    /// </summary>
+    Task SendVerificationEmailAsync(SlimEmailContext context, string email, string code, string verificationTokenOrLink, CancellationToken ct);
 
     /// <summary>Password reset link (<c>/forgot-password</c>).</summary>
     Task SendPasswordResetEmailAsync(SlimEmailContext context, string email, string resetTokenOrLink, CancellationToken ct);
@@ -19,10 +22,16 @@ public interface ISlimEmailSender
     Task SendTwoFactorCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct);
 
     /// <summary>
-    /// Confirmation link for a requested e-mail change, sent to the <b>new</b> address
-    /// (<c>/change-email</c>, link from <c>Links.BaseUrl</c> or <c>Links.EmailChangeUrl</c>). The address changes only when the link is confirmed.
+    /// 6-digit code that confirms the address during a sign-in (step <c>verify_email</c>, <c>POST /auth/login/verify-email</c>).
+    /// Sent directly (the user is waiting for it).
     /// </summary>
-    Task SendEmailChangeConfirmationAsync(SlimEmailContext context, string newEmail, string confirmationTokenOrLink, CancellationToken ct);
+    Task SendEmailVerificationCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct);
+
+    /// <summary>
+    /// 6-digit code for a requested e-mail change, sent to the <b>new</b> address (<c>/change-email</c>). The address
+    /// changes only when a session of the account enters it at <c>/change-email/confirm</c>; the mail carries no link.
+    /// </summary>
+    Task SendEmailChangeCodeAsync(SlimEmailContext context, string newEmail, string code, CancellationToken ct);
 
     /// <summary>
     /// Optional: informs the <b>old</b> address after the e-mail change was confirmed ("your address was changed –

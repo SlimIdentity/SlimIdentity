@@ -33,21 +33,22 @@ Works with xUnit, NUnit, MSTest or a console app – the package has no test-fra
 
 | Store | Rules |
 | :--- | :--- |
-| `ISlimUserStore` | create / find; case-insensitive lookup; `CreateAsync` returns `null` for a taken address – also for parallel registrations; all security fields persisted; **parallel** `IncrementFailedLoginAttemptsAsync` counts every failure; bookkeeping never overwrites hash or stamp; conditional rehash; e-mail change refuses taken addresses |
+| `ISlimUserStore` | create / find; case-insensitive lookup, also beyond ASCII; `CreateAsync` returns `null` for a taken address – also for parallel registrations; all security fields persisted; **parallel** `TryBeginAttemptAsync` reserves every attempt exactly once and exactly one locks at the threshold; separate counters for password and second factor; `UpdateSecurityStateAsync` never writes the counters, `IsActive` or the address; rehash and e-mail change write nothing else; bookkeeping never overwrites hash or stamp; conditional rehash; e-mail change refuses taken addresses, **also in parallel**, and accepts a new spelling of the own address |
 | `ISlimTwoFactorStore` | TOTP secret stored unchanged (length!); recovery codes single use, per user, **also in parallel**; code and challenge markers monotonic, per user, **also in parallel**, on separate columns |
 | `ISlimRefreshTokenStore` | single use, **also in parallel**; expired tokens rejected |
 | `ISlimSessionStore` | round trip; touch; revoke one / all / all but current |
 | `ISlimExternalLoginStore` | lookup by provider and key; list per user; remove only the user's own link |
 | `ISlimPasskeyStore` | credential ids unique, **also in parallel**; `TryRecordUseAsync` single use per challenge and compare-and-set on the counter, **also in parallel**; list, rename and remove per user; `RemovePasskeysAsync` removes all of one user only; backup flags stored, `BackedUp` updated with each use |
+| `ISlimSharedState` | a marker is added once, **also in parallel**; an expired marker counts as absent; counters count 1, 2, 3 per key without losing an increment **in parallel** and restart at 1 after their window; keys of 128 characters |
 
 A failed run reads like this:
 
 ```
 SlimIdentity store conformance: 21 of 22 checks passed.
   ...
-  FAIL  ISlimUserStore: IncrementFailedLoginAttemptsAsync counts parallel failures atomically
-          FailedLoginAttempts after 8 parallel increments: expected 8, got 3.
-          fix: One statement: UPDATE users SET failed_login_attempts = failed_login_attempts + 1 …
+  FAIL  ISlimUserStore: TryBeginAttemptAsync reserves parallel attempts atomically
+          FailedLoginAttempts after 8 reserved parallel attempts: expected 8, got 3.
+          fix: Read and write counter and lockout end in one atomic step: a row lock (SELECT … FOR UPDATE) …
 ```
 
 ## Important
@@ -58,4 +59,6 @@ SlimIdentity store conformance: 21 of 22 checks passed.
   their `DbContext` / connection as you do in the application.
 - The checks create users under `@conformance.invalid` (configurable) and **do not delete them**. Never run them
   against production data.
+- Every race check runs `RaceRounds` times (default 5) after warming up `Parallelism` connections, so a race
+  that a single round happens to miss is still found. Raise both in `SlimConformanceOptions` for a more thorough run.
 - `SlimStoreConformance.RunAsync` returns the report without throwing, e.g. to print it.

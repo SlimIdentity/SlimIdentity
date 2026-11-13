@@ -28,15 +28,19 @@ public sealed record SlimAuthResult
     /// <summary>A <see cref="ISlimSignInGuard"/> refused the session.</summary>
     public bool Vetoed { get; init; }
     /// <summary>
-    /// <see cref="ISlimAuthManager.SignInAsync"/> for an account with 2FA: the challenge to return with status 401
-    /// (<see cref="Error"/> is <c>requires_two_factor</c>); the client completes it at <c>POST /auth/login/2fa</c>.
+    /// Steps follow before the session (<see cref="Error"/> is <c>action_required</c>), e.g. the second factor: return it
+    /// with status 200 (<c>Results.Ok(result.ActionRequired)</c>); the client continues at the step endpoints.
     /// </summary>
-    public SlimLoginChallengeResponse? TwoFactorChallenge { get; init; }
+    public SlimActionRequiredResponse? ActionRequired { get; init; }
 
     /// <summary>When the tokens were issued (the registered <see cref="TimeProvider"/>) – the base of <c>expiresIn</c>.</summary>
     internal DateTimeOffset IssuedAt { get; init; }
 
+    /// <summary>The token of a device remembered for the second factor (bearer mode), answered with the session.</summary>
+    internal string? TwoFactorRememberToken { get; init; }
+
     internal static SlimAuthResult Failed(string error) => new() { Succeeded = false, Error = error };
+    internal static SlimAuthResult Steps(SlimActionRequiredResponse response) => new() { Succeeded = false, Error = SlimErrorCodes.ActionRequired, ActionRequired = response };
     internal static SlimAuthResult Veto(SlimVeto veto) => new() { Succeeded = false, Error = veto.Error, ErrorMessage = veto.Message, Vetoed = true };
 
     private bool PrintMembers(System.Text.StringBuilder builder)
@@ -79,7 +83,7 @@ public sealed record SlimAuthResult
 /// Result of <see cref="ISlimAuthManager.CreatePasswordResetAsync"/>: hand <see cref="Link"/> to the user (chat, ticket,
 /// in person). The user chooses the password – the administrator never sees it.
 /// </summary>
-/// <param name="Token">Raw reset token (for <c>POST /auth/reset-password</c>).</param>
+/// <param name="Token">Raw reset token (for <c>POST /auth/flow</c>).</param>
 /// <param name="Link">The reset link (<c>Links.BaseUrl</c> + <c>/reset-password</c> or <c>Links.PasswordResetUrl</c>) with the token inserted, or the raw token if neither is configured.</param>
 /// <param name="ExpiresAt">End of validity.</param>
 public sealed record SlimPasswordReset(string Token, string Link, DateTimeOffset ExpiresAt)
@@ -109,22 +113,23 @@ public sealed record SlimInvitation(string Token, string Link, DateTimeOffset Ex
 }
 
 /// <summary>
-/// Result of <see cref="ISlimAuthManager.RegisterAsync"/>. Return <see cref="Response"/> from a public endpoint: it does
-/// not reveal whether the address already had an account.
+/// Result of <see cref="ISlimAuthManager.CreateUserAsync"/>: the new account, or why there is none. It tells whether the
+/// address was taken – return it to an administrator, never from a public endpoint.
 /// </summary>
-public sealed class SlimRegistrationResult
+public sealed class SlimCreateUserResult
 {
-    internal SlimRegistrationResult(SlimUser? user, IResult? failure, IResult response) => (User, Failure, Response) = (user, failure, response);
+    internal SlimCreateUserResult(SlimUser? user, IResult? failure) => (User, Failure) = (user, failure);
 
-    /// <summary>
-    /// The new account – <c>null</c> if <see cref="Failure"/> is set or the address already has an account (its owner
-    /// got the "account exists" mail instead). Never tell the caller which of the two happened.
-    /// </summary>
+    /// <summary>The new account; <c>null</c> if <see cref="Failure"/> is set.</summary>
     public SlimUser? User { get; }
 
-    /// <summary><c>400</c> (address, password rules) or <c>403</c> (a registration guard's veto); <c>null</c> otherwise.</summary>
+    /// <summary>
+    /// <c>400</c> (address, password rules) or <c>409 email_taken</c> – to return as-is; <c>null</c> on success.
+    /// </summary>
     public IResult? Failure { get; }
 
-    /// <summary>The answer of <c>POST /register</c>: <see cref="Failure"/>, or the uniform <c>registration_accepted</c>.</summary>
-    public IResult Response { get; }
+    /// <summary>The account was created.</summary>
+    [System.Diagnostics.CodeAnalysis.MemberNotNullWhen(true, nameof(User))]
+    [System.Diagnostics.CodeAnalysis.MemberNotNullWhen(false, nameof(Failure))]
+    public bool Succeeded => User is not null;
 }

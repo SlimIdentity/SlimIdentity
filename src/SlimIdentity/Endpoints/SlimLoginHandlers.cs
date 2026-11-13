@@ -5,15 +5,15 @@ using SlimIdentity.Services;
 
 namespace SlimIdentity.Endpoints;
 
-/// <summary>Login state machine: password → (2FA) → session; refresh rotation; logout.</summary>
+/// <summary>Password sign-in and its step endpoints (<see cref="SlimSignInFlow"/>); refresh rotation; logout.</summary>
 internal sealed class SlimLoginHandlers(
     ISlimUserStore store,
-    SlimMailThrottle mailThrottle,
-    SlimEmailDispatcher mailDispatcher,
     SlimPasswordPolicy passwordPolicy,
     SlimHookRunner hooks,
     SlimCredentialService credentials,
     SlimAuthManager authManager,
+    SlimSignInFlow flow,
+    SlimSharedStateAccess sharedState,
     SlimWorkflowTokens workflow,
     SlimMetrics metrics,
     IOptions<SlimIdentityOptions> options,
@@ -26,6 +26,11 @@ internal sealed class SlimLoginHandlers(
     internal const string MethodEmail = "email";
     internal const string MethodRecovery = "recovery";
 
+    // attempts at the code of step verify_email: per sign-in, and per address across sign-ins
+    internal const int VerificationAttemptsPerFlow = 5;
+    internal const int VerificationAttemptsPerAddress = 10;
+    internal static readonly TimeSpan VerificationAddressWindow = TimeSpan.FromHours(24);
+
     private SlimIdentityOptions O => options.Value;
     private HttpContext Http => httpContextAccessor.HttpContext!;
 
@@ -36,41 +41,21 @@ internal sealed class SlimLoginHandlers(
         if (!SlimModes.TryResolve(O, useCookies, out var cookies, out var modeError)) return modeError!;
         var email = SlimEmailAddress.Normalize(request?.Email);
         if (request is null || email is null || string.IsNullOrEmpty(request.Password))
-            return SlimResults.BadRequest("invalid_request", "E-mail and password are required.");
+            return SlimResults.BadRequest(SlimErrorCodes.InvalidRequest, "E-mail and password are required.");
 
         // Oversized passwords are never hashed (DoS) – identical answer for known and unknown accounts.
-        if (request.Password.Length > O.Password.MaximumLength) return Failed("invalid_password");
+        if (request.Password.Length > O.Password.MaximumLength) return Failed(SlimErrorCodes.InvalidPassword);
 
         var found = await store.FindByEmailAsync(email, ct);
         if (found is null)
         {
             credentials.BurnDummyHash(request.Password); // timing-attack mitigation
-            await hooks.RaiseAsync(SlimEventTypes.SignInFailed, null, SlimAuthManager.MethodPassword, "unknown_user", ct: ct);
-            return Failed("unknown_user");
+            await hooks.RaiseAsync(SlimEventTypes.SignInFailed, null, SlimAuthManager.MethodPassword, SlimErrorCodes.UnknownUser, ct: ct);
+            return Failed(SlimErrorCodes.UnknownUser);
         }
 
-        // Lockout check, verification and counting form one step per account (keyed by the user id - every spelling of
-        // the address the store treats as equal shares it). Parallel guesses queue up instead of all passing the
-        // lockout check before the first failure is recorded; a full queue is answered like a wrong password.
-        IResult result;
-        bool burnDummyHash;
-        using (var attempt = await credentials.TryEnterAttemptAsync(found.Id, ct))
-        {
-            if (attempt is null)
-            {
-                metrics.Login("attempts_queued", cookies);
-                await hooks.RaiseAsync(SlimEventTypes.SignInFailed, found.Id, SlimAuthManager.MethodPassword, "attempts_queued", ct: ct);
-                (result, burnDummyHash) = (SlimResults.InvalidCredentials(), true);
-            }
-            else
-            {
-                // re-read inside the gate: a queued predecessor may just have locked the account
-                (result, burnDummyHash) = await LoginWithinGateAsync(await store.FindByIdAsync(found.Id, ct), request, cookies, ct);
-            }
-        }
-
-        // outside the gate: refused attempts must not occupy the account's queue for a full hashing time
-        if (burnDummyHash) credentials.BurnDummyHash(request.Password);
+        var (result, burnDummyHash) = await LoginWithPasswordAsync(found, request, cookies, ct);
+        if (burnDummyHash) credentials.BurnDummyHash(request.Password);   // same hashing time as a real verification
         return result;
 
         IResult Failed(string reason)
@@ -81,208 +66,146 @@ internal sealed class SlimLoginHandlers(
     }
 
     /// <summary>
-    /// The password step for one account, run inside its attempt gate. <c>BurnDummyHash</c>: the caller burns the time of
-    /// a verification after leaving the gate (account gone, inactive or locked).
+    /// The password step for one account. <c>BurnDummyHash</c>: the caller burns the time of a verification (inactive,
+    /// locked or not reserved – the password was not checked).
     /// </summary>
-    private async Task<(IResult Result, bool BurnDummyHash)> LoginWithinGateAsync(SlimUser? user, SlimLoginRequest request, bool cookies, CancellationToken ct)
+    private async Task<(IResult Result, bool BurnDummyHash)> LoginWithPasswordAsync(SlimUser user, SlimLoginRequest request, bool cookies, CancellationToken ct)
     {
-        if (user is null)
-        {
-            metrics.Login("unknown_user", cookies);
-            await hooks.RaiseAsync(SlimEventTypes.SignInFailed, null, SlimAuthManager.MethodPassword, "unknown_user", ct: ct);
-            return (SlimResults.InvalidCredentials(), true);
-        }
-
         // Inactive / locked accounts: by default indistinguishable from a wrong password (same answer, same hashing time).
         // Attempts during a lockout are neither verified nor counted.
         var reveal = O.SignIn.RevealAccountState;
         var now = time.GetUtcNow();
         if (!user.IsActive)
         {
-            metrics.Login("account_disabled", cookies);
-            await hooks.RaiseAsync(SlimEventTypes.SignInFailed, user.Id, SlimAuthManager.MethodPassword, "account_disabled", ct: ct);
+            metrics.Login(SlimErrorCodes.AccountDisabled, cookies);
+            await hooks.RaiseAsync(SlimEventTypes.SignInFailed, user.Id, SlimAuthManager.MethodPassword, SlimErrorCodes.AccountDisabled, ct: ct);
             return reveal
-                ? (SlimResults.Status("account_disabled", "The account is disabled.", StatusCodes.Status403Forbidden), false)
+                ? (SlimResults.Status(SlimErrorCodes.AccountDisabled, "The account is disabled.", StatusCodes.Status403Forbidden), false)
                 : (SlimResults.InvalidCredentials(), true);
         }
-        if (user.IsLockedOut(now))
+
+        // An account without a password cannot be guessed: counting would only let anyone lock its owner out. Answered
+        // like a wrong password, with the same hashing time.
+        if (!await credentials.HasPasswordAsync(user, ct))
         {
-            metrics.Login("locked_out", cookies);
-            await hooks.RaiseAsync(SlimEventTypes.SignInFailed, user.Id, SlimAuthManager.MethodPassword, "locked_out", ct: ct);
-            return reveal ? (SlimResults.Locked(Http, user.LockoutEndUtc!.Value, now), false) : (SlimResults.InvalidCredentials(), true);
+            metrics.Login(SlimErrorCodes.InvalidPassword, cookies);
+            await hooks.RaiseAsync(SlimEventTypes.SignInFailed, user.Id, SlimAuthManager.MethodPassword, SlimErrorCodes.InvalidPassword, ct: ct);
+            return (SlimResults.InvalidCredentials(), true);
+        }
+
+        // Reserved in the store before the check (keyed by the user id - every spelling of the address the store treats
+        // as equal shares it): of parallel guesses, at most the threshold is checked, on every instance together.
+        var attempt = await credentials.BeginAttemptAsync(user, SlimAttemptFactor.Password, ct);
+        if (attempt.Status != SlimAttemptStatus.Reserved)
+        {
+            var reason = attempt.Status == SlimAttemptStatus.LockedOut ? SlimErrorCodes.LockedOut : SlimErrorCodes.AttemptNotReserved;
+            metrics.Login(reason, cookies);
+            await hooks.RaiseAsync(SlimEventTypes.SignInFailed, user.Id, SlimAuthManager.MethodPassword, reason, ct: ct);
+            return reveal && attempt.LockoutEndUtc is { } end ? (SlimResults.Locked(Http, end, now), false) : (SlimResults.InvalidCredentials(), true);
         }
 
         var check = await credentials.VerifyPasswordAsync(user, request.Password, ct);
         if (check == SlimPasswordCheck.Failed)
         {
-            metrics.Login("invalid_password", cookies);
-            await hooks.RaiseAsync(SlimEventTypes.SignInFailed, user.Id, SlimAuthManager.MethodPassword, "invalid_password", ct: ct);
-            // an account without a password cannot be guessed: counting would only let anyone lock its owner out of the
-            // provider or passkey sign-in
-            if (!await credentials.HasPasswordAsync(user, ct)) return (SlimResults.InvalidCredentials(), false);
-            var locked = await credentials.RegisterFailureAsync(user, ct);
-            return (locked && reveal ? SlimResults.Locked(Http, user.LockoutEndUtc!.Value, now) : SlimResults.InvalidCredentials(), false);
+            metrics.Login(SlimErrorCodes.InvalidPassword, cookies);
+            await hooks.RaiseAsync(SlimEventTypes.SignInFailed, user.Id, SlimAuthManager.MethodPassword, SlimErrorCodes.InvalidPassword, ct: ct);
+            var lockedUntil = await credentials.FailAttemptAsync(user, attempt, ct);
+            return (lockedUntil is { } end && reveal ? SlimResults.Locked(Http, end, now) : SlimResults.InvalidCredentials(), false);
         }
 
-        // With 2FA the lockout counter is only reset after the second factor - otherwise a known
-        // password would allow unlimited guessing of the 6-digit code.
-        await credentials.RegisterSuccessAsync(user, request.Password,
-            rehash: check == SlimPasswordCheck.SuccessRehashNeeded,
-            resetLockout: !user.TwoFactorEnabled, ct);
+        // the second factor has its own counter: resetting the password counter opens no way to guess codes
+        await credentials.SucceedAttemptAsync(user, attempt, ct);
+        await credentials.RehashAsync(user, request.Password, check, ct);
 
-        if (O.SignIn.RequireConfirmedEmail && !user.EmailConfirmed)
-        {
-            metrics.Login("email_not_confirmed", cookies);
-            return (SlimResults.Status("email_not_confirmed", "The e-mail address has not been confirmed yet.", StatusCodes.Status403Forbidden), false);
-        }
-
-        // a password set by an administrator: no session (not even a remembered device) before the user chose an own one
-        if (user.PasswordChangeRequired)
-        {
-            metrics.Login("password_change_required", cookies);
-            var lifetime = SlimIdentityDefaults.PreAuthTokenLifetime;
-            return (SlimResults.Challenge(new SlimLoginChallengeResponse
-            {
-                Status = "password_change_required",
-                Message = "The password was set by an administrator. Choose your own password to continue.",
-                PasswordChangeToken = workflow.Protect(SlimWorkflowTokens.PasswordChangePurpose,
-                    new SlimPasswordChangePayload(user.Id, user.SecurityStamp, cookies, request.RememberMe), lifetime),
-                ExpiresIn = (int)lifetime.TotalSeconds,
-            }), false);
-        }
-
-        // remembered device: the second factor was passed on this device before - the password was just verified
-        if (user.TwoFactorEnabled && services.GetService<SlimTwoFactorService>() is { } twoFactor
-            && twoFactor.IsRememberedDevice(user, Http, cookies, request.TwoFactorRememberToken))
-        {
-            await credentials.RegisterSuccessAsync(user, null, rehash: false, resetLockout: true, ct);
-            metrics.TwoFactor("remembered_device", "success");
-            var remembered = await authManager.SignInCoreAsync(user, cookies, request.RememberMe, SlimAuthManager.MethodRememberedDevice, null, null, true, ct);
-            metrics.Login(remembered.Succeeded ? "success" : "rejected", cookies);
-            return (ToResult(remembered), false);
-        }
-
-        if (user.TwoFactorEnabled)
-        {
-            var challenge = await BeginTwoFactorAsync(user, cookies, request.RememberMe, ct);
-            metrics.Login("requires_two_factor", cookies);
-            return (challenge is null
-                ? Results.Problem(statusCode: 500, title: "Two-factor authentication is enabled for this user but ISlimTwoFactorStore is not registered.")
-                : SlimResults.Challenge(challenge), false);
-        }
-
-        var result = await authManager.SignInCoreAsync(user, cookies, request.RememberMe, SlimAuthManager.MethodPassword, null, null, true, ct);
-        metrics.Login(result.Succeeded ? "success" : "rejected", cookies);
-        return (ToResult(result), false);
+        var result = await flow.StartAsync(user, cookies, request.RememberMe, SlimAuthManager.MethodPassword, SlimSignInProofs.Password,
+            checkRememberedDevice: true, request.TwoFactorRememberToken, refuseLockedSecondFactor: true, ct);
+        metrics.Login(SlimSignInFlow.MetricReason(result), cookies);
+        return (flow.ToHttpResult(result, user), false);
     }
 
-    /// <summary>Creates the pre-auth token (and sends the e-mail code if no authenticator is configured).</summary>
-    internal async Task<SlimLoginChallengeResponse?> BeginTwoFactorAsync(SlimUser user, bool useCookies, bool rememberMe, CancellationToken ct)
+    // ------------------------------------------------------------------ POST /flow
+
+    public Task<IResult> ReadFlowAsync(SlimFlowRequest? request, bool? useCookies, CancellationToken ct) => flow.ReadAsync(request, useCookies, ct);
+
+    // ------------------------------------------------------------------ POST /login/verify-email
+
+    public async Task<IResult> VerifyEmailAsync(SlimVerifyEmailLoginRequest? request, CancellationToken ct)
     {
-        var twoFactor = services.GetService<SlimTwoFactorService>();
-        if (twoFactor is null)
+        if (request is null || !flow.TryRead(request.FlowToken, out var state, out _))
+            return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
+
+        // ends in a cookie sign-in without carrying a cookie – only the signed token knows (as on /login/2fa)
+        if (state.UseCookies && SlimCsrfEndpointFilter.Validate(Http.Request, O, logger) is { } csrfError) return csrfError;
+
+        // once confirmed, the step is no longer open: the token cannot confirm twice
+        var user = await flow.FindUserAsync(state, ct);
+        if (user is null || state.Method != SlimSignInActions.VerifyEmail || SlimSignInChain.Evaluate(user, state, O).Next != SlimSignInActions.VerifyEmail)
+            return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
+
+        // a lockout of the password that started after the token was issued holds
+        var now = time.GetUtcNow();
+        if (state.Proofs.HasFlag(SlimSignInProofs.Password) && user.IsLockedOut(now)) return SlimResults.Locked(Http, user.LockoutEndUtc!.Value, now);
+
+        // counted before the check: of parallel guesses, at most the limit is checked
+        if (await sharedState.CountAsync(SlimSharedStateAccess.VerificationCodeFlow, state.FlowId, SlimIdentityDefaults.SignInFlowLifetime, ct) > VerificationAttemptsPerFlow
+            || await sharedState.CountAsync(SlimSharedStateAccess.VerificationCodeAddress, user.Email.Trim().ToUpperInvariant(), VerificationAddressWindow, ct) > VerificationAttemptsPerAddress)
         {
-            Log.TwoFactorStoreMissing(logger, user.Id);
-            return null;
+            metrics.Login(SlimErrorCodes.TooManyAttempts, state.UseCookies);
+            return SlimResults.Status(SlimErrorCodes.TooManyAttempts,
+                "Too many attempts. Try again later.", StatusCodes.Status429TooManyRequests);
         }
 
-        var issuedAt = time.GetUtcNow().ToUnixTimeMilliseconds();
-        string method;
-        string? codeHash = null;
-        if ((await twoFactor.GetSecretAsync(user, ct)).Configured)
+        var code = SlimTotp.NormalizeCode(request.Code);
+        if (code.Length != 6 || state.CodeHash is null
+            || !SlimHashing.FixedTimeEquals(SlimSignInFlow.HashVerificationCode(user.Id, user.Email, code, state.IssuedAt), state.CodeHash))
         {
-            method = MethodTotp;
-        }
-        else if (!O.EmailCodesEnabled)
-        {
-            // e-mail codes cannot be sent (WithoutEmail, AllowEmailCodes = false): only a recovery code completes the
-            // sign-in – or an administrator resets the second factor
-            method = MethodRecovery;
-        }
-        else
-        {
-            method = MethodEmail;
-            var code = SlimTotp.GenerateNumericCode();
-            codeHash = HashEmailCode(user.Id, code, issuedAt);
-            // sent inline (the user waits for it); over the per-recipient limit the challenge is issued without a mail
-            if (mailThrottle.TryAcquire(SlimEmailKinds.TwoFactorCode, user.Email))
-            {
-                await services.GetRequiredService<ISlimEmailSender>().SendTwoFactorCodeAsync(mailDispatcher.CreateContext(SlimEmailKinds.TwoFactorCode, user.Id), user.Email, code, ct);
-                metrics.Mail(SlimEmailKinds.TwoFactorCode, "sent");
-            }
-            else
-            {
-                Log.MailThrottled(logger, SlimEmailKinds.TwoFactorCode);
-                metrics.Mail(SlimEmailKinds.TwoFactorCode, "throttled");
-            }
+            metrics.Login(SlimErrorCodes.InvalidVerificationCode, state.UseCookies);
+            await hooks.RaiseAsync(SlimEventTypes.SignInFailed, user.Id, state.Amr, SlimErrorCodes.InvalidVerificationCode, ct: ct);
+            return SlimResults.Status(SlimErrorCodes.InvalidVerificationCode, "The code is invalid.", StatusCodes.Status401Unauthorized);
         }
 
-        var lifetime = SlimIdentityDefaults.PreAuthTokenLifetime;
-        var token = workflow.Protect(SlimWorkflowTokens.PreAuthPurpose,
-            new SlimPreAuthPayload(user.Id, user.SecurityStamp, useCookies, rememberMe, method, codeHash, issuedAt), lifetime);
+        if (!await store.TryWriteSecurityStateAsync(user, u => u.EmailConfirmed = true, ct))
+            return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
+        await hooks.RaiseAsync(SlimEventTypes.EmailConfirmed, user.Id, ct: ct);
 
-        return new SlimLoginChallengeResponse
-        {
-            Status = "requires_two_factor",
-            Message = method switch
-            {
-                MethodTotp => "Enter the code from your authenticator app.",
-                MethodRecovery => "Enter one of your recovery codes. If you have none left, ask your administrator to reset two-factor authentication.",
-                _ => "A code has been sent to your e-mail address.",
-            },
-            PreAuthToken = token,
-            TwoFactorMethod = method,
-            ExpiresIn = (int)lifetime.TotalSeconds,
-        };
+        var result = await flow.ContinueAsync(user, state with { Stamp = user.SecurityStamp, Method = null, CodeHash = null, IssuedAt = 0 }, ct);
+        metrics.Login(SlimSignInFlow.MetricReason(result), state.UseCookies);
+        return flow.ToHttpResult(result, user);
     }
 
     // ------------------------------------------------------------------ POST /login/password-change
 
     public async Task<IResult> CompletePasswordChangeAsync(SlimPasswordChangeLoginRequest? request, CancellationToken ct)
     {
-        if (request is null || !workflow.TryUnprotect<SlimPasswordChangePayload>(SlimWorkflowTokens.PasswordChangePurpose, request.Token, out var payload))
+        if (request is null || !flow.TryRead(request.FlowToken, out var state, out _))
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
 
         // ends in a cookie sign-in without carrying a cookie – only the signed token knows (as on /login/2fa)
-        if (payload.UseCookies && SlimCsrfEndpointFilter.Validate(Http.Request, O, logger) is { } csrfError) return csrfError;
-
-        // one attempt per account at a time, like every credential step; a full queue answers like an invalid token
-        using var attempt = await credentials.TryEnterAttemptAsync(payload.Uid, ct);
-        if (attempt is null) return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
+        if (state.UseCookies && SlimCsrfEndpointFilter.Validate(Http.Request, O, logger) is { } csrfError) return csrfError;
 
         // the stamp rotates with the new password: the token works once, and a newer administrator password kills it
-        var user = await store.FindByIdAsync(payload.Uid, ct);
-        if (user is null || !user.IsActive || !user.PasswordChangeRequired || !SlimUser.IsSameSecurityState(user.SecurityStamp, payload.Stamp))
+        var user = await flow.FindUserAsync(state, ct);
+        if (user is null || SlimSignInChain.Evaluate(user, state, O).Next != SlimSignInActions.ChangePassword)
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
 
-        // a lockout that started after the token was issued holds – as on /login/2fa; the new password must not lift it
+        // a lockout of the password that started after the token was issued holds; the new password must not lift it
         var now = time.GetUtcNow();
-        if (user.IsLockedOut(now)) return SlimResults.Locked(Http, user.LockoutEndUtc!.Value, now);
+        if (state.Proofs.HasFlag(SlimSignInProofs.Password) && user.IsLockedOut(now)) return SlimResults.Locked(Http, user.LockoutEndUtc!.Value, now);
 
         if (await passwordPolicy.ValidateAsync(request.NewPassword, user.Email, ct, "newPassword") is { } errors)
             return SlimResults.Validation(errors);
         if (await credentials.VerifyPasswordAsync(user, request.NewPassword, ct) != SlimPasswordCheck.Failed)
-            return SlimResults.BadRequest("password_unchanged", "Choose a password different from the one set by the administrator.");
+            return SlimResults.BadRequest(SlimErrorCodes.PasswordUnchanged, "Choose a password different from the one set by the administrator.");
 
-        credentials.ApplyNewPassword(user, request.NewPassword);
-        await store.UpdateSecurityStateAsync(user, ct);
+        if (!await store.TryWriteSecurityStateAsync(user, u => credentials.ApplyNewPassword(u, request.NewPassword), ct))
+            return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
         await authManager.RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
         Log.ForcedPasswordChangeCompleted(logger, user.Id);
         await hooks.RaiseAsync(SlimEventTypes.PasswordChanged, user.Id, reason: "forced_change", ct: ct);
 
-        if (!SlimModes.TryResolve(O, payload.UseCookies, out var cookies, out var modeError)) return modeError!;
-        if (user.TwoFactorEnabled)
-        {
-            var challenge = await BeginTwoFactorAsync(user, cookies, payload.RememberMe, ct);
-            metrics.Login("requires_two_factor", cookies);
-            return challenge is null
-                ? Results.Problem(statusCode: 500, title: "Two-factor authentication is enabled for this user but ISlimTwoFactorStore is not registered.")
-                : SlimResults.Challenge(challenge);
-        }
-
-        var result = await authManager.SignInCoreAsync(user, cookies, payload.RememberMe, SlimAuthManager.MethodPassword, null, null, true, ct);
-        metrics.Login(result.Succeeded ? "success" : "rejected", cookies);
-        return ToResult(result);
+        var result = await flow.ContinueAsync(user, state with { Stamp = user.SecurityStamp }, ct);
+        metrics.Login(SlimSignInFlow.MetricReason(result), state.UseCookies);
+        return flow.ToHttpResult(result, user);
     }
 
     // ------------------------------------------------------------------ POST /login/2fa
@@ -290,40 +213,36 @@ internal sealed class SlimLoginHandlers(
     public async Task<IResult> LoginTwoFactorAsync(SlimTwoFactorLoginRequest? request, CancellationToken ct)
     {
         var twoFactor = services.GetRequiredService<SlimTwoFactorService>();
-        if (request is null || !workflow.TryUnprotect<SlimPreAuthPayload>(SlimWorkflowTokens.PreAuthPurpose, request.PreAuthToken, out var payload))
+        if (request is null || !flow.TryRead(request.FlowToken, out var state, out _))
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
 
-        // This request carries no session cookie and no useCookies flag – only the signed challenge knows that it ends in
+        // This request carries no session cookie and no useCookies flag – only the signed token knows that it ends in
         // a cookie sign-in, so the CSRF filter cannot classify it. Check here.
-        if (payload.UseCookies && SlimCsrfEndpointFilter.Validate(Http.Request, O, logger) is { } csrfError) return csrfError;
+        if (state.UseCookies && SlimCsrfEndpointFilter.Validate(Http.Request, O, logger) is { } csrfError) return csrfError;
 
-        var user = await store.FindByIdAsync(payload.Uid, ct);
-        if (user is null) return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
-
-        // one attempt per account at a time (shared with the password step); a full queue answers like a wrong code
-        // without evaluating it. Re-read inside the gate: a queued predecessor may just have locked the account.
-        using var attempt = await credentials.TryEnterAttemptAsync(user.Id, ct);
-        if (attempt is null)
-        {
-            metrics.TwoFactor(payload.Method, "attempts_queued");
-            return SlimResults.Status("invalid_two_factor_code", "The code is invalid.", StatusCodes.Status401Unauthorized);
-        }
-        user = await store.FindByIdAsync(payload.Uid, ct);
-        if (user is null || !user.IsActive || !SlimUser.IsSameSecurityState(user.SecurityStamp, payload.Stamp))
+        var user = await flow.FindUserAsync(state, ct);
+        if (user is null || state.Method is null or SlimSignInActions.VerifyEmail || SlimSignInChain.Evaluate(user, state, O).Next != SlimSignInActions.SecondFactor)
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
 
+        // reserved in the store before the check: of parallel guesses, at most the threshold is checked
         var now = time.GetUtcNow();
-        if (user.IsLockedOut(now)) return SlimResults.Locked(Http, user.LockoutEndUtc!.Value, now);
+        var attempt = await credentials.BeginAttemptAsync(user, SlimAttemptFactor.SecondFactor, ct);
+        if (attempt.Status == SlimAttemptStatus.LockedOut) return SlimResults.Locked(Http, attempt.LockoutEndUtc!.Value, now);
+        if (attempt.Status == SlimAttemptStatus.NotReserved)
+        {
+            metrics.TwoFactor(state.Method, SlimErrorCodes.AttemptNotReserved);
+            return SlimResults.Status(SlimErrorCodes.InvalidTwoFactorCode, "The code is invalid.", StatusCodes.Status401Unauthorized);
+        }
 
         string method;
         bool valid;
         if (!string.IsNullOrWhiteSpace(request.RecoveryCode))
         {
-            method = "recovery";
+            method = MethodRecovery;
             valid = await twoFactor.ConsumeRecoveryCodeAsync(user, request.RecoveryCode, ct);
             if (valid) Log.RecoveryCodeUsed(logger, user.Id);
         }
-        else if (payload.Method == MethodTotp)
+        else if (state.Method == MethodTotp)
         {
             method = MethodTotp;
             var secret = await twoFactor.GetSecretAsync(user, ct);
@@ -333,40 +252,140 @@ internal sealed class SlimLoginHandlers(
         {
             method = MethodEmail;
             var code = SlimTotp.NormalizeCode(request.Code);
-            valid = code.Length == 6 && payload.CodeHash is not null
-                && SlimHashing.FixedTimeEquals(HashEmailCode(user.Id, code, payload.IssuedAt), payload.CodeHash)
-                && await twoFactor.ConsumeEmailCodeAsync(user, payload.IssuedAt, ct);
+            valid = code.Length == 6 && state.CodeHash is not null
+                && SlimHashing.FixedTimeEquals(SlimSignInFlow.HashEmailCode(user.Id, code, state.IssuedAt), state.CodeHash)
+                && await twoFactor.ConsumeEmailCodeAsync(user, state.IssuedAt, ct);
         }
 
         if (!valid)
         {
             metrics.TwoFactor(method, "failure");
-            await hooks.RaiseAsync(SlimEventTypes.SignInFailed, user.Id, method, "invalid_two_factor_code", ct: ct);
-            var locked = await credentials.RegisterFailureAsync(user, ct);
-            return locked
-                ? SlimResults.Locked(Http, user.LockoutEndUtc!.Value, now)
-                : SlimResults.Status("invalid_two_factor_code", "The code is invalid.", StatusCodes.Status401Unauthorized);
+            await hooks.RaiseAsync(SlimEventTypes.SignInFailed, user.Id, method, SlimErrorCodes.InvalidTwoFactorCode, ct: ct);
+            return await credentials.FailAttemptAsync(user, attempt, ct) is { } lockedUntil
+                ? SlimResults.Locked(Http, lockedUntil, now)
+                : SlimResults.Status(SlimErrorCodes.InvalidTwoFactorCode, "The code is invalid.", StatusCodes.Status401Unauthorized);
         }
 
-        // The challenge completes at most one sign-in. Checked after the factor, so a typo does not burn the challenge;
-        // two parallel requests with different valid factors still yield only one session.
-        if (!await twoFactor.ConsumeChallengeAsync(user, payload.IssuedAt, ct))
+        // the factor is proven: its counter starts over, even if the challenge was already used
+        await credentials.SucceedAttemptAsync(user, attempt, ct);
+
+        // The challenge is passed at most once. Checked after the factor, so a typo does not burn the challenge; two
+        // parallel requests with different valid factors still continue the sign-in only once.
+        if (!await twoFactor.ConsumeChallengeAsync(user, state.IssuedAt, ct))
         {
             metrics.TwoFactor(method, "challenge_reused");
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
         }
 
         metrics.TwoFactor(method, "success");
-        await credentials.RegisterSuccessAsync(user, null, rehash: false, resetLockout: true, ct);
-
-        if (!SlimModes.TryResolve(O, payload.UseCookies, out var cookies, out var modeError)) return modeError!;
-        var result = await authManager.SignInCoreAsync(user, cookies, payload.RememberMe, SlimAuthManager.MethodMfa, null, null, true, ct);
 
         // "remember this device" – only after a real second factor, never after a recovery code
-        var rememberToken = result.Succeeded && request.RememberDevice && method != "recovery"
-            ? twoFactor.RememberDevice(user, Http, cookies)
-            : null;
-        return ToResult(result, rememberToken);
+        var next = state with
+        {
+            // a mail code proves the mailbox once more – not what ISlimSecondFactorPolicy asks for
+            Proofs = state.Proofs | (method == MethodEmail ? SlimSignInProofs.SecondFactor : SlimSignInProofs.StrongSecondFactor),
+            Amr = SlimAuthManager.MethodMfa,
+            RememberDevice = request.RememberDevice && method != MethodRecovery,
+            Method = null,
+            CodeHash = null,
+            IssuedAt = 0,
+        };
+        return flow.ToHttpResult(await flow.ContinueAsync(user, next, ct), user);
+    }
+
+    // ------------------------------------------------------------------ POST /login/2fa/setup
+
+    // a secret for step setup_second_factor – nothing is stored until /login/2fa/enable confirms a code
+    public async Task<IResult> SetupTwoFactorAsync(SlimFlowStepRequest? request, CancellationToken ct)
+    {
+        var (_, user, error) = await ReadStepAsync(request?.FlowToken, SlimSignInActions.SetupSecondFactor, ct);
+        if (user is null) return error!;
+
+        var secret = SlimTotp.GenerateSecret();
+        var setupToken = workflow.Protect(SlimWorkflowTokens.TwoFactorSetupPurpose,
+            new SlimTwoFactorSetupPayload(user.Id, secret, user.SecurityStamp), SlimIdentityDefaults.TwoFactorSetupTokenLifetime);
+        return Results.Ok(new SlimTwoFactorSetupResponse(
+            SlimTotp.FormatSharedKey(secret),
+            SlimTotp.BuildAuthenticatorUri(O.TwoFactor.AuthenticatorIssuer, user.Email, secret),
+            setupToken));
+    }
+
+    // ------------------------------------------------------------------ POST /login/2fa/enable
+
+    // The first factor of this sign-in stands in for the password /2fa/enable asks for. The stamp rotates: the flow token
+    // works once, and every other session ends.
+    public async Task<IResult> EnableTwoFactorAsync(SlimTwoFactorSetupLoginRequest? request, CancellationToken ct)
+    {
+        var (state, user, error) = await ReadStepAsync(request?.FlowToken, SlimSignInActions.SetupSecondFactor, ct);
+        if (user is null) return error!;
+        if (!workflow.TryUnprotect<SlimTwoFactorSetupPayload>(SlimWorkflowTokens.TwoFactorSetupPurpose, request!.SetupToken, out var payload)
+            || !string.Equals(payload.Uid, user.Id, StringComparison.Ordinal)
+            || !SlimUser.IsSameSecurityState(payload.Stamp, user.SecurityStamp))
+            return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
+
+        var twoFactor = services.GetRequiredService<SlimTwoFactorService>();
+        if (!await twoFactor.VerifyTotpAsync(user, payload.Secret, request.Code, ct, newSecret: true))
+            return SlimResults.BadRequest(SlimErrorCodes.InvalidTwoFactorCode, "The code is invalid.");
+
+        var written = await store.TryWriteSecurityStateAsync(user, u =>
+        {
+            u.TwoFactorEnabled = true;
+            u.SecurityStamp = SlimUser.NewSecurityStamp();
+        }, ct);
+        if (!written) return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
+        await twoFactor.SetSecretAsync(user, payload.Secret, ct);
+        var codes = await twoFactor.RegenerateRecoveryCodesAsync(user, ct);
+        await authManager.RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
+        Log.TwoFactorEnabled(logger, user.Id);
+        await hooks.RaiseAsync(SlimEventTypes.TwoFactorEnabled, user.Id, MethodTotp, ct: ct);
+
+        var result = await flow.ContinueAsync(user, state! with
+        {
+            Stamp = user.SecurityStamp,
+            Proofs = state.Proofs | SlimSignInProofs.StrongSecondFactor,
+            Amr = SlimAuthManager.MethodMfa,
+            RecoveryCodesPending = true,
+        }, ct);
+        metrics.Login(SlimSignInFlow.MetricReason(result), state.UseCookies);
+        // the codes are shown exactly once, with step confirm_recovery_codes
+        if (result.ActionRequired is { } steps)
+            result = result with
+            {
+                ActionRequired = new SlimActionRequiredResponse
+                {
+                    Actions = steps.Actions, FlowToken = steps.FlowToken, ExpiresIn = steps.ExpiresIn,
+                    Details = new SlimActionDetails { RecoveryCodes = codes },
+                },
+            };
+        return flow.ToHttpResult(result, user);
+    }
+
+    // ------------------------------------------------------------------ POST /login/2fa/recovery-codes-saved
+
+    public async Task<IResult> ConfirmRecoveryCodesAsync(SlimFlowStepRequest? request, CancellationToken ct)
+    {
+        var (state, user, error) = await ReadStepAsync(request?.FlowToken, SlimSignInActions.ConfirmRecoveryCodes, ct);
+        if (user is null) return error!;
+        var result = await flow.ContinueAsync(user, state! with { RecoveryCodesPending = false }, ct);
+        metrics.Login(SlimSignInFlow.MetricReason(result), state.UseCookies);
+        return flow.ToHttpResult(result, user);
+    }
+
+    /// <summary>
+    /// The flow of a step endpoint whose step is <paramref name="action"/> now – otherwise <c>401</c>, the CSRF error of a
+    /// cookie sign-in, or <c>423</c> for a lockout of the password that started after the token was issued.
+    /// </summary>
+    private async Task<(SlimFlowPayload? State, SlimUser? User, IResult? Error)> ReadStepAsync(string? token, string action, CancellationToken ct)
+    {
+        if (!flow.TryRead(token, out var state, out _)) return (null, null, SlimResults.InvalidToken(StatusCodes.Status401Unauthorized));
+        if (state.UseCookies && SlimCsrfEndpointFilter.Validate(Http.Request, O, logger) is { } csrfError) return (null, null, csrfError);
+        var user = await flow.FindUserAsync(state, ct);
+        if (user is null || SlimSignInChain.Evaluate(user, state, O).Next != action)
+            return (null, null, SlimResults.InvalidToken(StatusCodes.Status401Unauthorized));
+        var now = time.GetUtcNow();
+        if (state.Proofs.HasFlag(SlimSignInProofs.Password) && user.IsLockedOut(now))
+            return (null, null, SlimResults.Locked(Http, user.LockoutEndUtc!.Value, now));
+        return (state, user, null);
     }
 
     // ------------------------------------------------------------------ POST /refresh
@@ -375,7 +394,7 @@ internal sealed class SlimLoginHandlers(
     {
         var refreshStore = services.GetRequiredService<ISlimRefreshTokenStore>();
         if (request is null || string.IsNullOrWhiteSpace(request.RefreshToken))
-            return SlimResults.BadRequest("invalid_request", "refreshToken is required.");
+            return SlimResults.BadRequest(SlimErrorCodes.InvalidRequest, "refreshToken is required.");
 
         // signature + expiry of the token itself (DataProtector) – forged or expired tokens never reach the store
         if (!workflow.TryUnprotect<SlimRefreshPayload>(SlimWorkflowTokens.RefreshTokenPurpose, request.RefreshToken, out var payload, out var tokenExpiresAt))
@@ -415,10 +434,10 @@ internal sealed class SlimLoginHandlers(
 
         var result = await authManager.SignInCoreAsync(user, false, false, payload.Amr, null, null, true, ct,
             sessionId: payload.Sid, authTime: DateTimeOffset.FromUnixTimeSeconds(payload.AuthTime));
-        if (!result.Succeeded && result.Error == "session_expired")
+        if (!result.Succeeded && result.Error == SlimErrorCodes.SessionExpired)
         {
-            metrics.Refresh("session_expired");
-            return SlimResults.Status("session_expired", "The session has reached its maximum lifetime. Please sign in again.", StatusCodes.Status401Unauthorized);
+            metrics.Refresh(SlimErrorCodes.SessionExpired);
+            return SlimResults.Status(SlimErrorCodes.SessionExpired, "The session has reached its maximum lifetime. Please sign in again.", StatusCodes.Status401Unauthorized);
         }
 
         metrics.Refresh(result.Succeeded ? "success" : "invalid");
@@ -459,12 +478,12 @@ internal sealed class SlimLoginHandlers(
     public async Task<IResult> LogoutAllAsync(CancellationToken ct)
     {
         var userId = Http.User.GetSlimUserId();
-        if (userId is null) return Results.Unauthorized();
+        if (userId is null) return SlimResults.Unauthenticated();
         if (Http.User.IsImpersonating())
-            return SlimResults.Status("not_allowed_while_impersonating", "This action is not allowed during an impersonation session.", StatusCodes.Status403Forbidden);
+            return SlimResults.Status(SlimErrorCodes.NotAllowedWhileImpersonating, "This action is not allowed during an impersonation session.", StatusCodes.Status403Forbidden);
 
         var user = await store.FindByIdAsync(userId, ct);
-        if (user is null) return Results.Unauthorized();
+        if (user is null) return SlimResults.Unauthenticated();
 
         await authManager.SignOutEverywhereAsync(user, ct);
         if (O.Endpoints.AllowCookieAuth) await Http.SignOutAsync(SlimIdentityDefaults.CookieScheme);
@@ -473,19 +492,17 @@ internal sealed class SlimLoginHandlers(
 
     // ------------------------------------------------------------------ helpers
 
-    internal static IResult ToResult(SlimAuthResult result, string? twoFactorRememberToken = null)
+    internal static IResult ToResult(SlimAuthResult result)
     {
+        if (result.ActionRequired is { } steps) return SlimResults.ActionRequired(steps);
         // a guard's veto follows a correct sign-in – its reason can be told; anything else stays uniform
         if (!result.Succeeded)
             return result.Vetoed
                 ? SlimResults.Status(result.Error!, result.ErrorMessage ?? "The sign-in was refused.", StatusCodes.Status403Forbidden)
                 : SlimResults.InvalidCredentials();
         var response = result.ToResponse();
-        return Results.Ok(twoFactorRememberToken is null ? response : response.WithTwoFactorRememberToken(twoFactorRememberToken));
+        return Results.Ok(result.TwoFactorRememberToken is { } remember ? response.WithTwoFactorRememberToken(remember) : response);
     }
-
-    private static string HashEmailCode(string userId, string code, long issuedAt) =>
-        SlimHashing.Sha256Hex($"slimidentity.email-code.v1:{userId}:{issuedAt}:{code}");
 }
 
 internal static class SlimModes
@@ -495,9 +512,9 @@ internal static class SlimModes
         useCookies = requested ?? o.EffectiveDefaultUseCookies;
         error = null;
         if (useCookies && !o.Endpoints.AllowCookieAuth)
-            error = SlimResults.BadRequest("cookie_auth_disabled", "Cookie authentication is disabled.");
+            error = SlimResults.BadRequest(SlimErrorCodes.CookieAuthDisabled, "Cookie authentication is disabled.");
         else if (!useCookies && !o.JwtEnabled)
-            error = SlimResults.BadRequest("jwt_auth_disabled", "JWT authentication is not configured (Tokens.JwtSecret).");
+            error = SlimResults.BadRequest(SlimErrorCodes.JwtAuthDisabled, "JWT authentication is not configured (Tokens.JwtSecret).");
         return error is null;
     }
 }

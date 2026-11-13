@@ -1,4 +1,6 @@
 using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
@@ -63,22 +65,23 @@ public sealed class AdministratorTests
         Assert.Equal(HttpStatusCode.Unauthorized, (await me.GetAsync("/auth/me")).StatusCode);   // old sessions ended
 
         var challenge = await app.CreateClient().PostJsonAsync("/auth/login?useCookies=false",
-            new { email = TestApp.UserEmail, password = "Start-Pass-2026" }, HttpStatusCode.Unauthorized);
-        Assert.Equal("password_change_required", challenge.Str("status"));
+            new { email = TestApp.UserEmail, password = "Start-Pass-2026" });
+        Assert.Equal("action_required", challenge.Str("status"));
+        Assert.Equal("change_password", challenge.GetProperty("actions")[0].GetString());
         Assert.False(challenge.TryGetProperty("accessToken", out var accessToken) && accessToken.ValueKind == System.Text.Json.JsonValueKind.String);
 
-        var token = challenge.Str("passwordChangeToken");
-        await app.CreateClient().PostJsonAsync("/auth/login/password-change", new { token, newPassword = "Start-Pass-2026" }, HttpStatusCode.BadRequest);   // must differ
-        var session = await app.CreateClient().PostJsonAsync("/auth/login/password-change", new { token, newPassword = "My-Own-Pass-2026" });
+        var token = challenge.Str("flowToken");
+        await app.CreateClient().PostJsonAsync("/auth/login/password-change", new { flowToken = token, newPassword = "Start-Pass-2026" }, HttpStatusCode.BadRequest);   // must differ
+        var session = await app.CreateClient().PostJsonAsync("/auth/login/password-change", new { flowToken = token, newPassword = "My-Own-Pass-2026" });
         Assert.False(string.IsNullOrEmpty(session.Str("accessToken")));
 
-        await app.CreateClient().PostJsonAsync("/auth/login/password-change", new { token, newPassword = "Another-Pass-2026" }, HttpStatusCode.Unauthorized);   // single use
+        await app.CreateClient().PostJsonAsync("/auth/login/password-change", new { flowToken = token, newPassword = "Another-Pass-2026" }, HttpStatusCode.Unauthorized);   // single use
         await app.LoginBearerAsync(TestApp.UserEmail, "My-Own-Pass-2026");   // a normal sign-in from now on
         Assert.False(app.Users.Get(TestApp.UserEmail).PasswordChangeRequired);
     }
 
     [Fact]
-    public async Task The_forced_change_is_followed_by_the_second_factor()
+    public async Task The_second_factor_comes_before_the_forced_change()
     {
         await using var app = await TestApp.StartAsync(WithAdminEndpoints());
         var me = app.CreateClient();
@@ -88,13 +91,21 @@ public sealed class AdministratorTests
         app.Time.Advance(TimeSpan.FromSeconds(30));
 
         await (await AdminAsync(app)).PostJsonAsync("/api/admin/set-password", new { email = TestApp.UserEmail, password = "Start-Pass-2026", mustChange = true });
-        var token = (await app.CreateClient().PostJsonAsync("/auth/login?useCookies=false",
-            new { email = TestApp.UserEmail, password = "Start-Pass-2026" }, HttpStatusCode.Unauthorized)).Str("passwordChangeToken");
+        var start = await app.CreateClient().PostJsonAsync("/auth/login?useCookies=false",
+            new { email = TestApp.UserEmail, password = "Start-Pass-2026" });
+        Assert.Equal(["second_factor", "change_password"], start.GetProperty("actions").EnumerateArray().Select(a => a.GetString()));
 
-        var next = await app.CreateClient().PostJsonAsync("/auth/login/password-change", new { token, newPassword = "My-Own-Pass-2026" }, HttpStatusCode.Unauthorized);
-        Assert.Equal("requires_two_factor", next.Str("status"));
-        var session = await app.CreateClient().PostJsonAsync("/auth/login/2fa", new { preAuthToken = next.Str("preAuthToken"), code = Code(app, setup.Str("sharedKey")) });
+        // the steps in their order: no own password before the account is proven completely
+        await app.CreateClient().PostJsonAsync("/auth/login/password-change",
+            new { flowToken = start.Str("flowToken"), newPassword = "My-Own-Pass-2026" }, HttpStatusCode.Unauthorized);
+        var next = await app.CreateClient().PostJsonAsync("/auth/login/2fa", new { flowToken = start.Str("flowToken"), code = Code(app, setup.Str("sharedKey")) });
+        Assert.Equal(["change_password"], next.GetProperty("actions").EnumerateArray().Select(a => a.GetString()));
+        var session = await app.CreateClient().PostJsonAsync("/auth/login/password-change", new { flowToken = next.Str("flowToken"), newPassword = "My-Own-Pass-2026" });
         Assert.False(string.IsNullOrEmpty(session.Str("accessToken")));
+
+        var signedIn = app.CreateClient();
+        signedIn.BearerToken = session.Str("accessToken");
+        Assert.Equal("mfa", (await (await signedIn.GetAsync("/auth/me")).Content.ReadFromJsonAsync<JsonElement>()).Str("authenticationMethod"));
     }
 
     [Fact]
@@ -120,14 +131,14 @@ public sealed class AdministratorTests
         var admin = await AdminAsync(app);
         await admin.PostJsonAsync("/api/admin/set-password", new { email = TestApp.UserEmail, password = "Start-Pass-2026", mustChange = true });
         var token = (await app.CreateClient().PostJsonAsync("/auth/login?useCookies=false",
-            new { email = TestApp.UserEmail, password = "Start-Pass-2026" }, HttpStatusCode.Unauthorized)).Str("passwordChangeToken");
+            new { email = TestApp.UserEmail, password = "Start-Pass-2026" })).Str("flowToken");
 
         var bearer = app.CreateClient();
         bearer.BearerToken = token;
         Assert.Equal(HttpStatusCode.Unauthorized, (await bearer.GetAsync("/auth/me")).StatusCode);
 
         await admin.PostJsonAsync("/api/admin/set-password", new { email = TestApp.UserEmail, password = "Second-Start-2026", mustChange = true });
-        await app.CreateClient().PostJsonAsync("/auth/login/password-change", new { token, newPassword = "My-Own-Pass-2026" }, HttpStatusCode.Unauthorized);
+        await app.CreateClient().PostJsonAsync("/auth/login/password-change", new { flowToken = token, newPassword = "My-Own-Pass-2026" }, HttpStatusCode.Unauthorized);
     }
 
     // ------------------------------------------------------------------ reset link handed over by the administrator
@@ -139,9 +150,9 @@ public sealed class AdministratorTests
         var link = await (await AdminAsync(app)).PostJsonAsync($"/api/admin/reset-link/{TestApp.UserEmail}");
         Assert.True(link.GetProperty("expiresAt").GetDateTimeOffset() > app.Time.GetUtcNow());
 
-        await app.CreateClient().PostJsonAsync("/auth/reset-password", new { token = link.Str("token"), newPassword = "Chosen-By-Me-2026" });
+        await app.CreateClient().ResetPasswordJsonAsync(link.Str("token"), "Chosen-By-Me-2026");
         await app.LoginBearerAsync(TestApp.UserEmail, "Chosen-By-Me-2026");
-        await app.CreateClient().PostJsonAsync("/auth/reset-password", new { token = link.Str("token"), newPassword = "Again-2026-Pass" }, HttpStatusCode.BadRequest);
+        await app.CreateClient().ResetPasswordJsonAsync(link.Str("token"), "Again-2026-Pass", HttpStatusCode.Unauthorized);
     }
 
     [Fact]
@@ -156,7 +167,7 @@ public sealed class AdministratorTests
         await app.Users.UpdateSecurityStateAsync(user, default);
 
         var link = await (await AdminAsync(app)).PostJsonAsync($"/api/admin/reset-link/{TestApp.UserEmail}");
-        await app.CreateClient().PostJsonAsync("/auth/reset-password", new { token = link.Str("token"), newPassword = "Chosen-By-Me-2026" });
+        await app.CreateClient().ResetPasswordJsonAsync(link.Str("token"), "Chosen-By-Me-2026");
 
         var after = app.Users.Get(TestApp.UserEmail);
         Assert.False(after.EmailConfirmed);
@@ -192,5 +203,88 @@ public sealed class AdministratorTests
         await (await AdminAsync(app)).PostJsonAsync($"/api/admin/unlock/{TestApp.UserEmail}");
 
         await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword);
+    }
+
+    // ------------------------------------------------------------------ attempt counters per factor
+
+    private static void LockBothFactors(TestApp app)
+    {
+        var id = app.Users.Get(TestApp.UserEmail).Id;
+        app.Users.SetAttempts(id, SlimAttemptFactor.Password, 5, app.Time.GetUtcNow().AddMinutes(5));
+        app.Users.SetAttempts(id, SlimAttemptFactor.SecondFactor, 5, app.Time.GetUtcNow().AddMinutes(5));
+    }
+
+    [Fact]
+    public async Task Unlocking_resets_both_factors()
+    {
+        await using var app = await TestApp.StartAsync(WithAdminEndpoints());
+        var admin = await AdminAsync(app);
+        LockBothFactors(app);
+
+        await admin.PostJsonAsync($"/api/admin/unlock/{TestApp.UserEmail}");
+
+        var user = app.Users.Get(TestApp.UserEmail);
+        Assert.Equal((0, null, 0, null), (user.FailedLoginAttempts, user.LockoutEndUtc, user.FailedSecondFactorAttempts, user.SecondFactorLockoutEndUtc));
+    }
+
+    [Fact]
+    public async Task Setting_a_password_resets_only_the_password_counter()
+    {
+        await using var app = await TestApp.StartAsync(WithAdminEndpoints());
+        var admin = await AdminAsync(app);
+        LockBothFactors(app);
+
+        await admin.PostJsonAsync("/api/admin/set-password", new { email = TestApp.UserEmail, password = "Set-By-Admin-2026", mustChange = false });
+
+        var user = app.Users.Get(TestApp.UserEmail);
+        Assert.Equal((0, null), (user.FailedLoginAttempts, user.LockoutEndUtc));
+        Assert.Equal(5, user.FailedSecondFactorAttempts);
+        Assert.True(user.IsSecondFactorLockedOut(app.Time.GetUtcNow()));
+    }
+
+    [Fact]
+    public async Task Resetting_the_second_factor_resets_only_its_counter()
+    {
+        await using var app = await TestApp.StartAsync(WithAdminEndpoints());
+        var admin = await AdminAsync(app);
+        LockBothFactors(app);
+
+        await admin.PostJsonAsync($"/api/admin/reset-2fa/{TestApp.UserEmail}");
+
+        var user = app.Users.Get(TestApp.UserEmail);
+        Assert.Equal((0, null), (user.FailedSecondFactorAttempts, user.SecondFactorLockoutEndUtc));
+        Assert.Equal(5, user.FailedLoginAttempts);
+        Assert.True(user.IsLockedOut(app.Time.GetUtcNow()));
+    }
+
+    private static async Task<string> PasswordChangeTokenAsync(TestApp app)
+    {
+        var user = app.Users.Get(TestApp.UserEmail);
+        user.PasswordChangeRequired = true;
+        await app.Users.UpdateSecurityStateAsync(user, default);
+        return (await app.CreateClient().PostJsonAsync("/auth/login?useCookies=false",
+            new { email = TestApp.UserEmail, password = TestApp.UserPassword })).Str("flowToken");
+    }
+
+    [Fact]
+    public async Task A_locked_account_cannot_complete_the_forced_password_change_until_the_lockout_ends()
+    {
+        await using var app = await TestApp.StartAsync();
+        var token = await PasswordChangeTokenAsync(app);
+
+        for (var i = 0; i < 5; i++)   // locked before the token is redeemed
+            await app.CreateClient().PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = "wrong" }, HttpStatusCode.Unauthorized);
+        Assert.True(app.Users.Get(TestApp.UserEmail).IsLockedOut(app.Time.GetUtcNow()));
+
+        var answer = await app.CreateClient().PostAsync("/auth/login/password-change", new { flowToken = token, newPassword = "New-Valid-Pass-123!" });
+
+        Assert.Equal((HttpStatusCode)423, answer.StatusCode);
+        Assert.True(app.Users.Get(TestApp.UserEmail).IsLockedOut(app.Time.GetUtcNow()));   // the lockout was not cleared
+        Assert.True(app.Users.Get(TestApp.UserEmail).PasswordChangeRequired);
+
+        app.Time.Advance(TimeSpan.FromMinutes(1) + TimeSpan.FromSeconds(1));   // first lockout: 1 minute, token: 5 minutes
+
+        var session = await app.CreateClient().PostJsonAsync("/auth/login/password-change", new { flowToken = token, newPassword = "New-Valid-Pass-123!" });
+        Assert.False(string.IsNullOrEmpty(session.Str("accessToken")));
     }
 }

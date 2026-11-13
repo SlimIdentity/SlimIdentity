@@ -21,14 +21,12 @@ public interface ISlimOriginPolicy
 /// <summary>The links SlimIdentity creates.</summary>
 public enum SlimLinkKind
 {
-    /// <summary>Confirms the address after registration (<c>POST /auth/verify-email</c>).</summary>
+    /// <summary>Proves the mailbox of a registration (<c>POST /auth/flow</c> with its token).</summary>
     EmailVerification,
-    /// <summary>Sets a new password (<c>POST /auth/reset-password</c>) – mailed or created by an administrator.</summary>
+    /// <summary>Sets a new password or passkey (<c>POST /auth/flow</c> with its token, then step <c>set_credential</c>) – mailed or created by an administrator.</summary>
     PasswordReset,
-    /// <summary>Accepts an invitation (<c>POST /auth/invitation/accept</c>).</summary>
+    /// <summary>Accepts an invitation (<c>POST /auth/flow</c> with its token, then step <c>set_credential</c>).</summary>
     Invitation,
-    /// <summary>Confirms a new address (<c>POST /auth/confirm-email-change</c>).</summary>
-    EmailChange,
 }
 
 /// <summary>

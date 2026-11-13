@@ -52,39 +52,67 @@ internal sealed class SlimAuthManager(
             throw new ArgumentException("SlimIdentity: the authentication method must be 1–32 lowercase letters, digits or '_' and not one " +
                 "SlimIdentity issues itself for special sessions (impersonation, api_key).", nameof(authenticationMethod));
 
-        // the rules of /login after the first factor – a host endpoint must not be a way around them
-        var refusal = !user.IsActive ? "account_disabled"
-            : user.IsLockedOut(time.GetUtcNow()) ? "locked_out"
-            : options.Value.SignIn.RequireConfirmedEmail && !user.EmailConfirmed ? "email_not_confirmed"
-            : user.PasswordChangeRequired ? "password_change_required"
-            : null;
-        if (refusal is not null)
-        {
-            await Hooks.RaiseAsync(SlimEventTypes.SignInFailed, user.Id, authenticationMethod, refusal, ct: ct);
-            return SlimAuthResult.Failed(refusal);
-        }
-
-        if (user.TwoFactorEnabled && !secondFactorVerified)
-        {
-            var challenge = await services.GetRequiredService<Endpoints.SlimLoginHandlers>().BeginTwoFactorAsync(user, useCookies, isPersistent, ct);
-            return challenge is null
-                ? SlimAuthResult.Failed("two_factor_unavailable")   // 2FA enabled, but no ISlimTwoFactorStore registered
-                : new SlimAuthResult { Succeeded = false, Error = "requires_two_factor", TwoFactorChallenge = challenge };
-        }
-
-        return await SignInCoreAsync(user, useCookies, isPersistent, authenticationMethod, null, null, issueRefreshToken: true, ct);
+        // the rules of /login after the first factor – a host endpoint must not be a way around them. A lockout guards
+        // the password and the second factor against guessing; it does not apply here (the host checks its own factor).
+        var result = await services.GetRequiredService<SlimSignInFlow>().StartAsync(user, useCookies, isPersistent, authenticationMethod,
+            secondFactorVerified ? SlimSignInProofs.StrongSecondFactor : SlimSignInProofs.None,
+            checkRememberedDevice: false, rememberToken: null, refuseLockedSecondFactor: false, ct);
+        if (!result.Succeeded && result.ActionRequired is null && !result.Vetoed && result.Error != SlimErrorCodes.TwoFactorUnavailable)
+            await Hooks.RaiseAsync(SlimEventTypes.SignInFailed, user.Id, authenticationMethod, result.Error, ct: ct);
+        return result;
     }
 
     private static bool IsHostMethod(string? method) =>
         method is { Length: > 0 and <= 32 } && method != MethodImpersonation && method != "api_key"
         && method.All(c => c is (>= 'a' and <= 'z') or (>= '0' and <= '9') or '_');
 
-    public async Task<SlimRegistrationResult> RegisterAsync(string email, string password, object? profile = null, CancellationToken ct = default)
+    public Task<IResult> BeginRegistrationAsync(string email, bool? useCookies = null, bool rememberMe = false, CancellationToken ct = default)
     {
-        var registration = services.GetRequiredService<SlimRegistrationService>();
-        var (normalized, invalid) = await registration.ValidateAsync(email, password, ct);
-        if (invalid is not null) return new SlimRegistrationResult(null, invalid, invalid);
-        return await registration.CreateAsync(normalized!, password, profile, ct);
+        var o = options.Value;
+        if (!o.Email.Enabled)
+            throw new InvalidOperationException("SlimIdentity: BeginRegistrationAsync needs mail – without it, create the account with CreateUserAsync.");
+        if (!SlimIdentity.Endpoints.SlimModes.TryResolve(o, useCookies, out var cookies, out var modeError)) return Task.FromResult(modeError!);
+        return services.GetRequiredService<SlimRegistrationFlow>().BeginCoreAsync(email, cookies, rememberMe, ct);
+    }
+
+    public async Task<SlimCreateUserResult> CreateUserAsync(string email, string? initialPassword = null, object? profile = null, CancellationToken ct = default)
+    {
+        var normalized = SlimEmailAddress.Normalize(email);
+        if (!services.GetRequiredService<SlimRegistrationService>().IsValidAccountName(normalized))
+            return new SlimCreateUserResult(null, SlimRegistrationService.InvalidEmail("email"));
+        if (initialPassword is not null
+            && await services.GetRequiredService<SlimPasswordPolicy>().ValidateAsync(initialPassword, normalized, ct) is { } errors)
+            return new SlimCreateUserResult(null, SlimIdentity.Http.SlimResults.Validation(errors));
+
+        // without a hash first: the start password is written together with its change requirement – never one without the other
+        var user = await store.FindByEmailAsync(normalized, ct) is null
+            ? await store.CreateAsync(new SlimNewUser { Email = normalized, Profile = profile, EmailConfirmed = true }, ct)
+            : null;
+        if (user is null)
+            return new SlimCreateUserResult(null, SlimIdentity.Http.SlimResults.Status(SlimErrorCodes.EmailTaken,
+                "The address already has an account.", StatusCodes.Status409Conflict));
+
+        if (initialPassword is not null)
+        {
+            var credentials = services.GetRequiredService<SlimCredentialService>();
+            await store.WriteSecurityStateAsync(user, u =>
+            {
+                credentials.ApplyNewPassword(u, initialPassword);
+                u.PasswordChangeRequired = true;
+            }, ct);
+        }
+        Log.UserCreatedByAdministrator(logger, user.Id, initialPassword is not null);
+        metrics.Registration("created");
+        await Hooks.RaiseAsync(SlimEventTypes.UserCreated, user.Id, reason: "administrator", ct: ct);
+        return new SlimCreateUserResult(user, null);
+    }
+
+    public async Task<bool> HasSignInMethodAsync(SlimUser user, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+        if (await services.GetRequiredService<SlimCredentialService>().HasPasswordAsync(user, ct)) return true;
+        if (services.GetService<ISlimExternalLoginStore>() is { } external && (await external.GetExternalLoginsAsync(user.Id, ct)).Count > 0) return true;
+        return services.GetService<ISlimPasskeySignInMethods>() is { } passkeys && (await passkeys.GetPasskeysAsync(user.Id, ct)).Count > 0;
     }
 
     public async Task<SlimAuthResult> ImpersonateAsync(SlimUser targetUser, CancellationToken ct = default)
@@ -98,15 +126,15 @@ internal sealed class SlimAuthManager(
         var useCookies = admin.IsSlimCookieSession();
 
         if (admin.IsImpersonating())
-            return SlimAuthResult.Failed("already_impersonating");
+            return SlimAuthResult.Failed(SlimErrorCodes.AlreadyImpersonating);
         if (string.Equals(targetUser.Id, impersonatorUserId, StringComparison.Ordinal))
-            return SlimAuthResult.Failed("cannot_impersonate_self");
+            return SlimAuthResult.Failed(SlimErrorCodes.CannotImpersonateSelf);
 
         // Bind the session to the impersonator's current security state: banning the admin or rotating
         // their stamp ends every impersonation session they started (see SlimSecurityStampValidator).
         var impersonator = await store.FindByIdAsync(impersonatorUserId, ct);
         if (impersonator is not { IsActive: true })
-            return SlimAuthResult.Failed("impersonator_invalid");
+            return SlimAuthResult.Failed(SlimErrorCodes.ImpersonatorInvalid);
 
         // ... and to the administrator's session it starts from: revoking that session (a stolen device) ends it, too
         var originSessionId = Sessions is null ? null : CurrentSessionId(admin);
@@ -127,7 +155,7 @@ internal sealed class SlimAuthManager(
     {
         var current = Http.User;
         var actor = SlimClaims.ParseActorClaim(current.FindFirst(SlimClaimTypes.Actor)?.Value);
-        if (actor is null) return SlimAuthResult.Failed("not_impersonating");
+        if (actor is null) return SlimAuthResult.Failed(SlimErrorCodes.NotImpersonating);
 
         var useCookies = current.IsSlimCookieSession();
         if (current.FindFirst(SlimClaimTypes.SessionId)?.Value is { } sid && Sessions is { } sessions)
@@ -141,7 +169,7 @@ internal sealed class SlimAuthManager(
             // revoked in the meantime: no way back, end the session.
             Log.ImpersonationReturnDenied(logger, actor.UserId);
             if (useCookies) await Http.SignOutAsync(SlimIdentityDefaults.CookieScheme);
-            return SlimAuthResult.Failed("impersonator_invalid");
+            return SlimAuthResult.Failed(SlimErrorCodes.ImpersonatorInvalid);
         }
 
         Log.ImpersonationEnded(logger, impersonator.Id, current.GetSlimUserId());
@@ -173,9 +201,13 @@ internal sealed class SlimAuthManager(
         if (await services.GetRequiredService<SlimPasswordPolicy>().ValidateAsync(password, user.Email, ct) is { } errors)
             return SlimIdentity.Http.SlimResults.Validation(errors);
 
-        services.GetRequiredService<SlimCredentialService>().ApplyNewPassword(user, password);   // new stamp, lockout cleared
-        user.PasswordChangeRequired = mustChange;
-        await store.UpdateSecurityStateAsync(user, ct);
+        var credentials = services.GetRequiredService<SlimCredentialService>();
+        await store.WriteSecurityStateAsync(user, u =>
+        {
+            credentials.ApplyNewPassword(u, password);   // new stamp
+            u.PasswordChangeRequired = mustChange;
+        }, ct);
+        await credentials.ResetAttemptsAsync(user, SlimAttemptFactor.Password, ct);   // guesses against the old password end
         await RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
         Log.AdminPasswordSet(logger, user.Id, mustChange);
         await Hooks.RaiseAsync(SlimEventTypes.PasswordChanged, user.Id, reason: "set_by_administrator", ct: ct);
@@ -190,8 +222,10 @@ internal sealed class SlimAuthManager(
         if (validity <= TimeSpan.Zero || validity > TimeSpan.FromDays(7))
             throw new ArgumentOutOfRangeException(nameof(lifetime), "SlimIdentity: a reset link must be valid for more than 0 and at most 7 days.");
 
-        var token = workflow.Protect(SlimWorkflowTokens.PasswordResetPurpose,
-            new SlimResetTokenPayload(user.Id, user.SecurityStamp, ByAdministrator: true), validity);
+        // no proof of the mailbox: an unconfirmed account verifies its address in the flow first
+        var flowId = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
+        var token = workflow.Protect(SlimWorkflowTokens.LinkPurpose,
+            new SlimLinkPayload(SlimLinkPayload.AdminReset, flowId, Uid: user.Id, Stamp: user.SecurityStamp), validity);
         Log.AdminPasswordResetCreated(logger, user.Id);
         var link = services.GetRequiredService<SlimLinks>().Build(SlimLinkKind.PasswordReset, token);
         return Task.FromResult(new SlimPasswordReset(token, link, time.GetUtcNow() + validity));
@@ -200,14 +234,17 @@ internal sealed class SlimAuthManager(
     public async Task ResetTwoFactorAsync(SlimUser user, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(user);
+        await store.WriteSecurityStateAsync(user, u =>
+        {
+            u.TwoFactorEnabled = false;
+            u.SecurityStamp = SlimUser.NewSecurityStamp();   // remembered devices and all sessions end
+        }, ct);
         if (services.GetService<SlimTwoFactorService>() is { } twoFactor)
         {
             await twoFactor.RemoveSecretAsync(user, ct);
             await twoFactor.RemoveRecoveryCodesAsync(user, ct);
         }
-        user.TwoFactorEnabled = false;
-        user.SecurityStamp = SlimUser.NewSecurityStamp();   // remembered devices and all sessions end
-        await store.UpdateSecurityStateAsync(user, ct);
+        await services.GetRequiredService<SlimCredentialService>().ResetAttemptsAsync(user, SlimAttemptFactor.SecondFactor, ct);
         await RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
         Log.AdminTwoFactorReset(logger, user.Id);
         await Hooks.RaiseAsync(SlimEventTypes.TwoFactorDisabled, user.Id, reason: "administrator", ct: ct);
@@ -245,9 +282,9 @@ internal sealed class SlimAuthManager(
     public async Task UnlockAsync(SlimUser user, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(user);
-        user.FailedLoginAttempts = 0;
-        user.LockoutEndUtc = null;
-        await store.ResetFailedLoginAttemptsAsync(user, ct);
+        var credentials = services.GetRequiredService<SlimCredentialService>();
+        await credentials.ResetAttemptsAsync(user, SlimAttemptFactor.Password, ct);
+        await credentials.ResetAttemptsAsync(user, SlimAttemptFactor.SecondFactor, ct);
         Log.AdminUnlocked(logger, user.Id);
         await Hooks.RaiseAsync(SlimEventTypes.Unlocked, user.Id, ct: ct);
     }
@@ -355,8 +392,9 @@ internal sealed class SlimAuthManager(
         if (validity <= TimeSpan.Zero || validity > TimeSpan.FromDays(30))
             throw new ArgumentOutOfRangeException(nameof(lifetime), "SlimIdentity: invitation lifetime must be between 0 and 30 days.");
 
-        var token = workflow.Protect(SlimWorkflowTokens.InvitationPurpose,
-            new SlimInvitationPayload(user.Id, user.Email, user.SecurityStamp), validity);
+        var flowId = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
+        var token = workflow.Protect(SlimWorkflowTokens.LinkPurpose,
+            new SlimLinkPayload(SlimLinkPayload.Invitation, flowId, user.Email, user.Id, user.SecurityStamp), validity);
         metrics.Invitation("created");
         var link = services.GetRequiredService<SlimLinks>().Build(SlimLinkKind.Invitation, token);
         return Task.FromResult(new SlimInvitation(token, link, time.GetUtcNow() + validity));
@@ -392,7 +430,7 @@ internal sealed class SlimAuthManager(
         // path checks it with its own answer, this keeps a forgotten one from issuing a session (impersonation is the
         // administrator's own act)
         if (signInStage == SlimSignInStage.SignIn && user.PasswordChangeRequired && authMethod != MethodImpersonation)
-            return SlimAuthResult.Failed("password_change_required");
+            return SlimAuthResult.Failed(SlimErrorCodes.PasswordChangeRequired);
         if (user.IsActive && checkGuards && await Hooks.CheckSignInAsync(user, authMethod, signInStage, impersonatorId, ct) is { } veto)
         {
             await Hooks.RaiseAsync(SlimEventTypes.SignInFailed, user.Id, authMethod, veto.Error, impersonatorId, ct);
@@ -417,14 +455,17 @@ internal sealed class SlimAuthManager(
         DateTimeOffset? authTime,
         CancellationToken ct)
     {
-        if (!user.IsActive) return SlimAuthResult.Failed("account_disabled");
+        if (!user.IsActive) return SlimAuthResult.Failed(SlimErrorCodes.AccountDisabled);
 
         // a user created outside SlimIdentity (seeding, import) may have no stamp – every session would fail its first
         // validation: give it one before anything is bound to it
         if (string.IsNullOrEmpty(user.SecurityStamp))
         {
-            user.SecurityStamp = SlimUser.NewSecurityStamp();
-            await store.UpdateSecurityStateAsync(user, ct);
+            // a concurrent first sign-in may have set one already – either stamp serves
+            await store.WriteSecurityStateAsync(user, u =>
+            {
+                if (string.IsNullOrEmpty(u.SecurityStamp)) u.SecurityStamp = SlimUser.NewSecurityStamp();
+            }, ct);
             Log.SecurityStampMissing(logger, user.Id);
         }
 
@@ -475,7 +516,7 @@ internal sealed class SlimAuthManager(
         {
             // sliding lifetime, capped by the absolute lifetime of the whole chain
             var absoluteEnd = authStart + o.Tokens.RefreshTokenAbsoluteLifetime;
-            if (absoluteEnd <= now) return SlimAuthResult.Failed("session_expired");
+            if (absoluteEnd <= now) return SlimAuthResult.Failed(SlimErrorCodes.SessionExpired);
 
             refreshExpires = Min(now + o.Tokens.RefreshTokenLifetime, absoluteEnd);
             refreshToken = workflow.Protect(

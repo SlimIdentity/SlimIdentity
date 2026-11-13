@@ -64,9 +64,6 @@ internal static partial class Log
     [LoggerMessage(3005, LogLevel.Debug, "SlimIdentity: rejected {Purpose} token.")]
     public static partial void TokenRejected(ILogger logger, Exception exception, string purpose);
 
-    [LoggerMessage(7006, LogLevel.Warning, "SlimIdentity: mail throttle full ({Capacity} recipients within 15 minutes) – mails to new recipients are not sent. A flood of fresh addresses is likely.")]
-    public static partial void MailThrottleFull(ILogger logger, int capacity);
-
     [LoggerMessage(3011, LogLevel.Warning, "SlimIdentity: user {UserId} had no security stamp (created outside SlimIdentity?) – one was created at sign-in. Initialize SecurityStamp with SlimUser.NewSecurityStamp() when you create users.")]
     public static partial void SecurityStampMissing(ILogger logger, string userId);
 
@@ -76,8 +73,8 @@ internal static partial class Log
     [LoggerMessage(3007, LogLevel.Information, "SlimIdentity: sign-in guard refused user {UserId} ({Error}, stage {Stage}).")]
     public static partial void SignInVetoed(ILogger logger, string userId, string error, string stage);
 
-    [LoggerMessage(3008, LogLevel.Information, "SlimIdentity: registration guard refused a registration ({Error}).")]
-    public static partial void RegistrationVetoed(ILogger logger, string error);
+    [LoggerMessage(3008, LogLevel.Information, "SlimIdentity: registration guard refused a registration ({Error}, stage {Stage}).")]
+    public static partial void RegistrationVetoed(ILogger logger, string error, string stage);
 
     [LoggerMessage(3009, LogLevel.Error, "SlimIdentity: event handler failed for {Type} – the event was not delivered to it.")]
     public static partial void EventHandlerFailed(ILogger logger, Exception exception, string type);
@@ -106,6 +103,9 @@ internal static partial class Log
 
     [LoggerMessage(4007, LogLevel.Information, "SlimIdentity: administrator set the password of user {UserId} (change required: {MustChange}).")]
     public static partial void AdminPasswordSet(ILogger logger, string userId, bool mustChange);
+
+    [LoggerMessage(4012, LogLevel.Information, "SlimIdentity: administrator created user {UserId} (start password: {WithPassword}).")]
+    public static partial void UserCreatedByAdministrator(ILogger logger, string userId, bool withPassword);
 
     [LoggerMessage(4008, LogLevel.Information, "SlimIdentity: administrator created a password reset link for user {UserId}.")]
     public static partial void AdminPasswordResetCreated(ILogger logger, string userId);
@@ -145,9 +145,6 @@ internal static partial class Log
     [LoggerMessage(5015, LogLevel.Information, "SlimIdentity: sign-in at {Provider} did not complete ({Error}) – sent back to the front end.")]
     public static partial void ExternalLoginRemoteFailure(ILogger logger, string provider, string error);
 
-    [LoggerMessage(5004, LogLevel.Warning, "SlimIdentity: unconfirmed account {UserId} claimed by the verified owner via {Provider} – password, 2FA and sessions of the registrant removed (possible pre-account hijacking).")]
-    public static partial void UnverifiedAccountClaimed(ILogger logger, string provider, string userId);
-
     // ---------------------------------------------------------------- 6xxx impersonation
     [LoggerMessage(6001, LogLevel.Warning, "SlimIdentity: user {Impersonator} impersonates {Target}.")]
     public static partial void ImpersonationStarted(ILogger logger, string impersonator, string target);
@@ -184,12 +181,18 @@ internal static partial class Log
     [LoggerMessage(8003, LogLevel.Information, "SlimIdentity: no Data Protection application name is set; keys are isolated by the content-root path. With several instances in different directories call SetApplicationName(\"…\").")]
     public static partial void DataProtectionNoApplicationName(ILogger logger);
 
-    [LoggerMessage(8004, LogLevel.Warning, "SlimIdentity: external login without ISlimRefreshTokenStore – the one-time exchange codes are tracked in memory and single-use per instance only. Register a refresh-token store when running several instances.")]
-    public static partial void ExchangeCodesPerInstance(ILogger logger);
+    [LoggerMessage(8004, LogLevel.Information, "SlimIdentity: one-time codes and mail limits are tracked in memory, per instance. When running several instances register a shared ISlimSharedState (AddSharedState<T>() or the EF package) – see docs/guides/multiple-instances.md.")]
+    public static partial void SharedStatePerInstance(ILogger logger);
+
+    [LoggerMessage(8005, LogLevel.Warning, "SlimIdentity: in-memory shared state full ({Capacity} entries) – new one-time codes are rejected and mails to new recipients are not sent. A flood of fresh codes or addresses is likely.")]
+    public static partial void SharedStateFull(ILogger logger, int capacity);
+
+    [LoggerMessage(8006, LogLevel.Error, "SlimIdentity: ISlimSharedState failed ({Purpose}) – one-time codes are rejected, mail limits are counted per instance until it recovers.")]
+    public static partial void SharedStateFailed(ILogger logger, Exception exception, string purpose);
 
     // SlimNullEmailSender (development only – these log live links and codes)
-    [LoggerMessage(7101, LogLevel.Warning, "[SlimIdentity:NullEmailSender] Verification for {Email}: {Link}")]
-    public static partial void NullMailVerification(ILogger logger, string email, string link);
+    [LoggerMessage(7101, LogLevel.Warning, "[SlimIdentity:NullEmailSender] Verification for {Email}: code {Code}, link {Link}")]
+    public static partial void NullMailVerification(ILogger logger, string email, string code, string link);
 
     [LoggerMessage(7102, LogLevel.Warning, "[SlimIdentity:NullEmailSender] Password reset for {Email}: {Link}")]
     public static partial void NullMailPasswordReset(ILogger logger, string email, string link);
@@ -197,8 +200,11 @@ internal static partial class Log
     [LoggerMessage(7103, LogLevel.Warning, "[SlimIdentity:NullEmailSender] 2FA code for {Email}: {Code}")]
     public static partial void NullMailTwoFactorCode(ILogger logger, string email, string code);
 
-    [LoggerMessage(7104, LogLevel.Warning, "[SlimIdentity:NullEmailSender] E-mail change confirmation for {Email}: {Link}")]
-    public static partial void NullMailEmailChange(ILogger logger, string email, string link);
+    [LoggerMessage(7108, LogLevel.Warning, "[SlimIdentity:NullEmailSender] Verification code for {Email}: {Code}")]
+    public static partial void NullMailVerificationCode(ILogger logger, string email, string code);
+
+    [LoggerMessage(7104, LogLevel.Warning, "[SlimIdentity:NullEmailSender] E-mail change code for {Email}: {Code}")]
+    public static partial void NullMailEmailChange(ILogger logger, string email, string code);
 
     [LoggerMessage(7105, LogLevel.Warning, "[SlimIdentity:NullEmailSender] Address {OldEmail} was changed to {NewEmail}")]
     public static partial void NullMailEmailChanged(ILogger logger, string oldEmail, string newEmail);

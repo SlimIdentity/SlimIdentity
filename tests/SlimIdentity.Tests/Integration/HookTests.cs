@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Security.Claims;
 using System.Text.Json;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.DependencyInjection;
 using SlimIdentity.Tests.Infrastructure;
@@ -89,8 +90,8 @@ public sealed class HookTests
         var answer = await app.CreateClient().PostJsonAsync("/auth/login?useCookies=false",
             new { email = TestApp.UserEmail, password = TestApp.UserPassword }, HttpStatusCode.Forbidden);
 
-        Assert.Equal("tenant_suspended", answer.Str("status"));
-        Assert.Equal("Your organization's access is suspended.", answer.Str("message"));
+        Assert.Equal("tenant_suspended", answer.Str("code"));
+        Assert.Equal("Your organization's access is suspended.", answer.Str("detail"));
         Assert.False(answer.TryGetProperty("accessToken", out _));
         await app.LoginBearerAsync(TestApp.AdminEmail, TestApp.AdminPassword);   // others are not affected
     }
@@ -113,7 +114,7 @@ public sealed class HookTests
         Assert.Equal(HttpStatusCode.Unauthorized, (await bearer.GetAsync("/auth/me")).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await browser.GetAsync("/auth/me")).StatusCode);
         var refresh = await app.CreateClient().PostJsonAsync("/auth/refresh", new { refreshToken = tokens.RefreshToken }, HttpStatusCode.Forbidden);
-        Assert.Equal("tenant_suspended", refresh.Str("status"));
+        Assert.Equal("tenant_suspended", refresh.Str("code"));
     }
 
     [Fact]
@@ -151,11 +152,11 @@ public sealed class HookTests
         await using var app = await TestApp.StartAsync(With(b => b.AddRegistrationGuard<CompanyDomainGuard>()));
 
         var refused = await app.CreateClient().PostJsonAsync("/auth/register",
-            new { email = "someone@gmail.test", password = "Some-Long-Pass-1" }, HttpStatusCode.Forbidden);
-        Assert.Equal("registration_not_allowed", refused.Str("status"));
+            new { email = "someone@gmail.test" }, HttpStatusCode.Forbidden);
+        Assert.Equal("registration_not_allowed", refused.Str("code"));
         Assert.Null(await app.Users.FindByEmailAsync("someone@gmail.test", default));
 
-        await app.CreateClient().PostJsonAsync("/auth/register", new { email = "colleague@firma.test", password = "Some-Long-Pass-1" });
+        Assert.Equal(HttpStatusCode.OK, (await app.RegisterAsync("colleague@firma.test", "Some-Long-Pass-1")).StatusCode);
         Assert.NotNull(await app.Users.FindByEmailAsync("colleague@firma.test", default));
     }
 
@@ -178,12 +179,13 @@ public sealed class HookTests
         await using var job = app.App.Services.CreateAsyncScope();   // a background job: no HttpContext
         var auth = job.ServiceProvider.GetRequiredService<ISlimAuthManager>();
 
-        var refused = await auth.RegisterAsync("imported@gmail.test", "Some-Long-Pass-1");
-        var allowed = await auth.RegisterAsync("imported@firma.test", "Some-Long-Pass-1");
+        var refused = await auth.BeginRegistrationAsync("imported@gmail.test");
+        var allowed = await auth.BeginRegistrationAsync("imported@firma.test");
 
-        Assert.Null(refused.User);
-        Assert.Null(await app.Users.FindByEmailAsync("imported@gmail.test", default));
-        Assert.NotNull(allowed.User);
+        Assert.Equal(StatusCodes.Status403Forbidden, ((IStatusCodeHttpResult)refused).StatusCode);
+        Assert.Equal(StatusCodes.Status200OK, ((IStatusCodeHttpResult)allowed).StatusCode ?? StatusCodes.Status200OK);
+        await app.Mail.WaitForAsync("verification", "imported@firma.test");
+        Assert.DoesNotContain(app.Mail.Mails, m => m.To == "imported@gmail.test");
     }
 
     [Fact]
@@ -192,12 +194,61 @@ public sealed class HookTests
         await using var app = await TestApp.StartAsync(With(b => b.AddRegistrationGuard<RequestsOnlyGuard>()));
         await using var job = app.App.Services.CreateAsyncScope();
 
-        var imported = await job.ServiceProvider.GetRequiredService<ISlimAuthManager>().RegisterAsync("imported@gmail.test", "Some-Long-Pass-1");
+        await job.ServiceProvider.GetRequiredService<ISlimAuthManager>().BeginRegistrationAsync("imported@gmail.test");
         var refused = await app.CreateClient().PostJsonAsync("/auth/register",
-            new { email = "someone@gmail.test", password = "Some-Long-Pass-1" }, HttpStatusCode.Forbidden);
+            new { email = "someone@gmail.test" }, HttpStatusCode.Forbidden);
 
-        Assert.NotNull(imported.User);
-        Assert.Equal("registration_not_allowed", refused.Str("status"));
+        await app.Mail.WaitForAsync("verification", "imported@gmail.test");
+        Assert.Equal("registration_not_allowed", refused.Str("code"));
+    }
+
+    [Fact]
+    public async Task Registration_guards_are_asked_at_each_stage()
+    {
+        await using var app = await TestApp.StartAsync(With(b => b.AddRegistrationGuard<StageRecorder>(ServiceLifetime.Singleton),
+            new Claim(ClaimTypes.NameIdentifier, "ext-3"), new Claim(ClaimTypes.Email, "social@test.local"), new Claim("email_verified", "true")));
+        var seen = app.App.Services.GetServices<ISlimRegistrationGuard>().OfType<StageRecorder>().Single().Seen;
+
+        Assert.Equal(HttpStatusCode.OK, (await app.RegisterAsync("new@test.local", "Some-Long-Pass-1")).StatusCode);
+        await SignInExternallyAsync(app.CreateClient());
+
+        Assert.Equal(
+        [
+            ("new@test.local", SlimRegistrationStage.Begin, null, null),
+            ("new@test.local", SlimRegistrationStage.Complete, SlimCredentialKinds.Password, null),
+            ("social@test.local", SlimRegistrationStage.External, SlimCredentialKinds.External, "Fake"),
+        ], seen.ToArray());
+    }
+
+    [Fact]
+    public async Task Without_mail_both_stages_are_asked_before_the_account_exists()
+    {
+        await using var app = await TestApp.StartAsync(new TestAppOptions
+        {
+            EmailSender = false,
+            Builder = b => b.WithoutEmail(allowSelfRegistration: true).AddRegistrationGuard<StageRecorder>(ServiceLifetime.Singleton),
+        });
+        var recorder = app.App.Services.GetServices<ISlimRegistrationGuard>().OfType<StageRecorder>().Single();
+        recorder.Refuse = SlimRegistrationStage.Complete;
+
+        var refused = await app.CreateClient().PostJsonAsync("/auth/register",
+            new { email = "new-member", password = "Some-Long-Pass-1" }, HttpStatusCode.Forbidden);
+
+        Assert.Equal("registration_not_allowed", refused.Str("code"));
+        Assert.Equal([SlimRegistrationStage.Begin, SlimRegistrationStage.Complete], recorder.Seen.Select(s => s.Stage));
+        Assert.Null(await app.Users.FindByEmailAsync("new-member", default));
+    }
+
+    private sealed class StageRecorder : ISlimRegistrationGuard
+    {
+        public readonly ConcurrentQueue<(string Email, SlimRegistrationStage Stage, string? Kind, string? Provider)> Seen = new();
+        public SlimRegistrationStage? Refuse { get; set; }
+
+        public ValueTask<SlimVeto?> CheckAsync(SlimRegistrationContext context, CancellationToken ct)
+        {
+            Seen.Enqueue((context.Email, context.Stage, context.CredentialKind, context.Provider));
+            return ValueTask.FromResult(context.Stage == Refuse ? new SlimVeto("registration_not_allowed") : null);
+        }
     }
 
     /// <summary>Self-service registration is closed; the host's own import (no request) is trusted.</summary>
@@ -219,7 +270,7 @@ public sealed class HookTests
         var me = app.CreateClient();
         me.BearerToken = (await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword)).AccessToken;
         await me.PostJsonAsync("/auth/change-password", new { currentPassword = TestApp.UserPassword, newPassword = "Changed-Pass-123" });
-        await app.CreateClient().PostJsonAsync("/auth/register", new { email = "new@test.local", password = "New-Member-Pass-1" });
+        Assert.Equal(HttpStatusCode.OK, (await app.RegisterAsync("new@test.local", "New-Member-Pass-1")).StatusCode);
         for (var i = 0; i < 5; i++)
             await app.CreateClient().PostJsonAsync("/auth/login", new { email = TestApp.AdminEmail, password = "wrong-password" }, HttpStatusCode.Unauthorized);
 
@@ -247,5 +298,20 @@ public sealed class HookTests
         await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword);
 
         Assert.Contains(Hook<Recorder>(app).Events, e => e.Type == SlimEventTypes.SignedIn);
+    }
+
+    [Fact]
+    public async Task Without_a_session_store_a_refresh_is_not_reported_as_a_new_sign_in()
+    {
+        await using var app = await TestApp.StartAsync(new TestAppOptions
+        {
+            Sessions = false,
+            Builder = b => b.AddEventObserver<Recorder>(ServiceLifetime.Singleton),
+        });
+        var refreshToken = (await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword)).RefreshToken!;
+        for (var i = 0; i < 3; i++)
+            refreshToken = (await app.CreateClient().PostJsonAsync("/auth/refresh", new { refreshToken })).Str("refreshToken");
+
+        Assert.Single(Hook<Recorder>(app).Events, e => e.Type == SlimEventTypes.SignedIn);
     }
 }

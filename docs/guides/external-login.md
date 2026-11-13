@@ -1,129 +1,88 @@
 # External login (OAuth / OIDC)
 
-SlimIdentity does not implement OAuth itself – it orchestrates the regular ASP.NET Core remote handlers and maps the
-external identity to your users.
+SlimIdentity orchestrates the regular ASP.NET Core remote handlers and maps the external identity to your users.
+Provider walkthroughs (consoles, front end, troubleshooting): **[Google and Microsoft Entra ID](google-and-entra-id.md)**.
 
 ```csharp
-var slim = builder.Services.AddSlimIdentity(o =>
-    {
-        o.TrustedOrigins.Add("https://app.example.com");   // allowed returnUrl targets (besides local paths)
-    })
+var slim = builder.Services.AddSlimIdentity(o => o.TrustedOrigins.Add("https://app.example.com"))   // returnUrl targets
     .AddUserStore<MyUserStore>()
     .AddEmailSender<MyEmailSender>()
     .AddExternalLoginStore<MyExternalLoginStore>();
 
-// any remote handler; its SignInScheme must be SlimIdentity's external scheme (the default once the store is added)
-slim.Authentication.AddGoogle("Google", o =>
-{
-    o.ClientId = builder.Configuration["Google:ClientId"]!;
-    o.ClientSecret = builder.Configuration["Google:ClientSecret"]!;
-    o.ClaimActions.MapJsonKey("email_verified", "email_verified");   // Google's verification of the address
-    o.UseSlimErrorRedirects();                                       // cancel / failure → ?slim_error= instead of an error page
-});
+// any remote handler; its SignInScheme defaults to SlimIdentity's external scheme once the store is added
 slim.Authentication.AddOpenIdConnect("EntraId", o => { /* Authority, ClientId, … */ o.UseSlimErrorRedirects(); });
 ```
 
-Register the callback URL of the handler (e.g. `/signin-google`) at the provider as usual. Complete walkthroughs,
-including the provider consoles, the front end and the pitfalls: **[Google and Microsoft Entra ID](google-and-entra-id.md)**.
-
-`UseSlimErrorRedirects()` covers what happens before SlimIdentity sees a user: a *Cancel* at the provider returns to
-the `returnUrl` with `?slim_error=access_denied`, an answer that cannot be matched (state lost or forged, correlation
-cookie gone, provider error) with `?slim_error=external_login_failed`. Without it, ASP.NET Core throws and the user ends
-on the back end's error page.
+Register the handler's callback URL at the provider as usual. `UseSlimErrorRedirects()` turns a *Cancel* at the
+provider into `?slim_error=access_denied` and an unmatched answer (state lost or forged, correlation cookie gone,
+provider error) into `?slim_error=external_login_failed`; without it the user ends on the back end's error page.
 
 ## Flow
 
-The front end **navigates** (not `fetch`) to `/auth/login/{provider}?returnUrl=…&useCookies=true|false`.
-Bearer clients add a PKCE challenge (RFC 7636): they create a random `code_verifier` (43–128 characters), keep it
-(e.g. in `sessionStorage`) and send `code_challenge=BASE64URL(SHA256(verifier))&code_challenge_method=S256` –
-without it the request is rejected with `400 code_challenge_required`.
-After the provider round trip SlimIdentity redirects to `returnUrl`:
+The front end **navigates** (not `fetch`) to `/auth/login/{provider}?returnUrl=…&useCookies=true|false`. Bearer
+clients add PKCE (RFC 7636): a random `code_verifier` (43–128 characters) kept e.g. in `sessionStorage`, and
+`code_challenge=BASE64URL(SHA256(verifier))&code_challenge_method=S256` – otherwise `400 code_challenge_required`.
 
 | Situation | Redirect |
 | :--- | :--- |
 | Cookie mode, success | `returnUrl` – the cookie is set |
-| Cookie mode, 2FA enabled | `returnUrl#slim_status=requires_two_factor&preAuthToken=…&method=…` → continue with `/auth/login/2fa` |
-| Bearer mode | `returnUrl#code=…` → `POST /auth/login/external/exchange { code, codeVerifier, twoFactorRememberToken? }` returns the token pair – or, with 2FA, `401 requires_two_factor` with `preAuthToken` |
+| Cookie mode, steps follow (2FA, own password) | `returnUrl#slim_status=action_required&flowToken=…` → `POST /auth/flow` names the steps |
+| Bearer mode | `returnUrl#code=…` → `POST /auth/login/external/exchange { code, codeVerifier, twoFactorRememberToken? }` returns the tokens or `action_required` |
 | Error | `returnUrl?slim_error=<code>` |
 
-Secrets travel only in the URL **fragment**, which browsers never send to servers, logs or referrers; only error codes
-use the query. The exchange code is valid for 1 minute, works exactly once (registered in `ISlimRefreshTokenStore`,
-or in memory when no refresh-token store is registered – then per instance only) and only together with the
-verifier – an intercepted code (deep link, history, another app) is worthless. The front-end client
-(`samples/templates/Frontend/slimIdentityClient.ts`) does all of this: `loginWith(provider)` and
-`completeExternalLogin()`.
+Secrets travel only in the URL fragment; only error codes use the query. The exchange code is valid for 1 minute,
+single-use (`ISlimSharedState`, see [several instances](multiple-instances.md)) and useless without the verifier. The
+TypeScript client (`samples/templates/Frontend/slimIdentityClient.ts`) does all of this: `loginWith(provider)`,
+`readExternalLoginResult()` (cookie) and `completeExternalLogin()` (bearer).
 
 ## Account matching
 
-1. Known external identity (`provider` + subject) → that user.
-2. Otherwise, an existing account with the same e-mail:
-   - never confirmed (someone registered the address without proving the mailbox): the verified owner takes it over –
-     the registrant's password, 2FA, sessions and external logins are removed;
-   - confirmed and **without** a password of its own (created by another provider, LDAP): linked automatically if the
-     e-mail is **verified** (`email_verified=true`, or the provider is listed in `TrustedEmailProviders` – only for
-     providers whose addresses you control, e.g. your company's single-tenant Entra ID) and
-     `AutoLinkVerifiedEmails` is on;
-   - otherwise – in particular for every account **with** a password – `slim_error=account_conflict`: the user signs in
-     with the password and links the provider ([below](#linking-while-signed-in)). A click on a verification link proves
-     the mailbox, not who set the password; joining such an account automatically would let whoever registered the
-     address keep a password to the account the owner now uses (pre-account hijacking).
-3. Otherwise a new password-less user is created (`AllowAutoRegistration`) – only for a **verified** e-mail, else
-   `slim_error=email_not_verified` –, or `slim_error=registration_disabled`.
+1. Known external identity (provider + subject) → that user.
+2. Otherwise an existing account with the same address. "Verified" means `email_verified=true` from the provider, or
+   the provider is in `ExternalLogin.TrustedEmailProviders` (only for providers whose addresses you control, e.g. your
+   single-tenant Entra ID); linking also requires `AutoLinkVerifiedEmails` (default on).
+   - Unconfirmed account **without** any way in (no password, external login or passkey – e.g. created by an
+     administrator): confirmed and linked if the address is verified.
+   - Confirmed account **without** a password (other provider, LDAP): linked if the address is verified.
+   - Everything else – in particular every account **with** a password – `slim_error=account_conflict`: the user signs
+     in and [links the provider](#linking-while-signed-in); the owner of an unconfirmed account proves the mailbox with a
+     password reset. Linking automatically would let whoever set the password keep access (pre-account hijacking).
+3. Otherwise a new password-less user (`AllowAutoRegistration`, default on) – only for a verified address, else
+   `slim_error=email_not_verified`; with auto-registration off `slim_error=registration_disabled`.
 
-Inactive, locked and (with `RequireConfirmedEmail`) unconfirmed accounts are rejected with matching error codes.
+Inactive and locked accounts are rejected with their error codes. A linked account with an unconfirmed address
+continues with the `verify_email` step.
 
 ## Linking while signed in
 
-Signed-in users link a provider themselves – the PKCE-bound link code ends up only with the client that started the
-flow, and the password confirms it:
+Navigate to `/auth/login/{provider}?link=true&returnUrl=…&code_challenge=…&code_challenge_method=S256`; the return
+page receives `#slim_link_code=…` and posts `{ code, codeVerifier, password }` to `POST /auth/link/external` (signed
+in: cookie + `X-CSRF`, or bearer) → `200 external_login_linked`.
 
-```http
-GET /auth/login/Google?link=true&returnUrl=https://app.example.com/settings&code_challenge=…&code_challenge_method=S256
-→ provider round trip → https://app.example.com/settings#slim_link_code=…
+- `password` is required for accounts that have one; others need a sign-in within 5 minutes
+  (`403 reauthentication_required`).
+- The address must be confirmed (`403 email_not_confirmed`). An external account linked to another user:
+  `409 external_login_taken`. The code lives 1 minute, works once and only with the verifier.
+- TypeScript: `linkWith(provider)`, then `completeLink(password)` on the return page.
 
-POST /auth/link/external          (signed in: cookie + X-CSRF, or bearer)
-{ "code": "…", "codeVerifier": "…", "password": "…" }
-→ 200 external_login_linked
-```
-
-- `password` is required for accounts that have one; accounts without one need a sign-in within the last 5 minutes
-  (`403 reauthentication_required` – sign in again, then repeat): a stolen session alone must not add a permanent way in.
-- The account's address must be confirmed (`403 email_not_confirmed`), like for setting up 2FA.
-- An external account already linked to another user answers `409 external_login_taken`.
-- A link code planted in someone else's URL (link CSRF) fails at the verifier. Codes live 1 minute and work once.
-
-The TypeScript client does it with `linkWith(provider)` and, on the return page, `completeLink(password)`.
-
-If your own code links identities (`ISlimExternalLoginStore.LinkExternalLoginAsync`), do it only for confirmed accounts
-and only after the same proofs.
+Own code calling `ISlimExternalLoginStore.LinkExternalLoginAsync` must apply the same proofs and only link confirmed
+accounts.
 
 ## Managing sign-in methods
 
-```http
-GET  /auth/sign-in-methods                    → { "hasPassword": true, "externalLogins": [ { "provider": "Google", "providerKey": "1093…" } ] }
-POST /auth/sign-in-methods/external/remove    { "provider": "Google", "providerKey": "1093…", "password": "…" }
-```
+`GET /auth/sign-in-methods` lists `hasPassword` and `externalLogins`; `POST /auth/sign-in-methods/external/remove
+{ provider, providerKey, password }` removes one (TypeScript: `signInMethods()`, `removeExternalLogin(…)`).
 
-- Removing needs the current password – or, for accounts without one, a sign-in within the last 5 minutes: a stolen
-  session alone must not cut the owner's ways in.
-- **The last way in is never removed:** an account without a password keeps at least one external login or passkey
-  (`409 last_sign_in_method` – link another provider first). Parallel removals cannot get around it.
-- **A pure SSO account stays without local credentials:** an account without a password but with an external login
-  gets no password via `/change-password` (`409 password_not_set`) or a self-service reset (`/forgot-password` sends
-  no link, `/reset-password` answers `409 external_sign_in_only`), and no passkey (`403 password_required`). An
-  administrator can still set one (`SetPasswordAsync`, `CreatePasswordResetAsync`). Linking a provider to an account
-  with a password changes nothing – password and passkeys stay.
-- Not during an impersonation (`403`). Event `external_login_removed`.
-
-TypeScript: `signInMethods()` and `removeExternalLogin(provider, providerKey, password)`.
+- Removing needs the password, or a sign-in within 5 minutes for accounts without one. Not during impersonation (`403`).
+- The last way in is never removed (`409 last_sign_in_method`), also under parallel requests.
+- A pure SSO account (external login, no password) gets no password via `/change-password` (`409 password_not_set`)
+  or self-service reset (no link is sent; an older link answers `409 external_sign_in_only` at `/flow`), and no
+  passkey (`403 password_required`). An administrator can still set one.
 
 ## Signing out at the provider
 
-After the sign-in, the session lives in your application. Signing out at the provider – or revoking the app's access in
-the Google or Microsoft account – does not end it; that is how social logins work everywhere.
-
-Enterprise identity providers (Keycloak, Okta, Auth0, Duende, …) can tell the application through **OpenID Connect
-Back-Channel Logout** when they sign a user out or block them:
+Signing out at the provider or revoking the app's access does not end the application's session. Providers with
+**OpenID Connect Back-Channel Logout** (Keycloak, Okta, Auth0, Duende, …) can end it:
 
 ```csharp
 .AddBackChannelLogout("Keycloak", o =>          // the scheme name of your OIDC handler
@@ -133,18 +92,10 @@ Back-Channel Logout** when they sign a user out or block them:
 })
 ```
 
-Register `https://api.example.com/auth/backchannel-logout/Keycloak` as the client's back-channel logout URL at the
-provider. It posts a signed `logout_token`; every session of the user linked to its `sub` ends (all devices – the
-provider ended the user's single sign-on). The token is checked like any credential: signature with the provider's
-keys (from the discovery document, cached), issuer, audience, the back-channel event, no `nonce`, issued within the last
-5 minutes, single use. Tokens that carry only a `sid` are rejected – configure the provider to send `sub` (Keycloak and
-the others do by default). The endpoint is authenticated by the token, not by a cookie, so it needs no `X-CSRF` header.
+Register `https://api.example.com/auth/backchannel-logout/Keycloak` at the provider. Its signed `logout_token` ends
+every session of the user linked to its `sub`. Checked: signature (keys from discovery, cached), issuer, audience,
+back-channel event, no `nonce`, issued within 5 minutes, single use; tokens with only a `sid` are rejected. No
+`X-CSRF` needed. Without back-channel logout, call `SignOutEverywhereAsync` when the provider reports a sign-out, or
+use a sign-in guard ([hooks](hooks.md)) that asks the directory.
 
-For providers without back-channel logout, end a user's sessions from your own code with
-`ISlimAuthManager.SignOutEverywhereAsync` when the provider reports a sign-out or a block – or use a sign-in guard
-([hooks](hooks.md)) that asks your directory whether the account is still enabled.
-
-## Enterprise SSO and certificates
-
-Entra ID, Keycloak, Okta, ADFS work through `AddOpenIdConnect` / `AddWsFederation`. Client certificates (mTLS) are not
-built in – see the [architecture document](../architecture-manifest.md#9-mtls--client-certificates-documented-not-built-in).
+WS-Federation works through `AddWsFederation`; client certificates: [client-certificates.md](client-certificates.md).

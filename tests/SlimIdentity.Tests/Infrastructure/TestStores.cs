@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Options;
 
 namespace SlimIdentity.Tests.Infrastructure;
 
@@ -9,13 +10,18 @@ public sealed class TestUserStore : ISlimUserStore
     private readonly ConcurrentDictionary<string, SlimUser> _users = new();
     private readonly ConcurrentDictionary<string, string[]> _roles = new();
 
+    /// <summary>PBKDF2 iterations of seeded hashes – kept equal to the app's setting (see <see cref="TestAppOptions.FastHashing"/>).</summary>
+    public int HashIterations { get; set; } = TestApp.FastHashIterations;
+
+    private PasswordHasher<SlimUser> Hasher => new(Options.Create(new PasswordHasherOptions { IterationCount = HashIterations }));
+
     public SlimUser Seed(string email, string? password, params string[] roles) => SeedWithId(Guid.NewGuid().ToString(), email, password, roles);
 
     /// <summary>A user with a chosen id – e.g. the same id in two tenant stores.</summary>
     public SlimUser SeedWithId(string id, string email, string? password, params string[] roles)
     {
         var user = new SlimUser { Id = id, Email = email, EmailConfirmed = true };
-        if (password is not null) user.PasswordHash = new PasswordHasher<SlimUser>().HashPassword(user, password);
+        if (password is not null) user.PasswordHash = Hasher.HashPassword(user, password);
         _users[user.Id] = user;
         _roles[user.Id] = roles;
         return Clone(user);
@@ -35,7 +41,7 @@ public sealed class TestUserStore : ISlimUserStore
         var stored = _users[userId];
         lock (stored)
         {
-            stored.PasswordHash = new PasswordHasher<SlimUser>().HashPassword(stored, password);
+            stored.PasswordHash = Hasher.HashPassword(stored, password);
             stored.SecurityStamp = SlimUser.NewSecurityStamp();
         }
     }
@@ -49,8 +55,8 @@ public sealed class TestUserStore : ISlimUserStore
     /// <summary>Called between the "exists?" lookup and the insert of <see cref="CreateAsync"/> (race simulation).</summary>
     public Action<string>? BeforeCreate { get; set; }
 
-    /// <summary>Called by <see cref="IncrementFailedLoginAttemptsAsync"/> before it counts (race simulation).</summary>
-    public Action<string>? BeforeFailedAttempt { get; set; }
+    /// <summary>Called by <see cref="TryBeginAttemptAsync"/> before it reserves (race simulation).</summary>
+    public Action<string>? BeforeAttempt { get; set; }
 
     /// <summary>The profiles passed to <see cref="CreateAsync"/>, by user id.</summary>
     public ConcurrentDictionary<string, object?> Profiles { get; } = new();
@@ -64,7 +70,7 @@ public sealed class TestUserStore : ISlimUserStore
             // unique index on the e-mail address
             if (_users.Values.Any(u => string.Equals(u.Email, email, StringComparison.OrdinalIgnoreCase)))
                 return Task.FromResult<SlimUser?>(null);
-            var user = new SlimUser { Id = Guid.NewGuid().ToString(), Email = email, PasswordHash = passwordHash };
+            var user = new SlimUser { Id = Guid.NewGuid().ToString(), Email = email, PasswordHash = passwordHash, EmailConfirmed = newUser.EmailConfirmed };
             _users[user.Id] = user;
             _roles[user.Id] = [];
             Profiles[user.Id] = newUser.Profile;
@@ -72,25 +78,32 @@ public sealed class TestUserStore : ISlimUserStore
         }
     }
 
-    public Task<int> IncrementFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct)
+    public Task<SlimAttemptReservation?> TryBeginAttemptAsync(SlimUser user, SlimAttemptRequest attempt, CancellationToken ct)
     {
-        BeforeFailedAttempt?.Invoke(user.Id);
-        var stored = _users[user.Id];
-        lock (stored) return Task.FromResult(++stored.FailedLoginAttempts);
+        BeforeAttempt?.Invoke(user.Id);
+        if (!_users.TryGetValue(user.Id, out var stored)) return Task.FromResult<SlimAttemptReservation?>(null);
+        lock (stored)
+        {
+            var end = stored.LockoutEndOf(attempt.Factor);
+            if (attempt.IsLockedOut(end)) return Task.FromResult<SlimAttemptReservation?>(SlimAttemptReservation.LockedOut(end!.Value));
+            var count = (attempt.Factor == SlimAttemptFactor.Password ? stored.FailedLoginAttempts : stored.FailedSecondFactorAttempts) + 1;
+            stored.SetAttempts(attempt.Factor, count, attempt.NextLockoutEnd(count, end));
+            return Task.FromResult<SlimAttemptReservation?>(SlimAttemptReservation.Reserved(count));
+        }
     }
 
-    public Task SetLockoutEndAsync(SlimUser user, DateTimeOffset? lockoutEndUtc, CancellationToken ct)
+    public Task ResetFailedAttemptsAsync(SlimUser user, SlimAttemptFactor factor, CancellationToken ct)
     {
         var stored = _users[user.Id];
-        lock (stored) stored.LockoutEndUtc = lockoutEndUtc;
+        lock (stored) stored.SetAttempts(factor, 0, null);
         return Task.CompletedTask;
     }
 
-    public Task ResetFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct)
+    /// <summary>Test setup: sets counter and lockout end of a factor directly.</summary>
+    public void SetAttempts(string userId, SlimAttemptFactor factor, int failedAttempts, DateTimeOffset? lockoutEndUtc)
     {
-        var stored = _users[user.Id];
-        lock (stored) { stored.FailedLoginAttempts = 0; stored.LockoutEndUtc = null; }
-        return Task.CompletedTask;
+        var stored = _users[userId];
+        lock (stored) stored.SetAttempts(factor, failedAttempts, lockoutEndUtc);
     }
 
     public Task UpdatePasswordHashAsync(SlimUser user, string currentHash, string newHash, CancellationToken ct)
@@ -100,17 +113,26 @@ public sealed class TestUserStore : ISlimUserStore
         return Task.CompletedTask;
     }
 
+    public Task<bool> UpdateSecurityStateAsync(SlimUser user, string expectedStamp, CancellationToken ct)
+    {
+        if (!_users.TryGetValue(user.Id, out var stored)) return Task.FromResult(false);
+        lock (stored)
+        {
+            if ((stored.SecurityStamp ?? string.Empty) != expectedStamp) return Task.FromResult(false);
+            stored.PasswordHash = user.PasswordHash;
+            stored.SecurityStamp = user.SecurityStamp;
+            stored.EmailConfirmed = user.EmailConfirmed;
+            stored.TwoFactorEnabled = user.TwoFactorEnabled;
+            stored.PasswordChangeRequired = user.PasswordChangeRequired;
+            return Task.FromResult(true);
+        }
+    }
+
+    /// <summary>Test setup: writes the security state regardless of the stored stamp.</summary>
     public Task UpdateSecurityStateAsync(SlimUser user, CancellationToken ct)
     {
         var stored = _users[user.Id];
-        stored.PasswordHash = user.PasswordHash;
-        stored.SecurityStamp = user.SecurityStamp;
-        stored.EmailConfirmed = user.EmailConfirmed;
-        stored.FailedLoginAttempts = user.FailedLoginAttempts;
-        stored.LockoutEndUtc = user.LockoutEndUtc;
-        stored.TwoFactorEnabled = user.TwoFactorEnabled;
-        stored.PasswordChangeRequired = user.PasswordChangeRequired;
-        return Task.CompletedTask;
+        lock (stored) return UpdateSecurityStateAsync(user, stored.SecurityStamp ?? string.Empty, ct);
     }
 
     public Task<bool> UpdateSecurityStampAsync(SlimUser user, string expectedStamp, string newStamp, CancellationToken ct)
@@ -124,14 +146,19 @@ public sealed class TestUserStore : ISlimUserStore
         }
     }
 
-    public Task<bool> UpdateEmailAsync(SlimUser user, string newEmail, CancellationToken ct)
+    public Task<SlimEmailUpdateResult> UpdateEmailAsync(SlimUser user, string newEmail, string expectedStamp, string newStamp, CancellationToken ct)
     {
         lock (_users)
         {
             if (_users.Values.Any(u => u.Id != user.Id && string.Equals(u.Email, newEmail, StringComparison.OrdinalIgnoreCase)))
-                return Task.FromResult(false);
-            _users[user.Id].Email = newEmail;
-            return Task.FromResult(true);
+                return Task.FromResult(SlimEmailUpdateResult.EmailTaken);
+            if (!_users.TryGetValue(user.Id, out var stored)) return Task.FromResult(SlimEmailUpdateResult.StampChanged);
+            lock (stored)
+            {
+                if ((stored.SecurityStamp ?? string.Empty) != expectedStamp) return Task.FromResult(SlimEmailUpdateResult.StampChanged);
+                (stored.Email, stored.EmailConfirmed, stored.SecurityStamp) = (newEmail, true, newStamp);
+                return Task.FromResult(SlimEmailUpdateResult.Updated);
+            }
         }
     }
 
@@ -157,8 +184,20 @@ public sealed class TestUserStore : ISlimUserStore
     {
         Id = u.Id, Email = u.Email, PasswordHash = u.PasswordHash, SecurityStamp = u.SecurityStamp,
         IsActive = u.IsActive, EmailConfirmed = u.EmailConfirmed, FailedLoginAttempts = u.FailedLoginAttempts,
-        LockoutEndUtc = u.LockoutEndUtc, TwoFactorEnabled = u.TwoFactorEnabled, PasswordChangeRequired = u.PasswordChangeRequired,
+        LockoutEndUtc = u.LockoutEndUtc, FailedSecondFactorAttempts = u.FailedSecondFactorAttempts,
+        SecondFactorLockoutEndUtc = u.SecondFactorLockoutEndUtc,
+        TwoFactorEnabled = u.TwoFactorEnabled, PasswordChangeRequired = u.PasswordChangeRequired,
     };
+}
+
+/// <summary>A host-registered shared state (in memory – shared between test instances by registering one object).</summary>
+public sealed class TestSharedState(TimeProvider time) : ISlimSharedState
+{
+    private readonly SlimIdentity.Services.SlimMemorySharedState _inner = new(time);
+
+    public Task<bool> TryAddAsync(string key, DateTimeOffset expiresAt, CancellationToken ct) => _inner.TryAddAsync(key, expiresAt, ct);
+
+    public Task<long> IncrementAsync(string key, TimeSpan window, CancellationToken ct) => _inner.IncrementAsync(key, window, ct);
 }
 
 public sealed class TestRefreshTokenStore(TimeProvider time) : ISlimRefreshTokenStore
@@ -259,6 +298,8 @@ public sealed class TestTwoFactorStore : ISlimTwoFactorStore
 public sealed record SentMail(string Kind, string To, string Payload)
 {
     public SlimEmailContext? Context { get; init; }
+    /// <summary>The link of a mail that carries a code and a link (registration).</summary>
+    public string? Link { get; init; }
 }
 
 /// <summary>Records all mails; tests wait for them because most are sent by the background queue.</summary>
@@ -268,10 +309,15 @@ public sealed class CapturingEmailSender : ISlimEmailSender
 
     public IReadOnlyCollection<SentMail> Mails => _mails.ToArray();
 
-    public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string link, CancellationToken ct) => Add(context, "verification", email, link);
+    public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string code, string link, CancellationToken ct)
+    {
+        _mails.Enqueue(new SentMail("verification", email, code) { Context = context, Link = link });
+        return Task.CompletedTask;
+    }
     public Task SendPasswordResetEmailAsync(SlimEmailContext context, string email, string link, CancellationToken ct) => Add(context, "password-reset", email, link);
     public Task SendTwoFactorCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) => Add(context, "two-factor", email, code);
-    public Task SendEmailChangeConfirmationAsync(SlimEmailContext context, string newEmail, string link, CancellationToken ct) => Add(context, "email-change", newEmail, link);
+    public Task SendEmailVerificationCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) => Add(context, "verification-code", email, code);
+    public Task SendEmailChangeCodeAsync(SlimEmailContext context, string newEmail, string code, CancellationToken ct) => Add(context, "email-change", newEmail, code);
     public Task SendEmailChangedNotificationAsync(SlimEmailContext context, string oldEmail, string newEmail, CancellationToken ct) => Add(context, "email-changed", oldEmail, newEmail);
     public Task SendAccountExistsEmailAsync(SlimEmailContext context, string email, CancellationToken ct) => Add(context, "account-exists", email, "");
     public Task SendLockoutNotificationEmailAsync(SlimEmailContext context, string email, DateTimeOffset lockoutEndUtc, CancellationToken ct) =>

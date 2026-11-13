@@ -1,21 +1,14 @@
 # Running behind a reverse proxy
 
-Typical production setup: nginx, Traefik, an Azure/AWS load balancer or a Kubernetes ingress terminates TLS and talks
-plain HTTP to the app.
-
-## What works anyway
-
-The auth cookie always gets the `Secure` flag (`CookieSecurePolicy.Always`), independent of the scheme the app sees.
-The browser talks HTTPS to the proxy, so the cookie is sent normally.
-
-## What needs forwarded headers
+When a proxy or load balancer terminates TLS, the auth cookie still gets `Secure` (`CookieSecurePolicy.Always`). The
+rest needs forwarded headers:
 
 | Without `UseForwardedHeaders()` | Effect |
 | :--- | :--- |
-| `Request.Scheme` is `http` | CSRF origin check fails (`403 csrf_validation_failed` on every cookie POST). SlimIdentity logs a warning pointing at this. |
+| `Request.Scheme` is `http` | CSRF origin check fails (`403 csrf_validation_failed` on cookie POSTs; log event 1004). |
 | OAuth `redirect_uri` is `http://…` | The identity provider rejects the login. |
 | `UseHttpsRedirection()` | Redirect loop, or `307` for POSTs. |
-| `RemoteIpAddress` is the proxy | All users share **one** rate-limit bucket – a handful of logins block everyone. |
+| `RemoteIpAddress` is the proxy | All users share one rate-limit bucket. |
 
 ```csharp
 builder.Services.Configure<ForwardedHeadersOptions>(o =>
@@ -30,22 +23,14 @@ var app = builder.Build();
 app.UseForwardedHeaders();      // first – before UseHttpsRedirection, UseRateLimiter, UseAuthentication
 ```
 
-- By default only **loopback** proxies are trusted. In Docker/Kubernetes the headers are otherwise ignored – SlimIdentity
-  then logs warning `8001` once per proxy address, so the mistake does not stay silent.
-- `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true` enables For + Proto but trusts **every** sender – only if the app is
-  reachable exclusively through the proxy.
-- The proxy must pass the original host (nginx: `proxy_set_header Host $host;`) or set `X-Forwarded-Host`, and set
-  `X-Forwarded-For` / `X-Forwarded-Proto` (nginx: `proxy_set_header X-Forwarded-Proto $scheme;`).
+- Only loopback proxies are trusted by default; ignored headers are logged once per proxy address (event 8001).
+- `ASPNETCORE_FORWARDEDHEADERS_ENABLED=true` trusts **every** sender – only if the app is reachable solely via the proxy.
+- The proxy must pass the original host (nginx `proxy_set_header Host $host;`) or `X-Forwarded-Host`, plus
+  `X-Forwarded-For` / `X-Forwarded-Proto`.
 - For the CSRF check alone, adding the public origin to `TrustedOrigins` also works.
-- The demo reads `ReverseProxy:KnownProxies`, `ReverseProxy:KnownNetworks` and `ReverseProxy:AllowedHosts` from
-  configuration ([`samples/SlimIdentity.Demo/Program.cs`](../../samples/SlimIdentity.Demo/Program.cs)).
+- The demo reads `ReverseProxy:KnownProxies`, `KnownNetworks` and `AllowedHosts` from configuration
+  ([`Program.cs`](../../samples/SlimIdentity.Demo/Program.cs)).
+- If the proxy maps `https://example.com/api/` to the app root, use `app.UsePathBase("/api")` (or forward
+  `X-Forwarded-Prefix`) so external-login callbacks are correct.
 
-## Path prefixes
-
-If the proxy maps `https://example.com/api/` to the app root, call `app.UsePathBase("/api")` (or forward
-`X-Forwarded-Prefix`) so that external-login callback URLs are generated correctly.
-
-## Multiple instances
-
-Shared key ring, same application name and secret, clocks, per-instance limits and the diagnostics for all of it:
-[Running several instances](multiple-instances.md).
+Several instances behind the proxy: [running several instances](multiple-instances.md).

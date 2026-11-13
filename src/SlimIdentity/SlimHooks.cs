@@ -55,26 +55,101 @@ public interface ISlimSignInGuard
     ValueTask<SlimVeto?> CheckAsync(SlimSignInContext context, CancellationToken ct);
 }
 
+/// <summary>What <see cref="ISlimSecondFactorPolicy"/> decides on.</summary>
+public sealed class SlimSecondFactorPolicyContext
+{
+    /// <summary>The account (current state from the store).</summary>
+    public required SlimUser User { get; init; }
+    /// <summary>The first factor of the sign-in (<c>amr</c>): <c>pwd</c>, <c>ext</c>, <c>passkey</c>, or the method of <see cref="ISlimAuthManager.SignInAsync"/>.</summary>
+    public required string AuthenticationMethod { get; init; }
+    /// <summary>The external provider of an <c>ext</c> sign-in, else <c>null</c>.</summary>
+    public string? Provider { get; init; }
+    /// <summary>The request; <c>null</c> when your own code calls <see cref="ISlimAuthManager"/> outside a request.</summary>
+    public HttpContext? HttpContext { get; init; }
+}
+
+/// <summary>
+/// Optional requirement of a second factor that is more than a mail code – for administrators, a tenant, a role, or
+/// everyone. Asked once when a sign-in starts; can only tighten. Register with <c>AddSecondFactorPolicy&lt;T&gt;()</c>
+/// (several are allowed – each one can require it).
+/// </summary>
+/// <remarks>
+/// A sign-in that requires it and has not proven an authenticator app, a recovery code or a passkey continues with step
+/// <c>setup_second_factor</c>: the account sets up an authenticator app (<c>/login/2fa/setup</c>, <c>/login/2fa/enable</c>)
+/// or signs in with a passkey instead, then confirms its recovery codes (<c>confirm_recovery_codes</c>). An account with
+/// mail codes passes them first. Applies from the next sign-in – including <see cref="ISlimAuthManager.SignInAsync"/> and
+/// external logins; running sessions, refresh and impersonation stay as they are.
+/// </remarks>
+public interface ISlimSecondFactorPolicy
+{
+    /// <summary><c>true</c> to require a second factor for this sign-in.</summary>
+    ValueTask<bool> IsRequiredAsync(SlimSecondFactorPolicyContext context, CancellationToken ct);
+}
+
+/// <summary>When <see cref="ISlimRegistrationGuard"/> is asked.</summary>
+public enum SlimRegistrationStage
+{
+    /// <summary>
+    /// <c>/register</c> starts: only the address and the request are known. Nothing has been looked up – decide from the
+    /// request alone, never from whether the address has an account, or the answer reveals it.
+    /// </summary>
+    Begin,
+    /// <summary>
+    /// The account is about to be created: the mailbox is proven (with mail), the profile is validated
+    /// (<see cref="SlimRegistrationContext.Profile"/>) and the first way to sign in is known
+    /// (<see cref="SlimRegistrationContext.CredentialKind"/>). A refusal stores nothing and keeps the flow open – a
+    /// corrected request with the same flow token can still complete it. Without mail, <c>/register</c> asks
+    /// <see cref="Begin"/> and then this stage, both before anything is looked up.
+    /// </summary>
+    Complete,
+    /// <summary>An automatic registration through an external login (<see cref="SlimRegistrationContext.Provider"/>), the provider verified the address.</summary>
+    External,
+}
+
+/// <summary>The first way to sign in of a new account (<see cref="SlimRegistrationContext.CredentialKind"/>).</summary>
+public static class SlimCredentialKinds
+{
+    /// <summary>A password.</summary>
+    public const string Password = "password";
+    /// <summary>A passkey (package <c>SlimIdentity.Passkeys</c>).</summary>
+    public const string Passkey = "passkey";
+    /// <summary>An external login; the provider is <see cref="SlimRegistrationContext.Provider"/>.</summary>
+    public const string External = "external";
+}
+
 /// <summary>What <see cref="ISlimRegistrationGuard"/> decides about.</summary>
 public sealed class SlimRegistrationContext
 {
     /// <summary>The normalized address of the new account.</summary>
     public required string Email { get; init; }
+    /// <summary>Start, completion or external auto-registration.</summary>
+    public required SlimRegistrationStage Stage { get; init; }
+    /// <summary>
+    /// The first way to sign in (<see cref="SlimCredentialKinds"/>) – from <see cref="SlimRegistrationStage.Complete"/>
+    /// on; <c>null</c> at <see cref="SlimRegistrationStage.Begin"/>.
+    /// </summary>
+    public string? CredentialKind { get; init; }
+    /// <summary>
+    /// The profile as validated by your <see cref="ISlimRegistrationProfile"/> (your typed object) – from
+    /// <see cref="SlimRegistrationStage.Complete"/> on; <c>null</c> before, or without a profile.
+    /// </summary>
+    public object? Profile { get; init; }
     /// <summary><c>null</c> for <c>/register</c>, the provider for an automatic registration through external login.</summary>
     public string? Provider { get; init; }
     /// <summary>
     /// The request (client IP, captcha header, invitation code, …); <c>null</c> when your own code calls
-    /// <see cref="ISlimAuthManager.RegisterAsync"/> outside a request (a background job, an import) – guards run there
+    /// <see cref="ISlimAuthManager.BeginRegistrationAsync"/> outside a request (a background job, an import) – guards run there
     /// too, so decide yourself whether such a call is trusted.
     /// </summary>
     public HttpContext? HttpContext { get; init; }
 }
 
 /// <summary>
-/// Optional veto against new accounts: company domains only, invitation codes, captcha checks. Asked before anything is
-/// looked up or stored – decide from the request only, never from whether the address already has an account, or the
-/// answer reveals it. A refused <c>/register</c> answers <c>403</c> with the veto's code; a refused external
-/// auto-registration redirects with <c>slim_error</c>. Register with <c>AddRegistrationGuard&lt;T&gt;()</c>.
+/// Optional veto against new accounts: company domains only, invitation codes, captcha checks, terms of business data
+/// in the profile. Asked at every <see cref="SlimRegistrationStage"/> of a registration – a guard that only cares about
+/// one stage returns <c>null</c> for the others. Nothing is stored before the last stage passed. A refusal answers
+/// <c>403</c> with the veto's code; a refused external auto-registration redirects with <c>slim_error</c>. Register
+/// with <c>AddRegistrationGuard&lt;T&gt;()</c>.
 /// </summary>
 public interface ISlimRegistrationGuard
 {

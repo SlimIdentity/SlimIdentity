@@ -44,7 +44,7 @@ facts.
   `SlimIdentity.Passkeys` (optional WebAuthn support), and `SlimIdentity.Testing` (conformance checks for store
   implementations). Copy-paste templates (EF Core, Dapper, mail, admin endpoints, TypeScript client) are in
   `samples/templates`.
-- Target: .NET 10. Status: 0.9.0 pre-release; four external review rounds, no professional audit.
+- Target: .NET 10. Status: 0.9.0 pre-release, no professional audit.
 
 ## Read first (in this order)
 
@@ -52,7 +52,7 @@ facts.
 2. Choose the relevant integration path: `docs/minimal-setup.md` for EF Core and browser cookies, or
    `docs/getting-started.md` for a custom store and bearer/JWT. These are alternatives, not sequential setup steps.
 3. `docs/security.md` – threat model, host responsibilities, **known limitations**.
-4. `docs/attack-scenarios.md` – every scenario with the test that is supposed to cover it.
+4. `docs/attack-scenarios.md` – the threat catalogue with the state of each scenario.
 5. `docs/architecture-manifest.md` – principles and design decisions with their reasons.
 6. `docs/endpoints.md`, `docs/configuration.md`, the guides in `docs/guides/` as needed.
 7. Then the code: `src/SlimIdentity` (start with `Endpoints/`, `Services/`, `Authentication/`, `Http/`, `Security/`),
@@ -68,12 +68,8 @@ applications); the public API surface as a whole.
 "Breakme" playground), vulnerabilities in ASP.NET Core or third-party packages, misconfigurations the documentation
 explicitly warns against.
 
-## Already reviewed – do not re-report
+## Already documented – do not re-report
 
-- Four external review rounds and seven further findings were fixed; each fix has a test (`ReviewRound1Tests.cs` to
-  `ReviewRound4Tests.cs` and the tests referenced in `docs/attack-scenarios.md`, marked **Fixed**; CHANGELOG sections
-  "Security (external review round …)"). Report such an
-  area again only if you can show that the fix is incomplete.
 - Everything under **Known limitations** in `docs/security.md` is a documented trade-off, not a finding – unless you
   find a cheap fix the documentation overlooks or the impact is worse than described.
 
@@ -83,14 +79,16 @@ Challenge them only if you can show a concrete attack or a concrete integration 
 
 - Refresh-token reuse always revokes the token family; two parallel refreshes with the same token end the session
   (no grace window – clients serialize, see `docs/guides/mobile-bearer.md`).
-- Rate limit and mail limit (3 per recipient and kind in 15 min, 5 for 2FA codes) are per instance; the account
-  lockout is in the database and global. No distributed limiter (gateway's job).
+- Rate limit is per instance; the mail limit (3 per recipient and kind in 15 min, 5 for sign-in codes) and single-use
+  codes live in `ISlimSharedState` (in memory per instance unless a shared one is registered); the account lockout is
+  in the database and global. No distributed limiter (gateway's job).
 - CSRF protection = custom header `X-CSRF` + `Origin` check, always on in cookie mode; `SameSite=Strict` by default.
 - No password composition rules (NIST SP 800-63B); length + optional `ISlimPasswordRule`.
 - TOTP uses HMAC-SHA1 (RFC 6238, authenticator compatibility).
-- The first proof of a mailbox (verified external login, password reset of an unconfirmed account) removes the
-  registrant's password, 2FA and sessions (pre-account hijacking defence). External logins are never linked
-  automatically to an account that has a password; linking is an explicit flow for signed-in users.
+- A password reset of an unconfirmed account (the first proof of its mailbox) removes the registrant's password, 2FA,
+  sessions, external logins and passkeys (pre-account hijacking defence). External logins are never linked
+  automatically to an account that has a password, or to an unconfirmed account with any way in
+  (`account_conflict`); linking is an explicit flow for signed-in users.
 - A provider's e-mail address counts as verified only with its own `email_verified=true` claim or when the host lists
   the provider in `ExternalLogin.TrustedEmailProviders`. The guides map Google's `email_verified` (the ASP.NET Core
   handler drops it) and allow trusting Entra ID only for a single tenant (nOAuth); Entra has no back-channel logout.
@@ -105,7 +103,7 @@ Challenge them only if you can show a concrete attack or a concrete integration 
 - A registration `profile` is refused unless the host registers an `ISlimRegistrationProfile`; only the object the
   hook returns reaches the store.
 - `AddNullEmailSender()` refuses to start in the `Production` environment. Deployment diagnostics (log events
-  8001–8004) only log, they never change behaviour.
+  8001–8006) only log, they never change behaviour.
 
 ## Part 1 – Security
 
@@ -126,7 +124,7 @@ Look for concrete defects, not general advice:
    from a token; cookie attributes; login CSRF; CORS derived from the origin policy.
 5. **Enumeration and timing** – answers, status codes, headers, mails and timing for unknown / existing / inactive /
    locked / unconfirmed accounts across all endpoints, including registration with a profile and passkey sign-in.
-6. **Brute force** – lockout arithmetic, counter atomicity, the per-account attempt gate, 2FA code guessing,
+6. **Brute force** – lockout arithmetic, counter atomicity, the compare-and-set on the security stamp, 2FA code guessing,
    rate-limit partitioning (IPv6, proxies).
 7. **Concurrency** – races between parallel requests (sign-in vs. password change, double consumption of codes,
    challenges and passkey assertions, registration, last-sign-in-method protection), and whether the store contracts

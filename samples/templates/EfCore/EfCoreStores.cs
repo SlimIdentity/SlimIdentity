@@ -45,9 +45,10 @@ public sealed class EfCoreUserStore(IdentityDb identity) : ISlimUserStore
             Email = newUser.Email,
             NormalizedEmail = newUser.Email.ToUpperInvariant(),
             PasswordHash = newUser.PasswordHash,
+            EmailConfirmed = newUser.EmailConfirmed,
             SecurityStamp = SlimUser.NewSecurityStamp(),
         };
-        // registration profile (ISlimRegistrationProfile / ISlimAuthManager.RegisterAsync): copy it into the entity or
+        // registration profile (ISlimRegistrationProfile / ISlimAuthManager.CreateUserAsync): copy it into the entity or
         // attach related entities here – the SaveChanges below writes them together with the account
         // if (newUser.Profile is SignUpProfile p) user.DisplayName = p.Name;
         db.Users.Add(user);
@@ -72,32 +73,41 @@ public sealed class EfCoreUserStore(IdentityDb identity) : ISlimUserStore
 
     // ---- sign-in bookkeeping: narrow, atomic updates (never write back a whole, possibly outdated user)
 
-    public async Task<int> IncrementFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct)
+    // Reserves an attempt before it is checked. Portable compare-and-set loop: of parallel attempts at the threshold exactly
+    // one reaches it (with raw SQL a row lock does the same: SELECT … FOR UPDATE, see the Dapper template).
+    public async Task<SlimAttemptReservation?> TryBeginAttemptAsync(SlimUser user, SlimAttemptRequest attempt, CancellationToken ct)
     {
         var id = Guid.Parse(user.Id);
-        // portable compare-and-set loop (with raw SQL: UPDATE … SET failed = failed + 1 … RETURNING failed)
-        while (true)
+        var password = attempt.Factor == SlimAttemptFactor.Password;
+        for (var i = 0; i < 20; i++)
         {
-            if (await db.Users.AsNoTracking().Where(u => u.Id == id).Select(u => (int?)u.FailedLoginAttempts).FirstOrDefaultAsync(ct) is not { } current)
-                return 0;   // deleted during the sign-in
-            var updated = await db.Users.Where(u => u.Id == id && u.FailedLoginAttempts == current)
-                .ExecuteUpdateAsync(s => s.SetProperty(u => u.FailedLoginAttempts, current + 1), ct);
-            if (updated == 1) return current + 1;
+            var state = await db.Users.AsNoTracking().Where(u => u.Id == id)
+                .Select(u => password
+                    ? new { Count = u.FailedLoginAttempts, End = u.LockoutEndUtc }
+                    : new { Count = u.FailedSecondFactorAttempts, End = u.SecondFactorLockoutEndUtc })
+                .FirstOrDefaultAsync(ct);
+            if (state is null) return null;   // deleted during the sign-in
+            if (attempt.IsLockedOut(state.End)) return SlimAttemptReservation.LockedOut(state.End!.Value);
+
+            int oldCount = state.Count, newCount = oldCount + 1;
+            DateTimeOffset? oldEnd = state.End, newEnd = attempt.NextLockoutEnd(newCount, oldEnd);
+            var updated = password
+                ? await db.Users.Where(u => u.Id == id && u.FailedLoginAttempts == oldCount && u.LockoutEndUtc == oldEnd)
+                    .ExecuteUpdateAsync(s => s.SetProperty(u => u.FailedLoginAttempts, newCount).SetProperty(u => u.LockoutEndUtc, newEnd), ct)
+                : await db.Users.Where(u => u.Id == id && u.FailedSecondFactorAttempts == oldCount && u.SecondFactorLockoutEndUtc == oldEnd)
+                    .ExecuteUpdateAsync(s => s.SetProperty(u => u.FailedSecondFactorAttempts, newCount).SetProperty(u => u.SecondFactorLockoutEndUtc, newEnd), ct);
+            if (updated == 1) return SlimAttemptReservation.Reserved(newCount);
         }
+        return null;   // permanent contention: the attempt is not checked
     }
 
-    public Task SetLockoutEndAsync(SlimUser user, DateTimeOffset? lockoutEndUtc, CancellationToken ct)
+    public Task ResetFailedAttemptsAsync(SlimUser user, SlimAttemptFactor factor, CancellationToken ct)
     {
         var id = Guid.Parse(user.Id);
-        return db.Users.Where(u => u.Id == id).ExecuteUpdateAsync(s => s.SetProperty(u => u.LockoutEndUtc, lockoutEndUtc), ct);
-    }
-
-    public Task ResetFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct)
-    {
-        var id = Guid.Parse(user.Id);
-        return db.Users.Where(u => u.Id == id).ExecuteUpdateAsync(s => s
-            .SetProperty(u => u.FailedLoginAttempts, 0)
-            .SetProperty(u => u.LockoutEndUtc, (DateTimeOffset?)null), ct);
+        var row = db.Users.Where(u => u.Id == id);
+        return factor == SlimAttemptFactor.Password
+            ? row.ExecuteUpdateAsync(s => s.SetProperty(u => u.FailedLoginAttempts, 0).SetProperty(u => u.LockoutEndUtc, (DateTimeOffset?)null), ct)
+            : row.ExecuteUpdateAsync(s => s.SetProperty(u => u.FailedSecondFactorAttempts, 0).SetProperty(u => u.SecondFactorLockoutEndUtc, (DateTimeOffset?)null), ct);
     }
 
     // conditional: a password change in the meantime wins over the transparent rehash
@@ -108,18 +118,17 @@ public sealed class EfCoreUserStore(IdentityDb identity) : ISlimUserStore
             .ExecuteUpdateAsync(s => s.SetProperty(u => u.PasswordHash, newHash), ct);
     }
 
-    public async Task UpdateSecurityStateAsync(SlimUser user, CancellationToken ct)
+    // compare-and-set on the whole stamp: a change based on an outdated copy is never written back over a newer one
+    public async Task<bool> UpdateSecurityStateAsync(SlimUser user, string expectedStamp, CancellationToken ct)
     {
         var id = Guid.Parse(user.Id);
         // Only security columns are touched – business data stays untouched.
-        await db.Users.Where(u => u.Id == id).ExecuteUpdateAsync(s => s
+        return await db.Users.Where(u => u.Id == id && (u.SecurityStamp ?? "") == expectedStamp).ExecuteUpdateAsync(s => s
             .SetProperty(u => u.PasswordHash, user.PasswordHash)
             .SetProperty(u => u.SecurityStamp, user.SecurityStamp)
             .SetProperty(u => u.EmailConfirmed, user.EmailConfirmed)
-            .SetProperty(u => u.FailedLoginAttempts, user.FailedLoginAttempts)
-            .SetProperty(u => u.LockoutEndUtc, user.LockoutEndUtc)
             .SetProperty(u => u.TwoFactorEnabled, user.TwoFactorEnabled)
-            .SetProperty(u => u.PasswordChangeRequired, user.PasswordChangeRequired), ct);
+            .SetProperty(u => u.PasswordChangeRequired, user.PasswordChangeRequired), ct) == 1;
     }
 
     // compare-and-set: a concurrent password or 2FA change is never written back over
@@ -130,22 +139,26 @@ public sealed class EfCoreUserStore(IdentityDb identity) : ISlimUserStore
             .ExecuteUpdateAsync(s => s.SetProperty(u => u.SecurityStamp, newStamp), ct) == 1;
     }
 
-    public async Task<bool> UpdateEmailAsync(SlimUser user, string newEmail, CancellationToken ct)
+    public async Task<SlimEmailUpdateResult> UpdateEmailAsync(SlimUser user, string newEmail, string expectedStamp, string newStamp, CancellationToken ct)
     {
         var id = Guid.Parse(user.Id);
         var normalized = newEmail.ToUpperInvariant();
         try
         {
             // the unique index on NormalizedEmail decides – no check-then-act race
-            return await db.Users.Where(u => u.Id == id).ExecuteUpdateAsync(s => s
+            return await db.Users.Where(u => u.Id == id && (u.SecurityStamp ?? "") == expectedStamp).ExecuteUpdateAsync(s => s
                 .SetProperty(u => u.Email, newEmail)
-                .SetProperty(u => u.NormalizedEmail, normalized), ct) == 1;
+                .SetProperty(u => u.NormalizedEmail, normalized)
+                .SetProperty(u => u.EmailConfirmed, true)
+                .SetProperty(u => u.SecurityStamp, newStamp), ct) == 1
+                ? SlimEmailUpdateResult.Updated
+                : SlimEmailUpdateResult.StampChanged;
         }
         catch (DbException)
         {
             // ExecuteUpdate bypasses SaveChanges: the provider's own exception arrives (PostgresException, SqlException, …),
             // not DbUpdateException. Report "taken" only if the unique index really is the reason.
-            if (await IsEmailTakenAsync(normalized, id, ct)) return false;
+            if (await IsEmailTakenAsync(normalized, id, ct)) return SlimEmailUpdateResult.EmailTaken;
             throw;
         }
     }
@@ -182,6 +195,8 @@ public sealed class EfCoreUserStore(IdentityDb identity) : ISlimUserStore
         EmailConfirmed = u.EmailConfirmed,
         FailedLoginAttempts = u.FailedLoginAttempts,
         LockoutEndUtc = u.LockoutEndUtc,
+        FailedSecondFactorAttempts = u.FailedSecondFactorAttempts,
+        SecondFactorLockoutEndUtc = u.SecondFactorLockoutEndUtc,
         TwoFactorEnabled = u.TwoFactorEnabled,
         PasswordChangeRequired = u.PasswordChangeRequired,
     };
@@ -428,7 +443,7 @@ public sealed class EfCorePasskeyStore(IdentityDb identity) : ISlimPasskeyStore
             CredentialIdHash = hash, CredentialId = passkey.CredentialId, UserId = Guid.Parse(passkey.UserId), PublicKey = passkey.PublicKey,
             SignCount = passkey.SignCount, LastChallengeAt = passkey.LastChallengeAt, Name = passkey.Name,
             CreatedUtc = passkey.CreatedUtc, LastUsedUtc = passkey.LastUsedUtc,
-            BackupEligible = passkey.BackupEligible, BackedUp = passkey.BackedUp,
+            BackupEligible = passkey.BackupEligible, BackedUp = passkey.BackedUp, UserHandle = passkey.UserHandle,
         };
         db.Passkeys.Add(row);
         try
@@ -481,6 +496,6 @@ public sealed class EfCorePasskeyStore(IdentityDb identity) : ISlimPasskeyStore
     {
         UserId = p.UserId.ToString(), CredentialId = p.CredentialId, PublicKey = p.PublicKey, SignCount = (uint)p.SignCount,
         LastChallengeAt = p.LastChallengeAt, Name = p.Name, CreatedUtc = p.CreatedUtc, LastUsedUtc = p.LastUsedUtc,
-        BackupEligible = p.BackupEligible, BackedUp = p.BackedUp,
+        BackupEligible = p.BackupEligible, BackedUp = p.BackedUp, UserHandle = p.UserHandle,
     };
 }

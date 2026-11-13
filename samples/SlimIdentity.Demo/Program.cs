@@ -114,7 +114,7 @@ app.MapGet("/api/playground/info", async (DemoSettings settings, IOptions<SlimId
         [.. (await schemes.GetRequestHandlerSchemesAsync()).Select(s => s.Name)]));   // the configured external providers
 app.MapGet("/api/playground/mailbox", (string address, DemoMailbox mailbox) => mailbox.For(address))
     .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy);
-foreach (var page in new[] { "/verify-email", "/reset-password", "/accept-invitation", "/confirm-email-change" })
+foreach (var page in new[] { "/verify-email", "/reset-password", "/accept-invitation" })
     app.MapGet(page, (IWebHostEnvironment env) => Results.File(Path.Combine(env.WebRootPath, "index.html"), "text/html"));
 
 app.MapGet("/api/hello", (ClaimsPrincipal user) =>
@@ -193,12 +193,11 @@ app.MapPost("/api/admin/users/{userId}/ban", async (string userId, ISlimUserStor
 
 // Invitation: create the user without password (+ your own business data), then hand out the link.
 // In a real app the link is mailed – the demo returns it.
-app.MapPost("/api/admin/invite", async (InviteRequest request, ISlimUserStore store, ISlimAuthManager auth, CancellationToken ct) =>
+app.MapPost("/api/admin/invite", async (InviteRequest request, ISlimAuthManager auth, CancellationToken ct) =>
     {
-        // CreateAsync returns null if the address is taken (unique index) – no separate check-then-act lookup
-        if (await store.CreateAsync(new SlimNewUser { Email = request.Email }, ct) is not { } user)
-            return Results.Conflict(new SlimStatusResponse("already_exists"));
-        var invitation = await auth.CreateInvitationAsync(user, ct: ct);
+        var created = await auth.CreateUserAsync(request.Email, ct: ct);
+        if (!created.Succeeded) return created.Failure;   // 400 invalid address, 409 email_taken
+        var invitation = await auth.CreateInvitationAsync(created.User, ct: ct);
         return Results.Ok(invitation);
     })
     .RequireAuthorization(p => p.RequireRole("Admin"))

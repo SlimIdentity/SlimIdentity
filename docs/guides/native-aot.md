@@ -1,19 +1,11 @@
 # Native AOT
 
-SlimIdentity is trimming- and Native-AOT-compatible (`IsAotCompatible`): all JSON serialization uses source
-generation, the endpoints use the minimal-API request delegate generator, and options binding uses the configuration
-binding generator. CI publishes the demo as Native AOT on every build, so regressions fail the build.
+SlimIdentity is trimming- and Native-AOT-compatible: source-generated JSON, the minimal-API request delegate generator
+and the configuration binding generator. The demo ([`samples/SlimIdentity.Demo`](../../samples/SlimIdentity.Demo))
+is a complete AOT example including OpenAPI.
 
-## What your application needs
-
-```xml
-<PropertyGroup>
-  <PublishAot>true</PublishAot>
-</PropertyGroup>
-```
-
-SlimIdentity registers its own `JsonSerializerContext` for its request/response types. Your own endpoint DTOs need one
-as well – anonymous types (`new { … }`) do not work under AOT:
+Set `<PublishAot>true</PublishAot>`. SlimIdentity registers its own `JsonSerializerContext`; your DTOs need one too
+(anonymous types do not work under AOT):
 
 ```csharp
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.TypeInfoResolverChain.Add(AppJsonContext.Default));
@@ -26,20 +18,6 @@ internal sealed record HelloResponse(string Message);
 internal sealed partial class AppJsonContext : JsonSerializerContext;
 ```
 
-The demo ([`samples/SlimIdentity.Demo`](../../samples/SlimIdentity.Demo)) is a complete AOT example including
-OpenAPI.
-
-## Store implementations
-
-- **EF Core:** Native AOT support is still limited (precompiled queries); check the EF Core documentation for your version.
-- **Dapper:** uses reflection; use [Dapper.AOT](https://aot.dapperlib.dev/) or hand-written ADO.NET mapping.
-- In-memory, REST or hand-written ADO.NET stores work without restrictions.
-
-## Checking your app
-
-```bash
-dotnet publish -c Release -r linux-x64
-```
-
-Trimming/AOT warnings (IL2xxx, IL3xxx) during publish point to code that may break at runtime. SlimIdentity itself
-produces none.
+Stores: EF Core's AOT support is limited (precompiled queries – check your version); Dapper needs
+[Dapper.AOT](https://aot.dapperlib.dev/); hand-written ADO.NET, REST or in-memory stores work. Check with
+`dotnet publish -c Release -r linux-x64`: IL2xxx/IL3xxx warnings point to code that may break at runtime.

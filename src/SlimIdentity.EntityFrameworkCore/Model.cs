@@ -26,10 +26,14 @@ public interface ISlimUserEntity<TKey> where TKey : IEquatable<TKey>, IParsable<
     bool IsActive { get; set; }
     /// <summary>The address has been proven.</summary>
     bool EmailConfirmed { get; set; }
-    /// <summary>Consecutive failed sign-ins.</summary>
+    /// <summary>Failed password attempts since the last success or reset.</summary>
     int FailedLoginAttempts { get; set; }
-    /// <summary>End of the current lockout.</summary>
+    /// <summary>End of the current password lockout.</summary>
     DateTimeOffset? LockoutEndUtc { get; set; }
+    /// <summary>Failed second-factor attempts since the last success or reset.</summary>
+    int FailedSecondFactorAttempts { get; set; }
+    /// <summary>End of the current second-factor lockout.</summary>
+    DateTimeOffset? SecondFactorLockoutEndUtc { get; set; }
     /// <summary>Second factor required.</summary>
     bool TwoFactorEnabled { get; set; }
     /// <summary>The password was set by an administrator and must be changed at the next sign-in.</summary>
@@ -109,6 +113,8 @@ public sealed class SlimPasskeyEntity<TKey>
     public TKey UserId { get; set; } = default!;
     /// <summary>COSE public key.</summary>
     public byte[] PublicKey { get; set; } = [];
+    /// <summary>WebAuthn user handle (<c>null</c> for passkeys registered before it was stored).</summary>
+    public byte[]? UserHandle { get; set; }
     /// <summary>Signature counter.</summary>
     public long SignCount { get; set; }
     /// <summary>May be synced to other devices (WebAuthn flag BE).</summary>
@@ -125,13 +131,27 @@ public sealed class SlimPasskeyEntity<TKey>
     public DateTimeOffset? LastUsedUtc { get; set; }
 }
 
+/// <summary>
+/// A single-use marker or a counter of <see cref="ISlimSharedState"/>. Table <c>SlimSharedState</c>; expired rows are
+/// deleted now and then by the store itself.
+/// </summary>
+public sealed class SlimSharedStateEntity
+{
+    /// <summary>Hashed key (64 hex characters) – primary key.</summary>
+    public string Key { get; set; } = string.Empty;
+    /// <summary>Counter value (0 for markers).</summary>
+    public long Count { get; set; }
+    /// <summary>Expiry in unix milliseconds (comparable in every provider).</summary>
+    public long ExpiresAt { get; set; }
+}
+
 /// <summary>Model configuration: <c>modelBuilder.ApplySlimIdentity&lt;AppUser, Guid&gt;()</c> in <c>OnModelCreating</c>.</summary>
 public static class SlimModelBuilderExtensions
 {
     /// <summary>
     /// Configures the SlimIdentity columns of <typeparamref name="TUser"/> (lengths, unique index on
     /// <c>NormalizedEmail</c>) and adds the tables <c>SlimRefreshTokens</c>, <c>SlimSessions</c>, <c>SlimRecoveryCodes</c>,
-    /// <c>SlimExternalLogins</c> and <c>SlimPasskeys</c> with a cascading foreign key to your users. Your own configuration of
+    /// <c>SlimExternalLogins</c> and <c>SlimPasskeys</c> with a cascading foreign key to your users, plus <c>SlimSharedState</c>. Your own configuration of
     /// <typeparamref name="TUser"/> (table name, business columns) stays as it is.
     /// </summary>
     public static ModelBuilder ApplySlimIdentity<TUser, TKey>(this ModelBuilder modelBuilder)
@@ -199,9 +219,18 @@ public static class SlimModelBuilderExtensions
             e.Property(x => x.CredentialIdHash).HasMaxLength(32);
             e.Property(x => x.CredentialId).HasMaxLength(1023);
             e.Property(x => x.PublicKey).HasMaxLength(1024);
+            e.Property(x => x.UserHandle).HasMaxLength(64);
             e.Property(x => x.Name).HasMaxLength(64);
             e.HasIndex(x => x.UserId);
             e.HasOne<TUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<SlimSharedStateEntity>(e =>
+        {
+            e.ToTable("SlimSharedState");
+            e.HasKey(x => x.Key);
+            e.Property(x => x.Key).HasMaxLength(128);
+            e.HasIndex(x => x.ExpiresAt);
         });
 
         return modelBuilder;

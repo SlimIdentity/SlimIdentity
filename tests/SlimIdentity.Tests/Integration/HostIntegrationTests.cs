@@ -6,137 +6,10 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
-using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.Extensions.DependencyInjection;
 using SlimIdentity.Tests.Infrastructure;
 
 namespace SlimIdentity.Tests.Integration;
-
-public sealed class ExternalLoginTests
-{
-    private static TestAppOptions WithProvider(params Claim[] claims) => WithProvider(refreshTokens: true, claims);
-
-    private static TestAppOptions WithProvider(bool refreshTokens, params Claim[] claims) => new()
-    {
-        RefreshTokens = refreshTokens,
-        Builder = b =>
-        {
-            b.AddExternalLoginStore<TestExternalLoginStore>(ServiceLifetime.Singleton);
-            b.Authentication.AddScheme<FakeOAuthOptions, FakeOAuthHandler>("Fake", o => o.Claims = [.. claims]);
-        },
-    };
-
-    /// <summary>Browser navigation: /auth/login/Fake → provider → callback → returnUrl.</summary>
-    private static async Task<Uri> NavigateAsync(ApiClient browser, string query)
-    {
-        var challenge = await browser.GetAsync($"/auth/login/Fake?{query}");
-        Assert.Equal(HttpStatusCode.Redirect, challenge.StatusCode);
-        var callback = await browser.GetAsync(challenge.Headers.Location!.OriginalString);
-        Assert.Equal(HttpStatusCode.Redirect, callback.StatusCode);
-        return new Uri(new Uri("https://localhost"), callback.Headers.Location!);
-    }
-
-    [Fact]
-    public async Task New_external_user_is_created_and_bearer_clients_exchange_a_one_time_code()
-    {
-        await using var app = await TestApp.StartAsync(WithProvider(
-            new Claim(ClaimTypes.NameIdentifier, "ext-123"), new Claim(ClaimTypes.Email, "social@test.local"), new Claim("email_verified", "true")));
-        var browser = app.CreateClient();
-
-        var (verifier, challenge) = ReviewRound1Tests.Pkce();
-        var target = await NavigateAsync(browser, $"useCookies=false&returnUrl=/done&code_challenge={challenge}");
-        Assert.Equal("/done", target.AbsolutePath);
-        var code = QueryHelpers.ParseQuery(target.Fragment.TrimStart('#'))["code"].ToString();
-        Assert.DoesNotContain("accessToken", target.ToString());   // tokens never travel in URLs
-
-        var tokens = await app.CreateClient().PostJsonAsync("/auth/login/external/exchange", new { code, codeVerifier = verifier });
-        Assert.False(string.IsNullOrEmpty(tokens.Str("accessToken")));
-        Assert.True(app.Users.Get("social@test.local").EmailConfirmed);
-    }
-
-    [Theory]
-    [InlineData(true)]    // consumed atomically via ISlimRefreshTokenStore
-    [InlineData(false)]   // in-memory fallback
-    public async Task The_exchange_code_works_only_once(bool refreshTokens)
-    {
-        await using var app = await TestApp.StartAsync(WithProvider(refreshTokens,
-            new Claim(ClaimTypes.NameIdentifier, "ext-123"), new Claim(ClaimTypes.Email, "social@test.local"), new Claim("email_verified", "true")));
-
-        var (verifier, challenge) = ReviewRound1Tests.Pkce();
-        var target = await NavigateAsync(app.CreateClient(), $"useCookies=false&returnUrl=/done&code_challenge={challenge}");
-        var code = QueryHelpers.ParseQuery(target.Fragment.TrimStart('#'))["code"].ToString();
-
-        await app.CreateClient().PostJsonAsync("/auth/login/external/exchange", new { code, codeVerifier = verifier });
-        await app.CreateClient().PostJsonAsync("/auth/login/external/exchange", new { code, codeVerifier = verifier }, HttpStatusCode.Unauthorized);
-    }
-
-    [Fact]
-    public async Task Unverified_email_of_an_existing_account_is_not_linked()
-    {
-        await using var app = await TestApp.StartAsync(WithProvider(
-            new Claim(ClaimTypes.NameIdentifier, "ext-attacker"), new Claim(ClaimTypes.Email, TestApp.UserEmail)));
-
-        var target = await NavigateAsync(app.CreateClient(), "useCookies=true&returnUrl=/done");
-
-        Assert.Equal("account_conflict", QueryHelpers.ParseQuery(target.Query)["slim_error"].ToString());
-    }
-
-    [Fact]
-    public async Task Verified_email_is_linked_to_an_account_without_password_and_cookie_mode_sets_the_session_cookie()
-    {
-        // only accounts without an own password are joined automatically (see ExternalLinkTests for the others)
-        await using var app = await TestApp.StartAsync(WithProvider(
-            new Claim(ClaimTypes.NameIdentifier, "ext-user"), new Claim(ClaimTypes.Email, "no-password@test.local"), new Claim("email_verified", "true")));
-        app.Users.Seed("no-password@test.local", password: null);
-        var browser = app.CreateClient();
-
-        var target = await NavigateAsync(browser, "useCookies=true&returnUrl=/done");
-
-        Assert.Equal("/done", target.AbsolutePath);
-        Assert.True(browser.Cookies.ContainsKey("SlimAuth"));
-        Assert.Equal(HttpStatusCode.OK, (await browser.GetAsync("/api/hello")).StatusCode);
-    }
-
-    [Fact]
-    public async Task Pre_registered_unverified_account_is_taken_over_by_the_verified_owner_not_shared()
-    {
-        // Attack scenario E8 (pre-account hijacking): the attacker registers the victim's address with an own password
-        // before the victim ever signs up. The victim later signs in with a provider that has verified the address.
-        const string victim = "victim@test.local";
-        await using var app = await TestApp.StartAsync(WithProvider(
-            new Claim(ClaimTypes.NameIdentifier, "google-victim"), new Claim(ClaimTypes.Email, victim), new Claim("email_verified", "true")));
-
-        await app.CreateClient().PostJsonAsync("/auth/register", new { email = victim, password = "Attacker-Pass-123" });
-        var attacker = await app.LoginBearerAsync(victim, "Attacker-Pass-123");   // unconfirmed accounts can sign in by default
-
-        var browser = app.CreateClient();
-        await NavigateAsync(browser, "useCookies=true&returnUrl=/done");
-        Assert.Equal(HttpStatusCode.OK, (await browser.GetAsync("/api/hello")).StatusCode);   // the victim is in
-
-        var attackerClient = app.CreateClient();
-        attackerClient.BearerToken = attacker.AccessToken;
-        Assert.Equal(HttpStatusCode.Unauthorized, (await attackerClient.GetAsync("/api/hello")).StatusCode);   // running session ended
-        await app.CreateClient().PostJsonAsync("/auth/login", new { email = victim, password = "Attacker-Pass-123" }, HttpStatusCode.Unauthorized);
-        await app.CreateClient().PostJsonAsync("/auth/refresh", new { refreshToken = attacker.RefreshToken }, HttpStatusCode.Unauthorized);
-    }
-
-    [Fact]
-    public async Task Linking_a_confirmed_account_keeps_its_password()
-    {
-        await using var app = await TestApp.StartAsync(WithProvider(
-            new Claim(ClaimTypes.NameIdentifier, "ext-user"), new Claim(ClaimTypes.Email, TestApp.UserEmail), new Claim("email_verified", "true")));
-        await NavigateAsync(app.CreateClient(), "useCookies=true&returnUrl=/done");
-        await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword);
-    }
-
-    [Fact]
-    public async Task Foreign_return_urls_are_rejected()
-    {
-        await using var app = await TestApp.StartAsync(WithProvider(new Claim(ClaimTypes.NameIdentifier, "x")));
-        var response = await app.CreateClient().GetAsync("/auth/login/Fake?returnUrl=https://evil.example/");
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-    }
-}
 
 public sealed class HostEndpointTests
 {
@@ -218,6 +91,7 @@ public sealed class HostEndpointTests
     public async Task Sudo_policy_requires_an_elevated_session_that_expires()
     {
         await using var app = await TestApp.StartAsync(HostSetup());
+        app.Time.Advance(TimeSpan.FromDays(30));   // the window follows the registered clock, not the system clock
         var tokens = await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword);
         var client = app.CreateClient();
         client.BearerToken = tokens.AccessToken;
@@ -233,7 +107,7 @@ public sealed class HostEndpointTests
     }
 
     [Fact]
-    public async Task R7_password_confirmation_on_host_endpoints_counts_towards_the_lockout()
+    public async Task Password_confirmation_on_host_endpoints_counts_towards_the_lockout()
     {
         await using var app = await TestApp.StartAsync(HostSetup());
         var client = app.CreateClient();
@@ -249,13 +123,41 @@ public sealed class HostEndpointTests
     }
 
     [Fact]
-    public async Task Q3_a_session_is_never_elevated_to_another_account()
+    public async Task A_session_is_never_elevated_to_another_account()
     {
         await using var app = await TestApp.StartAsync(HostSetup());
         var client = app.CreateClient();
         client.BearerToken = (await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword)).AccessToken;
 
         Assert.Equal("\"refused\"", await (await client.PostAsync("/api/sudo-wrong-user")).Content.ReadAsStringAsync());
+    }
+
+    /// <summary>A host that binds API keys to users ("personal access tokens" with a narrow scope).</summary>
+    private sealed class PersonalApiKeys(ISlimUserStore users) : ISlimApiKeyStore
+    {
+        public static readonly (string Key, string Hash) Key = SlimApiKeys.Generate("pat");
+
+        public async Task<IReadOnlyCollection<Claim>?> ValidateApiKeyAsync(string keyHash, CancellationToken ct) =>
+            keyHash == Key.Hash
+                ? [new Claim(SlimClaimTypes.UserId, (await users.FindByEmailAsync(TestApp.UserEmail, ct))!.Id), new Claim("scope", "reports:read")]
+                : null;
+    }
+
+    [Theory]
+    [InlineData("/auth/2fa/forget-all-devices")]
+    [InlineData("/auth/logout-all")]
+    [InlineData("/auth/2fa/setup")]
+    public async Task An_api_key_cannot_act_as_the_user_on_the_account_endpoints(string path)
+    {
+        await using var app = await TestApp.StartAsync(new TestAppOptions
+        {
+            Builder = b => b.AddApiKeyStore<PersonalApiKeys>(ServiceLifetime.Singleton),
+        });
+
+        var response = await app.CreateClient().SendAsync(HttpMethod.Post, path, new { },
+            new Dictionary<string, string> { [SlimIdentityDefaults.ApiKeyHeaderName] = PersonalApiKeys.Key.Key });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);   // API keys are machine-to-machine, never a user session
     }
 }
 

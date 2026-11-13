@@ -58,11 +58,11 @@ public sealed class SlimIdentityBuilder
 
     /// <summary>
     /// Runs without a mail server (internal services where an administrator creates accounts): no mail is ever sent and
-    /// no sender is required. Not mapped: <c>/forgot-password</c>, <c>/verify-email</c>, <c>/resend-verification</c>,
-    /// <c>/change-email</c>, <c>/confirm-email-change</c>, <c>/2fa/enable-email</c> and – unless
+    /// no sender is required. Not mapped: <c>/forgot-password</c>, <c>/register/verify</c>, <c>/register/password</c>,
+    /// <c>/change-email</c>, <c>/change-email/confirm</c>, <c>/2fa/enable-email</c> and – unless
     /// <paramref name="allowSelfRegistration"/> – <c>/register</c>. Lockout and "account exists" notices are dropped.
     /// Passwords are changed with <c>/change-password</c>; forgotten passwords are reset by an administrator
-    /// (<see cref="ISlimAuthManager"/>), whose links use <c>/reset-password</c> and <c>/invitation/accept</c>.
+    /// (<see cref="ISlimAuthManager"/>), whose reset and invitation links continue at <c>/flow</c>.
     /// </summary>
     /// <param name="allowSelfRegistration">Keeps <c>/register</c> (accounts without a confirmed address).</param>
     public SlimIdentityBuilder WithoutEmail(bool allowSelfRegistration = false)
@@ -70,7 +70,6 @@ public sealed class SlimIdentityBuilder
         Services.PostConfigure<SlimIdentityOptions>(o =>
         {
             o.Email.Enabled = false;
-            o.Endpoints.EnableEmailVerification = false;
             o.Endpoints.EnableChangeEmail = false;
             if (!allowSelfRegistration) o.Endpoints.EnableRegistration = false;
         });
@@ -119,7 +118,6 @@ public sealed class SlimIdentityBuilder
             names = new SlimBackChannelProviders();
             Services.AddSingleton(names);
             Services.TryAddSingleton<SlimBackChannelConfigurations>();
-            Services.TryAddSingleton<SlimLocalNonceRegistry>();
             Services.TryAddScoped<SlimBackChannelLogoutHandler>();
         }
         names.Names.Add(provider);
@@ -170,6 +168,17 @@ public sealed class SlimIdentityBuilder
         return this;
     }
 
+    /// <summary>
+    /// Requires a second factor for some or all sign-ins (see <see cref="ISlimSecondFactorPolicy"/>); needs a
+    /// <see cref="ISlimTwoFactorStore"/>. Can be called several times – each policy can require it.
+    /// </summary>
+    public SlimIdentityBuilder AddSecondFactorPolicy<[DynamicallyAccessedMembers(Ctors)] TPolicy>(ServiceLifetime lifetime = ServiceLifetime.Scoped)
+        where TPolicy : class, ISlimSecondFactorPolicy
+    {
+        Services.TryAddEnumerable(ServiceDescriptor.Describe(typeof(ISlimSecondFactorPolicy), typeof(TPolicy), lifetime));
+        return this;
+    }
+
     /// <summary>Adds a veto against new accounts (see <see cref="ISlimRegistrationGuard"/>). Can be called several times.</summary>
     public SlimIdentityBuilder AddRegistrationGuard<[DynamicallyAccessedMembers(Ctors)] TGuard>(ServiceLifetime lifetime = ServiceLifetime.Scoped)
         where TGuard : class, ISlimRegistrationGuard
@@ -199,6 +208,13 @@ public sealed class SlimIdentityBuilder
     }
 
     // ---------------------------------------------------------------- optional capabilities
+
+    /// <summary>
+    /// Shares single-use markers and mail counters between instances (see <see cref="ISlimSharedState"/>). Without it they
+    /// are kept in memory per instance – fine for one instance.
+    /// </summary>
+    public SlimIdentityBuilder AddSharedState<[DynamicallyAccessedMembers(Ctors)] TState>(ServiceLifetime lifetime = ServiceLifetime.Scoped)
+        where TState : class, ISlimSharedState => Register<ISlimSharedState, TState>(lifetime);
 
     /// <summary>Activates <c>/refresh</c> and refresh tokens in bearer responses.</summary>
     public SlimIdentityBuilder AddRefreshTokenStore<[DynamicallyAccessedMembers(Ctors)] TStore>(ServiceLifetime lifetime = ServiceLifetime.Scoped)
@@ -230,7 +246,6 @@ public sealed class SlimIdentityBuilder
     {
         Register<ISlimExternalLoginStore, TStore>(lifetime);
         Services.TryAddScoped<SlimExternalLoginHandlers>();
-        Services.TryAddSingleton<SlimLocalNonceRegistry>();
         Services.Configure<AuthenticationOptions>(o => o.DefaultSignInScheme ??= SlimIdentityDefaults.ExternalScheme);
         return this;
     }
@@ -304,8 +319,9 @@ public sealed class SlimIdentityBuilder
     /// host name) is written to the <see cref="SlimClaimTypes.Tenant"/> claim at sign-in and compared on every request –
     /// before any validation interval and also for access tokens with
     /// <see cref="SlimTokenOptions.ValidateSecurityStampOnEachRequest"/> = false. A cookie or token presented to another
-    /// tenant is rejected. Required with a store per tenant (see the multi-tenancy guide); keep the selector synchronous
-    /// and in memory.
+    /// tenant is rejected. Links, flow, refresh and other Data Protection tokens get the tenant in their purpose and do not
+    /// decrypt in another tenant. Required with a store per tenant (see the multi-tenancy guide); keep the selector
+    /// synchronous and in memory.
     /// </summary>
     /// <param name="keySelector">Returns the tenant of a request; <c>null</c> for requests outside any tenant.</param>
     public SlimIdentityBuilder UseTenantKey(Func<HttpContext, string?> keySelector)

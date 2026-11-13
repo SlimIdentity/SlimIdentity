@@ -68,10 +68,9 @@ internal sealed class SlimTwoFactorHandlers(
 
         // the first code is consumed as well – it cannot be replayed for a sign-in afterwards
         if (!await twoFactor.VerifyTotpAsync(user, payload.Secret, request!.Code, ct, newSecret: true))
-            return SlimResults.BadRequest("invalid_two_factor_code", "The code is invalid.");
+            return SlimResults.BadRequest(SlimErrorCodes.InvalidTwoFactorCode, "The code is invalid.");
 
-        await twoFactor.SetSecretAsync(user, payload.Secret, ct);
-        return await ActivateAsync(user, SlimLoginHandlers.MethodTotp, ct);
+        return await ActivateAsync(user, SlimLoginHandlers.MethodTotp, payload.Secret, ct);
     }
 
     // POST /2fa/enable-email
@@ -80,8 +79,7 @@ internal sealed class SlimTwoFactorHandlers(
         var (user, error) = await ConfirmPasswordAsync(request, ct, requireConfirmedAddress: true);
         if (user is null) return error!;
 
-        await twoFactor.RemoveSecretAsync(user, ct);
-        return await ActivateAsync(user, SlimLoginHandlers.MethodEmail, ct);
+        return await ActivateAsync(user, SlimLoginHandlers.MethodEmail, authenticatorSecret: null, ct);
     }
 
     // POST /2fa/disable
@@ -90,11 +88,14 @@ internal sealed class SlimTwoFactorHandlers(
         var (user, error) = await ConfirmPasswordAsync(request, ct);
         if (user is null) return error!;
 
+        var written = await store.TryWriteSecurityStateAsync(user, u =>
+        {
+            u.TwoFactorEnabled = false;
+            u.SecurityStamp = SlimUser.NewSecurityStamp();
+        }, ct);
+        if (!written) return SlimResults.ConcurrentChange();
         await twoFactor.RemoveSecretAsync(user, ct);
         await twoFactor.RemoveRecoveryCodesAsync(user, ct);
-        user.TwoFactorEnabled = false;
-        user.SecurityStamp = SlimUser.NewSecurityStamp();
-        await store.UpdateSecurityStateAsync(user, ct);
         await authManager.RevokeSessionsAsync(user.Id, SlimAuthManager.CurrentSessionId(Http.User), ct);
         Log.TwoFactorDisabled(logger, user.Id);
         await hooks.RaiseAsync(SlimEventTypes.TwoFactorDisabled, user.Id, reason: "user", ct: ct);
@@ -108,7 +109,7 @@ internal sealed class SlimTwoFactorHandlers(
     {
         var (user, error) = await ConfirmPasswordAsync(request, ct);
         if (user is null) return error!;
-        if (!user.TwoFactorEnabled) return SlimResults.BadRequest("two_factor_disabled", "Two-factor authentication is not enabled.");
+        if (!user.TwoFactorEnabled) return SlimResults.BadRequest(SlimErrorCodes.TwoFactorDisabled, "Two-factor authentication is not enabled.");
 
         var codes = await twoFactor.RegenerateRecoveryCodesAsync(user, ct);
         return Results.Ok(new SlimRecoveryCodesResponse(codes, null));
@@ -147,16 +148,21 @@ internal sealed class SlimTwoFactorHandlers(
     /// </summary>
     private IResult? UnconfirmedAddress(SlimUser user) =>
         O.Email.Enabled && !user.EmailConfirmed
-            ? SlimResults.Status("email_not_confirmed", "Confirm your e-mail address before setting up two-factor authentication.", StatusCodes.Status403Forbidden)
+            ? SlimResults.Status(SlimErrorCodes.EmailNotConfirmed, "Confirm your e-mail address before setting up two-factor authentication.", StatusCodes.Status403Forbidden)
             : null;
 
-    private async Task<IResult> ActivateAsync(SlimUser user, string method, CancellationToken ct)
+    private async Task<IResult> ActivateAsync(SlimUser user, string method, string? authenticatorSecret, CancellationToken ct)
     {
+        var written = await store.TryWriteSecurityStateAsync(user, u =>
+        {
+            u.TwoFactorEnabled = true;
+            u.SecurityStamp = SlimUser.NewSecurityStamp(); // sign out all other sessions
+        }, ct);
+        if (!written) return SlimResults.ConcurrentChange();
+        // stored only once the state is written; the e-mail method removes a secret left from an earlier setup
+        if (authenticatorSecret is null) await twoFactor.RemoveSecretAsync(user, ct);
+        else await twoFactor.SetSecretAsync(user, authenticatorSecret, ct);
         var codes = await twoFactor.RegenerateRecoveryCodesAsync(user, ct);
-
-        user.TwoFactorEnabled = true;
-        user.SecurityStamp = SlimUser.NewSecurityStamp(); // sign out all other sessions
-        await store.UpdateSecurityStateAsync(user, ct);
         await authManager.RevokeSessionsAsync(user.Id, SlimAuthManager.CurrentSessionId(Http.User), ct);
         Log.TwoFactorEnabled(logger, user.Id);
         await hooks.RaiseAsync(SlimEventTypes.TwoFactorEnabled, user.Id, method, ct: ct);

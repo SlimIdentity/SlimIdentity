@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace SlimIdentity.Contracts;
 
 // Wire types of the /auth endpoints. Property names are serialized in camelCase.
@@ -27,17 +29,17 @@ public sealed record SlimLoginRequest(string Email, string Password, bool Rememb
 }
 
 /// <summary>Body of <c>POST /auth/login/2fa</c>: either <see cref="Code"/> (TOTP / e-mail code) or <see cref="RecoveryCode"/>.</summary>
-/// <param name="PreAuthToken">Token from the <c>requires_two_factor</c> answer of <c>/auth/login</c>.</param>
+/// <param name="FlowToken"><c>flowToken</c> of an <c>action_required</c> answer with <c>second_factor</c> as first step.</param>
 /// <param name="Code">6-digit TOTP or e-mail code.</param>
 /// <param name="RecoveryCode">One of the recovery codes (single use).</param>
 /// <param name="RememberDevice">
 /// Skip the second factor on this device for <c>TwoFactor.RememberDeviceLifetime</c> (only if the feature is enabled).
 /// </param>
-public sealed record SlimTwoFactorLoginRequest(string PreAuthToken, string? Code = null, string? RecoveryCode = null, bool RememberDevice = false)
+public sealed record SlimTwoFactorLoginRequest(string FlowToken, string? Code = null, string? RecoveryCode = null, bool RememberDevice = false)
 {
     private bool PrintMembers(System.Text.StringBuilder builder)
     {
-        builder.Append("PreAuthToken = ").Append(SlimRedaction.Mask(PreAuthToken));
+        builder.Append("FlowToken = ").Append(SlimRedaction.Mask(FlowToken));
         builder.Append(", Code = ").Append(SlimRedaction.Mask(Code));
         builder.Append(", RecoveryCode = ").Append(SlimRedaction.Mask(RecoveryCode));
         builder.Append(", RememberDevice = ").Append(RememberDevice);
@@ -68,57 +70,121 @@ public sealed record SlimLogoutRequest(string? RefreshToken = null)
 }
 
 /// <summary>Body of <c>POST /auth/register</c>.</summary>
-/// <param name="Email">E-mail address of the new account.</param>
-/// <param name="Password">Password according to the password policy.</param>
-/// <param name="Profile">Optional business data, validated by the host's <see cref="ISlimRegistrationProfile"/>.</param>
-public sealed record SlimRegisterRequest(string Email, string Password, JsonElement? Profile = null)
+/// <param name="Email">
+/// E-mail address of the new account. Without mail (<c>WithoutEmail(allowSelfRegistration: true)</c>) the sign-in name.
+/// </param>
+/// <param name="Password">
+/// Without mail only: the password according to the password policy. With mail it follows at
+/// <c>POST /auth/register/password</c>, once the mailbox is proven.
+/// </param>
+/// <param name="Profile">
+/// Without mail only: business data, validated by the host's <see cref="ISlimRegistrationProfile"/>. With mail it is sent
+/// with the password.
+/// </param>
+/// <param name="RememberMe">With mail: persistent session once the registration completes.</param>
+public sealed record SlimRegisterRequest(string Email, string? Password = null, JsonElement? Profile = null, bool RememberMe = false)
 {
     private bool PrintMembers(System.Text.StringBuilder builder)
     {
         builder.Append("Email = ").Append(Email);
         builder.Append(", Password = ").Append(SlimRedaction.Mask(Password));
         builder.Append(", Profile = ").Append(Profile);
+        builder.Append(", RememberMe = ").Append(RememberMe);
         return true;
     }
 }
 
-/// <summary>Body of <c>POST /auth/verify-email</c>.</summary>
-/// <param name="Token">Token from the verification mail.</param>
-public sealed record SlimVerifyEmailRequest(string Token)
+/// <summary>
+/// Body of <c>POST /auth/register/password</c>: step <c>set_credential</c> with a password – creates the account of a
+/// registration, or replaces the password after a reset link.
+/// </summary>
+/// <param name="FlowToken"><c>flowToken</c> at step <c>set_credential</c>.</param>
+/// <param name="Password">Password according to the password policy.</param>
+/// <param name="Profile">
+/// Optional business data of a registration, validated by the host's <see cref="ISlimRegistrationProfile"/>. Refused for
+/// an existing account.
+/// </param>
+public sealed record SlimRegisterPasswordRequest(string FlowToken, string Password, JsonElement? Profile = null)
 {
     private bool PrintMembers(System.Text.StringBuilder builder)
     {
-        builder.Append("Token = ").Append(SlimRedaction.Mask(Token));
+        builder.Append("FlowToken = ").Append(SlimRedaction.Mask(FlowToken));
+        builder.Append(", Password = ").Append(SlimRedaction.Mask(Password));
+        builder.Append(", Profile = ").Append(Profile);
         return true;
     }
 }
 
-/// <summary>Body of <c>POST /auth/forgot-password</c> and <c>POST /auth/resend-verification</c>.</summary>
+/// <summary>Body of <c>POST /auth/forgot-password</c>.</summary>
 /// <param name="Email">E-mail address of the account.</param>
 public sealed record SlimEmailRequest(string Email);
 
-/// <summary>Body of <c>POST /auth/reset-password</c>.</summary>
-/// <param name="Token">Token from the reset mail.</param>
-/// <param name="NewPassword">New password according to the password policy.</param>
-public sealed record SlimResetPasswordRequest(string Token, string NewPassword)
+/// <summary>
+/// Body of <c>POST /auth/login/verify-email</c> and <c>POST /auth/register/verify</c>: the mailed code proves the mailbox.
+/// </summary>
+/// <param name="FlowToken"><c>flowToken</c> of an <c>action_required</c> answer with <c>verify_email</c> as first step.</param>
+/// <param name="Code">The 6-digit code from the mail sent with that answer.</param>
+public sealed record SlimVerifyEmailLoginRequest(string FlowToken, string? Code)
 {
     private bool PrintMembers(System.Text.StringBuilder builder)
     {
-        builder.Append("Token = ").Append(SlimRedaction.Mask(Token));
-        builder.Append(", NewPassword = ").Append(SlimRedaction.Mask(NewPassword));
+        builder.Append("FlowToken = ").Append(SlimRedaction.Mask(FlowToken));
+        builder.Append(", Code = ").Append(SlimRedaction.Mask(Code));
         return true;
     }
 }
 
 /// <summary>Body of <c>POST /auth/login/password-change</c>: the forced change of a password set by an administrator.</summary>
-/// <param name="Token"><c>passwordChangeToken</c> from the <c>password_change_required</c> answer of <c>/auth/login</c>.</param>
+/// <param name="FlowToken"><c>flowToken</c> of an <c>action_required</c> answer with <c>change_password</c> as first step.</param>
 /// <param name="NewPassword">New password according to the password policy, different from the current one.</param>
-public sealed record SlimPasswordChangeLoginRequest(string Token, string NewPassword)
+public sealed record SlimPasswordChangeLoginRequest(string FlowToken, string NewPassword)
 {
     private bool PrintMembers(System.Text.StringBuilder builder)
     {
-        builder.Append("Token = ").Append(SlimRedaction.Mask(Token));
+        builder.Append("FlowToken = ").Append(SlimRedaction.Mask(FlowToken));
         builder.Append(", NewPassword = ").Append(SlimRedaction.Mask(NewPassword));
+        return true;
+    }
+}
+
+/// <summary>
+/// Body of <c>POST /auth/flow</c>: reads the open steps of a flow again (<paramref name="FlowToken"/>), or redeems the
+/// link of a mail into a flow (<paramref name="Token"/>).
+/// </summary>
+/// <param name="FlowToken"><c>flowToken</c> of an <c>action_required</c> answer.</param>
+/// <param name="Token">The token of a mailed link (registration); the answer carries the flow it continues.</param>
+public sealed record SlimFlowRequest(string? FlowToken = null, string? Token = null)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("FlowToken = ").Append(SlimRedaction.Mask(FlowToken));
+        builder.Append(", Token = ").Append(SlimRedaction.Mask(Token));
+        return true;
+    }
+}
+
+/// <summary>Body of <c>POST /auth/login/2fa/setup</c> and <c>POST /auth/login/2fa/recovery-codes-saved</c>.</summary>
+/// <param name="FlowToken"><c>flowToken</c> of an <c>action_required</c> answer with the step as first one.</param>
+public sealed record SlimFlowStepRequest(string FlowToken)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("FlowToken = ").Append(SlimRedaction.Mask(FlowToken));
+        return true;
+    }
+}
+
+/// <summary>Body of <c>POST /auth/login/2fa/enable</c>: step <c>setup_second_factor</c> with an authenticator app.</summary>
+/// <param name="FlowToken"><c>flowToken</c> of an <c>action_required</c> answer with <c>setup_second_factor</c> as first step.</param>
+/// <param name="SetupToken">Token from <c>POST /auth/login/2fa/setup</c>.</param>
+/// <param name="Code">First code from the authenticator app.</param>
+public sealed record SlimTwoFactorSetupLoginRequest(string FlowToken, string SetupToken, string Code)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("FlowToken = ").Append(SlimRedaction.Mask(FlowToken));
+        builder.Append(", SetupToken = ").Append(SlimRedaction.Mask(SetupToken));
+        builder.Append(", Code = ").Append(SlimRedaction.Mask(Code));
         return true;
     }
 }
@@ -223,32 +289,8 @@ public sealed record SlimExternalLinkRequest(string Code, string? CodeVerifier =
     }
 }
 
-/// <summary>Body of <c>POST /auth/invitation/info</c>.</summary>
-/// <param name="Token">Token from the invitation link.</param>
-public sealed record SlimInvitationInfoRequest(string Token)
-{
-    private bool PrintMembers(System.Text.StringBuilder builder)
-    {
-        builder.Append("Token = ").Append(SlimRedaction.Mask(Token));
-        return true;
-    }
-}
-
-/// <summary>Body of <c>POST /auth/invitation/accept</c>.</summary>
-/// <param name="Token">Token from the invitation link.</param>
-/// <param name="Password">The password to set, according to the password policy.</param>
-public sealed record SlimAcceptInvitationRequest(string Token, string Password)
-{
-    private bool PrintMembers(System.Text.StringBuilder builder)
-    {
-        builder.Append("Token = ").Append(SlimRedaction.Mask(Token));
-        builder.Append(", Password = ").Append(SlimRedaction.Mask(Password));
-        return true;
-    }
-}
-
 /// <summary>Body of <c>POST /auth/change-email</c>.</summary>
-/// <param name="NewEmail">The new e-mail address (receives the confirmation link).</param>
+/// <param name="NewEmail">The new e-mail address (receives the confirmation code).</param>
 /// <param name="Password">The current password.</param>
 public sealed record SlimChangeEmailRequest(string NewEmail, string Password)
 {
@@ -260,13 +302,27 @@ public sealed record SlimChangeEmailRequest(string NewEmail, string Password)
     }
 }
 
-/// <summary>Body of <c>POST /auth/confirm-email-change</c>.</summary>
-/// <param name="Token">Token from the confirmation mail sent to the new address.</param>
-public sealed record SlimConfirmEmailChangeRequest(string Token)
+/// <summary>Answer of <c>POST /auth/change-email</c>.</summary>
+/// <param name="Status"><c>email_change_requested</c>.</param>
+/// <param name="Token">Pass it with the mailed code to <c>POST /auth/change-email/confirm</c>.</param>
+/// <param name="ExpiresIn">Seconds until the token expires.</param>
+public sealed record SlimEmailChangeResponse(string Status, string Token, int ExpiresIn)
 {
     private bool PrintMembers(System.Text.StringBuilder builder)
     {
-        builder.Append("Token = ").Append(SlimRedaction.Mask(Token));
+        builder.Append("Status = ").Append(Status).Append(", Token = ").Append(SlimRedaction.Mask(Token)).Append(", ExpiresIn = ").Append(ExpiresIn);
+        return true;
+    }
+}
+
+/// <summary>Body of <c>POST /auth/change-email/confirm</c>.</summary>
+/// <param name="Token">The token of <c>POST /auth/change-email</c>.</param>
+/// <param name="Code">The 6-digit code mailed to the new address.</param>
+public sealed record SlimConfirmEmailChangeRequest(string Token, string Code)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("Token = ").Append(SlimRedaction.Mask(Token)).Append(", Code = ").Append(SlimRedaction.Mask(Code));
         return true;
     }
 }
@@ -314,30 +370,110 @@ public sealed class SlimAuthResponse
 }
 
 /// <summary>
-/// 401 body of <c>/auth/login</c>: <c>invalid_credentials</c>, <c>requires_two_factor</c> (then
-/// <see cref="PreAuthToken"/> and <see cref="TwoFactorMethod"/> are set) or <c>password_change_required</c> (then
-/// <see cref="PasswordChangeToken"/> is set).
+/// 200 body of a sign-in that needs further steps before its session (<c>/auth/login</c>, <c>/auth/login/2fa</c>,
+/// <c>/auth/login/password-change</c>, <c>/auth/flow</c> and other sign-in entry points).
 /// </summary>
-public sealed class SlimLoginChallengeResponse
+public sealed class SlimActionRequiredResponse
 {
-    /// <summary><c>invalid_credentials</c>, <c>requires_two_factor</c> or <c>password_change_required</c>.</summary>
-    public string Status { get; init; } = "invalid_credentials";
-    /// <summary>Human-readable English description.</summary>
-    public string? Message { get; init; }
-    /// <summary>Short-lived token for <c>POST /auth/login/2fa</c>.</summary>
-    public string? PreAuthToken { get; init; }
-    /// <summary><c>totp</c>, <c>email</c> or <c>recovery</c> (no codes can be sent – only a recovery code helps).</summary>
-    public string? TwoFactorMethod { get; init; }
-    /// <summary>Short-lived token for <c>POST /auth/login/password-change</c>.</summary>
-    public string? PasswordChangeToken { get; init; }
-    /// <summary>Lifetime of <see cref="PreAuthToken"/> or <see cref="PasswordChangeToken"/> in seconds.</summary>
-    public int? ExpiresIn { get; init; }
+    /// <summary>Always <c>action_required</c>.</summary>
+    public string Status { get; init; } = SlimErrorCodes.ActionRequired;
+    /// <summary>
+    /// The open steps in order; the first one is taken now: <c>verify_email</c> (<c>POST /auth/login/verify-email</c>, in a
+    /// registration <c>POST /auth/register/verify</c>), <c>set_credential</c> (<c>POST /auth/register/password</c>),
+    /// <c>second_factor</c> (<c>POST /auth/login/2fa</c>), <c>change_password</c> (<c>POST /auth/login/password-change</c>),
+    /// <c>setup_second_factor</c> (<c>POST /auth/login/2fa/setup</c> and <c>/auth/login/2fa/enable</c>) or
+    /// <c>confirm_recovery_codes</c> (<c>POST /auth/login/2fa/recovery-codes-saved</c>). Clients ignore steps they do not know.
+    /// </summary>
+    public required IReadOnlyList<string> Actions { get; init; }
+    /// <summary>Token of the sign-in for the step endpoints and <c>POST /auth/flow</c>; every step answers with a new one.</summary>
+    public required string FlowToken { get; init; }
+    /// <summary>Seconds until the sign-in expires (all steps together).</summary>
+    public int ExpiresIn { get; init; }
+    /// <summary>Details of the first step, if it has any.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SlimActionDetails? Details { get; init; }
 }
 
-/// <summary>423 body (only with <c>SignIn.RevealAccountState</c> or for already authenticated flows).</summary>
-/// <param name="Status">Always <c>locked_out</c>.</param>
-/// <param name="LockoutEndUtc">End of the lockout.</param>
-public sealed record SlimLockedResponse(string Status, DateTimeOffset LockoutEndUtc);
+/// <summary>Details of the open step of a <see cref="SlimActionRequiredResponse"/>.</summary>
+public sealed class SlimActionDetails
+{
+    /// <summary>Set for <c>second_factor</c>.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SlimSecondFactorDetails? SecondFactor { get; init; }
+
+    /// <summary>Set for <c>set_credential</c>.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SlimSetCredentialDetails? SetCredential { get; init; }
+
+    /// <summary>Set for <c>setup_second_factor</c>.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SlimSetupSecondFactorDetails? SetupSecondFactor { get; init; }
+
+    /// <summary>
+    /// The recovery codes of the second factor just set up – only in the answer of <c>POST /auth/login/2fa/enable</c>,
+    /// shown exactly once (step <c>confirm_recovery_codes</c>).
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? RecoveryCodes { get; init; }
+}
+
+/// <summary>How the second factor the sign-in requires can be set up.</summary>
+public sealed class SlimSetupSecondFactorDetails
+{
+    /// <summary>
+    /// <c>totp</c> (an authenticator app: <c>POST /auth/login/2fa/setup</c>, then <c>/auth/login/2fa/enable</c>) and, for
+    /// an account with a passkey, <c>passkey</c> (sign in with it instead). Clients ignore methods they do not know.
+    /// </summary>
+    public required IReadOnlyList<string> Methods { get; init; }
+}
+
+/// <summary>
+/// The ways to sign in the step can set: the first one of a registration, or the new one after a reset link.
+/// </summary>
+public sealed class SlimSetCredentialDetails
+{
+    /// <summary>
+    /// <c>password</c> (<c>POST /auth/register/password</c>) and, with the passkey package, <c>passkey</c>
+    /// (<c>POST /auth/register/passkey</c>). Clients ignore kinds they do not know.
+    /// </summary>
+    public required IReadOnlyList<string> Kinds { get; init; }
+
+    /// <summary>The address of the account – to show it, and as the user name for password managers.</summary>
+    public required string Email { get; init; }
+}
+
+/// <summary>How the open second factor can be proven.</summary>
+public sealed class SlimSecondFactorDetails
+{
+    /// <summary>
+    /// <c>totp</c> (authenticator app), <c>email</c> (a code was sent) and <c>recovery</c> (a recovery code). Only
+    /// <c>recovery</c>: no codes can be sent – a recovery code or an administrator's reset helps.
+    /// </summary>
+    public required IReadOnlyList<string> Methods { get; init; }
+}
+
+/// <summary>
+/// Body of every error answer: RFC 9457 problem details (<c>application/problem+json</c>) with the machine-readable
+/// <see cref="Code"/> (<see cref="SlimErrorCodes"/>; host guards may add their own).
+/// </summary>
+public sealed class SlimProblemResponse
+{
+    /// <summary>HTTP status code.</summary>
+    public int Status { get; init; }
+    /// <summary>Machine-readable error code, snake_case. Clients evaluate this field only.</summary>
+    public required string Code { get; init; }
+    /// <summary>Reason phrase of the HTTP status.</summary>
+    public string? Title { get; init; }
+    /// <summary>English description for logs and developers, not meant for display.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Detail { get; init; }
+    /// <summary>423 <c>locked_out</c>: end of the lockout (also sent as <c>Retry-After</c>).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? LockoutEndUtc { get; init; }
+    /// <summary>400 <c>validation_failed</c>: messages per field.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IDictionary<string, string[]>? Errors { get; init; }
+}
 
 /// <summary>A claim of the current principal.</summary>
 /// <param name="Type">Claim type, e.g. <c>role</c>.</param>
@@ -399,11 +535,6 @@ public sealed record SlimPasswordPolicyResponse(
     int MinimumLength,
     int MaximumLength,
     bool HasAdditionalRules);
-
-/// <summary>Body of <c>POST /auth/invitation/info</c>.</summary>
-/// <param name="Email">The invited address (lets the "set your password" form show it).</param>
-/// <param name="ExpiresAt">End of validity of the link.</param>
-public sealed record SlimInvitationInfoResponse(string Email, DateTimeOffset ExpiresAt);
 
 /// <summary>An active session / device of the signed-in user (<c>GET /auth/sessions</c>).</summary>
 /// <param name="Id">Session id (for <c>DELETE /auth/sessions/{id}</c>).</param>

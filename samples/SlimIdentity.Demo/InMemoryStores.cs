@@ -46,31 +46,38 @@ public sealed class InMemoryUserStore : ISlimUserStore
             // "unique index": null if the address is taken (e.g. by a concurrent registration)
             if (_users.Values.Any(u => string.Equals(u.Email, email, StringComparison.OrdinalIgnoreCase)))
                 return Task.FromResult<SlimUser?>(null);
-            var user = new SlimUser { Id = Guid.NewGuid().ToString(), Email = email, PasswordHash = passwordHash };
+            var user = new SlimUser { Id = Guid.NewGuid().ToString(), Email = email, PasswordHash = passwordHash, EmailConfirmed = newUser.EmailConfirmed };
             _users[user.Id] = user;
             _roles[user.Id] = [];
             return Task.FromResult<SlimUser?>(Clone(user));
         }
     }
 
-    // sign-in bookkeeping: narrow, atomic updates (never write back a whole, possibly outdated user)
-    public Task<int> IncrementFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct)
+    // sign-in bookkeeping: reserve an attempt atomically before it is checked (never write back a whole, possibly outdated user)
+    public Task<SlimAttemptReservation?> TryBeginAttemptAsync(SlimUser user, SlimAttemptRequest attempt, CancellationToken ct)
     {
-        var stored = _users[user.Id];
-        lock (stored) return Task.FromResult(++stored.FailedLoginAttempts);
+        if (!_users.TryGetValue(user.Id, out var stored)) return Task.FromResult<SlimAttemptReservation?>(null);
+        lock (stored)
+        {
+            var password = attempt.Factor == SlimAttemptFactor.Password;
+            var end = password ? stored.LockoutEndUtc : stored.SecondFactorLockoutEndUtc;
+            if (attempt.IsLockedOut(end)) return Task.FromResult<SlimAttemptReservation?>(SlimAttemptReservation.LockedOut(end!.Value));
+            var count = (password ? stored.FailedLoginAttempts : stored.FailedSecondFactorAttempts) + 1;
+            var newEnd = attempt.NextLockoutEnd(count, end);
+            if (password) (stored.FailedLoginAttempts, stored.LockoutEndUtc) = (count, newEnd);
+            else (stored.FailedSecondFactorAttempts, stored.SecondFactorLockoutEndUtc) = (count, newEnd);
+            return Task.FromResult<SlimAttemptReservation?>(SlimAttemptReservation.Reserved(count));
+        }
     }
 
-    public Task SetLockoutEndAsync(SlimUser user, DateTimeOffset? lockoutEndUtc, CancellationToken ct)
+    public Task ResetFailedAttemptsAsync(SlimUser user, SlimAttemptFactor factor, CancellationToken ct)
     {
         var stored = _users[user.Id];
-        lock (stored) stored.LockoutEndUtc = lockoutEndUtc;
-        return Task.CompletedTask;
-    }
-
-    public Task ResetFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct)
-    {
-        var stored = _users[user.Id];
-        lock (stored) { stored.FailedLoginAttempts = 0; stored.LockoutEndUtc = null; }
+        lock (stored)
+        {
+            if (factor == SlimAttemptFactor.Password) (stored.FailedLoginAttempts, stored.LockoutEndUtc) = (0, null);
+            else (stored.FailedSecondFactorAttempts, stored.SecondFactorLockoutEndUtc) = (0, null);
+        }
         return Task.CompletedTask;
     }
 
@@ -81,18 +88,20 @@ public sealed class InMemoryUserStore : ISlimUserStore
         return Task.CompletedTask;
     }
 
-    // persists the security fields only (contract of ISlimUserStore)
-    public Task UpdateSecurityStateAsync(SlimUser user, CancellationToken ct)
+    // persists the security fields only, and only while the stamp is unchanged (contract of ISlimUserStore)
+    public Task<bool> UpdateSecurityStateAsync(SlimUser user, string expectedStamp, CancellationToken ct)
     {
-        var stored = _users[user.Id];
-        stored.PasswordHash = user.PasswordHash;
-        stored.SecurityStamp = user.SecurityStamp;
-        stored.EmailConfirmed = user.EmailConfirmed;
-        stored.FailedLoginAttempts = user.FailedLoginAttempts;
-        stored.LockoutEndUtc = user.LockoutEndUtc;
-        stored.TwoFactorEnabled = user.TwoFactorEnabled;
-        stored.PasswordChangeRequired = user.PasswordChangeRequired;
-        return Task.CompletedTask;
+        if (!_users.TryGetValue(user.Id, out var stored)) return Task.FromResult(false);
+        lock (stored)
+        {
+            if ((stored.SecurityStamp ?? string.Empty) != expectedStamp) return Task.FromResult(false);
+            stored.PasswordHash = user.PasswordHash;
+            stored.SecurityStamp = user.SecurityStamp;
+            stored.EmailConfirmed = user.EmailConfirmed;
+            stored.TwoFactorEnabled = user.TwoFactorEnabled;
+            stored.PasswordChangeRequired = user.PasswordChangeRequired;
+            return Task.FromResult(true);
+        }
     }
 
     // compare-and-set on the stamp only (contract of ISlimUserStore)
@@ -107,14 +116,19 @@ public sealed class InMemoryUserStore : ISlimUserStore
         }
     }
 
-    public Task<bool> UpdateEmailAsync(SlimUser user, string newEmail, CancellationToken ct)
+    public Task<SlimEmailUpdateResult> UpdateEmailAsync(SlimUser user, string newEmail, string expectedStamp, string newStamp, CancellationToken ct)
     {
         lock (_users)
         {
             if (_users.Values.Any(u => u.Id != user.Id && string.Equals(u.Email, newEmail, StringComparison.OrdinalIgnoreCase)))
-                return Task.FromResult(false);
-            _users[user.Id].Email = newEmail;
-            return Task.FromResult(true);
+                return Task.FromResult(SlimEmailUpdateResult.EmailTaken);
+            if (!_users.TryGetValue(user.Id, out var stored)) return Task.FromResult(SlimEmailUpdateResult.StampChanged);
+            lock (stored)
+            {
+                if ((stored.SecurityStamp ?? string.Empty) != expectedStamp) return Task.FromResult(SlimEmailUpdateResult.StampChanged);
+                (stored.Email, stored.EmailConfirmed, stored.SecurityStamp) = (newEmail, true, newStamp);
+                return Task.FromResult(SlimEmailUpdateResult.Updated);
+            }
         }
     }
 
@@ -136,7 +150,9 @@ public sealed class InMemoryUserStore : ISlimUserStore
     {
         Id = u.Id, Email = u.Email, PasswordHash = u.PasswordHash, SecurityStamp = u.SecurityStamp,
         IsActive = u.IsActive, EmailConfirmed = u.EmailConfirmed, FailedLoginAttempts = u.FailedLoginAttempts,
-        LockoutEndUtc = u.LockoutEndUtc, TwoFactorEnabled = u.TwoFactorEnabled, PasswordChangeRequired = u.PasswordChangeRequired,
+        LockoutEndUtc = u.LockoutEndUtc, FailedSecondFactorAttempts = u.FailedSecondFactorAttempts,
+        SecondFactorLockoutEndUtc = u.SecondFactorLockoutEndUtc,
+        TwoFactorEnabled = u.TwoFactorEnabled, PasswordChangeRequired = u.PasswordChangeRequired,
     };
 }
 
@@ -319,7 +335,7 @@ public sealed class InMemoryPasskeyStore : ISlimPasskeyStore
     private static SlimPasskey Copy(SlimPasskey p) => new()
     {
         UserId = p.UserId, CredentialId = p.CredentialId, PublicKey = p.PublicKey, SignCount = p.SignCount,
-        BackupEligible = p.BackupEligible, BackedUp = p.BackedUp, LastChallengeAt = p.LastChallengeAt, Name = p.Name,
+        UserHandle = p.UserHandle, BackupEligible = p.BackupEligible, BackedUp = p.BackedUp, LastChallengeAt = p.LastChallengeAt, Name = p.Name,
         CreatedUtc = p.CreatedUtc, LastUsedUtc = p.LastUsedUtc,
     };
 }
@@ -337,8 +353,8 @@ public sealed class InMemoryApiKeyStore : ISlimApiKeyStore
 /// <summary>Prints mails to the console and drops them into the playground's fake mailbox.</summary>
 public sealed class ConsoleEmailSender(DemoMailbox mailbox) : ISlimEmailSender
 {
-    public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string verificationTokenOrLink, CancellationToken ct) =>
-        Write("Verify your e-mail", email, verificationTokenOrLink);
+    public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string code, string verificationTokenOrLink, CancellationToken ct) =>
+        Write("Verify your e-mail", email, $"Code: {code} – or open {verificationTokenOrLink}");
 
     public Task SendPasswordResetEmailAsync(SlimEmailContext context, string email, string resetTokenOrLink, CancellationToken ct) =>
         Write("Reset your password", email, resetTokenOrLink);
@@ -346,8 +362,11 @@ public sealed class ConsoleEmailSender(DemoMailbox mailbox) : ISlimEmailSender
     public Task SendTwoFactorCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) =>
         Write("Your sign-in code", email, code);
 
-    public Task SendEmailChangeConfirmationAsync(SlimEmailContext context, string newEmail, string confirmationTokenOrLink, CancellationToken ct) =>
-        Write("Confirm your new e-mail address", newEmail, confirmationTokenOrLink);
+    public Task SendEmailVerificationCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) =>
+        Write("Confirm your e-mail address", email, code);
+
+    public Task SendEmailChangeCodeAsync(SlimEmailContext context, string newEmail, string code, CancellationToken ct) =>
+        Write("Confirm your new e-mail address", newEmail, $"Your code: {code}");
 
     public Task SendEmailChangedNotificationAsync(SlimEmailContext context, string oldEmail, string newEmail, CancellationToken ct) =>
         Write("Your e-mail address was changed", oldEmail, $"The sign-in address of your account is now {newEmail}. Not you? Contact support.");

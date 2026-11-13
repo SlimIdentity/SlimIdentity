@@ -92,4 +92,25 @@ public sealed class CookieAndCsrfTests
         Assert.Equal(HttpStatusCode.OK, (await browser.PostAsync("/auth/logout-all")).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await thief.GetAsync("/api/hello")).StatusCode);
     }
+
+    [Fact]
+    public async Task A_planted_cookie_never_becomes_the_victims_session()
+    {
+        await using var app = await TestApp.StartAsync();
+        var attacker = app.CreateClient();
+        attacker.SendCsrfHeader = true;
+        await attacker.PostJsonAsync("/auth/login?useCookies=true", new { email = TestApp.AdminEmail, password = TestApp.AdminPassword });
+        var planted = attacker.Cookies["SlimAuth"];
+
+        var victim = app.CreateClient();
+        victim.SendCsrfHeader = true;
+        victim.SetCookies(new Dictionary<string, string> { ["SlimAuth"] = planted });
+        await victim.PostJsonAsync("/auth/login?useCookies=true", UserLogin);
+
+        Assert.NotEqual(planted, victim.Cookies["SlimAuth"]);   // a new ticket was issued
+        var withPlanted = app.CreateClient();
+        withPlanted.SetCookies(new Dictionary<string, string> { ["SlimAuth"] = planted });
+        var response = await withPlanted.GetAsync("/api/hello");
+        Assert.DoesNotContain(TestApp.UserEmail, await response.Content.ReadAsStringAsync());   // never the victim
+    }
 }

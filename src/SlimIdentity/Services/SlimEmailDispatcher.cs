@@ -37,17 +37,20 @@ internal sealed class SlimEmailDispatcher(
         } : context;
     }
 
-    /// <summary>Sends (or queues) a mail to <paramref name="recipient"/> – unless the per-recipient limit is reached.</summary>
-    public async Task SendAsync(string kind, string recipient, string? userId,
+    /// <summary>
+    /// Sends (or queues) a mail to <paramref name="recipient"/> – unless the per-recipient limit is reached. <c>false</c>
+    /// if it was not sent or queued.
+    /// </summary>
+    public async Task<bool> SendAsync(string kind, string recipient, string? userId,
         Func<ISlimEmailSender, SlimEmailContext, CancellationToken, Task> send, CancellationToken ct)
     {
-        if (!options.Value.Email.Enabled) return;   // WithoutEmail(): nothing is ever sent
+        if (!options.Value.Email.Enabled) return false;   // WithoutEmail(): nothing is ever sent
 
-        if (!throttle.TryAcquire(kind, recipient))
+        if (!await throttle.TryAcquireAsync(kind, recipient, ct))
         {
             Log.MailThrottled(logger, kind);
             metrics.Mail(kind, "throttled");
-            return;
+            return false;
         }
 
         var context = CreateContext(kind, userId);
@@ -55,14 +58,13 @@ internal sealed class SlimEmailDispatcher(
         {
             await send(services.GetRequiredService<ISlimEmailSender>(), context, ct);
             metrics.Mail(kind, "sent");
-            return;
+            return true;
         }
 
-        if (!queue.TryEnqueue(new SlimEmailJob(kind, context, send)))
-        {
-            Log.MailDropped(logger, kind);
-            metrics.Mail(kind, "dropped");
-        }
+        if (queue.TryEnqueue(new SlimEmailJob(kind, context, send))) return true;
+        Log.MailDropped(logger, kind);
+        metrics.Mail(kind, "dropped");
+        return false;
     }
 }
 

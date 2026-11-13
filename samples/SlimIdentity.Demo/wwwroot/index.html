@@ -43,11 +43,10 @@
     <div class="row">
       <button data-action="logout">Sign out</button>
       <button data-action="logoutAll">Sign out everywhere</button>
-      <button data-action="resendVerification">Resend verification</button>
     </div>
 
     <div id="challenge" class="box" hidden>
-      <h3>Second factor required (<span id="challengeMethod"></span>)</h3>
+      <h3><span id="challengeTitle">Second factor required</span> (<span id="challengeMethod"></span>)</h3>
       <label>Code <input id="code" inputmode="numeric" autocomplete="one-time-code" placeholder="6 digits"></label>
       <label>or recovery code <input id="recoveryCode" placeholder="xxxx-xxxx-xxxx-xxxx"></label>
       <div class="row">
@@ -110,10 +109,9 @@
       <button data-action="changePassword">Change password</button>
       <button data-action="changeEmail">Change e-mail</button>
     </div>
-    <div id="linkForm" class="box" hidden>
-      <h3 id="linkTitle"></h3>
-      <label id="linkPasswordLabel">New password <input id="linkPassword" type="password" autocomplete="new-password"></label>
-      <button data-action="completeLink" class="primary">Submit</button>
+    <label>Code from the new address <input id="emailChangeCode" inputmode="numeric" placeholder="6 digits"></label>
+    <div class="row">
+      <button data-action="confirmEmailChange">Confirm e-mail change</button>
     </div>
   </section>
 

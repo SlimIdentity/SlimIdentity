@@ -24,10 +24,6 @@ internal sealed class SlimIdentityOptionsValidator : IValidateOptions<SlimIdenti
         if (e.DefaultUseCookies && !e.AllowCookieAuth)
             f.Add("Endpoints.DefaultUseCookies is true but cookie auth is disabled.");
 
-        if (!o.Email.Enabled && e.EnableRegistration && o.SignIn.RequireConfirmedEmail)
-            f.Add("SignIn.RequireConfirmedEmail with WithoutEmail(allowSelfRegistration: true): self-registered users could never " +
-                "confirm their address. Turn one of them off.");
-
         // Tokens
         if (o.JwtEnabled)
         {
@@ -89,7 +85,6 @@ internal sealed class SlimIdentityOptionsValidator : IValidateOptions<SlimIdenti
         CheckTemplate(o.Links.EmailVerificationUrl, "Links.EmailVerificationUrl");
         CheckTemplate(o.Links.PasswordResetUrl, "Links.PasswordResetUrl");
         CheckTemplate(o.Links.InvitationUrl, "Links.InvitationUrl");
-        CheckTemplate(o.Links.EmailChangeUrl, "Links.EmailChangeUrl");
 
         return f.Count > 0
             ? ValidateOptionsResult.Fail(f.Select(x => "SlimIdentity: " + x))

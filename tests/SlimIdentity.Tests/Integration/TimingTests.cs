@@ -5,7 +5,7 @@ using Xunit.Abstractions;
 namespace SlimIdentity.Tests.Integration;
 
 /// <summary>
-/// Attack scenario A3: unknown, known, inactive and locked accounts must not be distinguishable by response time.
+/// Unknown, known, inactive and locked accounts must not be distinguishable by response time.
 /// A statistical measurement (Mann-Whitney U, interleaved requests), too slow and noisy for every CI run – run it before
 /// a release: <c>SLIMIDENTITY_TIMING=1 dotnet test --filter TimingTests</c>.
 /// </summary>
@@ -14,15 +14,15 @@ public sealed class TimingTests(ITestOutputHelper output)
     private const int SamplesPerGroup = 150;
 
     [SkippableFact]
-    public async Task A3_login_timing_does_not_reveal_whether_an_account_exists_or_its_state()
+    public async Task Login_timing_does_not_reveal_whether_an_account_exists_or_its_state()
     {
         Skip.IfNot(Environment.GetEnvironmentVariable("SLIMIDENTITY_TIMING") == "1", "Set SLIMIDENTITY_TIMING=1 to run timing measurements.");
 
-        await using var app = await TestApp.StartAsync(new TestAppOptions { Configure = o => o.Lockout.MaxFailedAttempts = 0 });
+        await using var app = await TestApp.StartAsync(new TestAppOptions { FastHashing = false, Configure = o => o.Lockout.MaxFailedAttempts = 0 });
         var inactive = app.Users.Seed("inactive@test.local", "Inactive-123");
         app.Users.SetActive(inactive.Id, false);
         var locked = app.Users.Seed("locked@test.local", "Locked-123");
-        await app.Users.SetLockoutEndAsync(locked, DateTimeOffset.UtcNow.AddYears(1), default);
+        app.Users.SetAttempts(locked.Id, SlimAttemptFactor.Password, 0, DateTimeOffset.UtcNow.AddYears(1));
 
         var groups = new Dictionary<string, (string Email, string Password)>
         {

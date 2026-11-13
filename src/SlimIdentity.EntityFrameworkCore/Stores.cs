@@ -78,7 +78,14 @@ public class SlimEfUserStore<TContext, TUser, TKey>(SlimEfContext<TContext> cont
 {
     private readonly TContext db = context.Db;
 
-    private const string Failed = nameof(ISlimUserEntity<TKey>.FailedLoginAttempts);
+    private const int MaxAttemptRetries = 20;
+
+    private static (string Counter, string End) AttemptColumns(SlimAttemptFactor factor) => factor switch
+    {
+        SlimAttemptFactor.Password => (nameof(ISlimUserEntity<TKey>.FailedLoginAttempts), nameof(ISlimUserEntity<TKey>.LockoutEndUtc)),
+        SlimAttemptFactor.SecondFactor => (nameof(ISlimUserEntity<TKey>.FailedSecondFactorAttempts), nameof(ISlimUserEntity<TKey>.SecondFactorLockoutEndUtc)),
+        _ => throw new ArgumentOutOfRangeException(nameof(factor)),
+    };
 
     /// <summary>The users of the context.</summary>
     protected DbSet<TUser> Users => db.Set<TUser>();
@@ -117,6 +124,7 @@ public class SlimEfUserStore<TContext, TUser, TKey>(SlimEfContext<TContext> cont
         user.Email = newUser.Email;
         user.NormalizedEmail = Normalize(newUser.Email);
         user.PasswordHash = newUser.PasswordHash ?? string.Empty;
+        user.EmailConfirmed = newUser.EmailConfirmed;
         user.SecurityStamp = SlimUser.NewSecurityStamp();
         user.IsActive = true;
         context.BeforeWrite();
@@ -141,45 +149,58 @@ public class SlimEfUserStore<TContext, TUser, TKey>(SlimEfContext<TContext> cont
     }
 
     /// <inheritdoc />
-    public Task UpdateSecurityStateAsync(SlimUser user, CancellationToken ct)
+    public async Task<bool> UpdateSecurityStateAsync(SlimUser user, string expectedStamp, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(user);
-        return Update(user).ExecuteUpdateAsync(s => s
+        ArgumentNullException.ThrowIfNull(expectedStamp);
+        return await WithStamp(user, expectedStamp).ExecuteUpdateAsync(s => s
             .SetProperty(u => EF.Property<string>(u, nameof(ISlimUserEntity<TKey>.PasswordHash)), user.PasswordHash)
             .SetProperty(u => EF.Property<string>(u, nameof(ISlimUserEntity<TKey>.SecurityStamp)), user.SecurityStamp)
             .SetProperty(u => EF.Property<bool>(u, nameof(ISlimUserEntity<TKey>.EmailConfirmed)), user.EmailConfirmed)
-            .SetProperty(u => EF.Property<int>(u, Failed), user.FailedLoginAttempts)
-            .SetProperty(u => EF.Property<DateTimeOffset?>(u, nameof(ISlimUserEntity<TKey>.LockoutEndUtc)), user.LockoutEndUtc)
             .SetProperty(u => EF.Property<bool>(u, nameof(ISlimUserEntity<TKey>.TwoFactorEnabled)), user.TwoFactorEnabled)
-            .SetProperty(u => EF.Property<bool>(u, nameof(ISlimUserEntity<TKey>.PasswordChangeRequired)), user.PasswordChangeRequired), ct);
+            .SetProperty(u => EF.Property<bool>(u, nameof(ISlimUserEntity<TKey>.PasswordChangeRequired)), user.PasswordChangeRequired), ct)
+            .ConfigureAwait(false) == 1;
     }
 
+    /// <summary>The user row, only while its stamp is <paramref name="expectedStamp"/> (a missing stamp counts as empty).</summary>
+    private IQueryable<TUser> WithStamp(SlimUser user, string expectedStamp) =>
+        Update(user).Where(u => (EF.Property<string?>(u, nameof(ISlimUserEntity<TKey>.SecurityStamp)) ?? "") == expectedStamp);
+
     /// <inheritdoc />
-    public async Task<int> IncrementFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct)
+    public async Task<SlimAttemptReservation?> TryBeginAttemptAsync(SlimUser user, SlimAttemptRequest attempt, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(user);
-        // portable compare-and-set loop: no lost update, on every provider
-        while (true)
+        ArgumentNullException.ThrowIfNull(attempt);
+        var (counter, end) = AttemptColumns(attempt.Factor);
+        // portable compare-and-set loop: no lost update and exactly one attempt reaches the threshold, on every provider
+        for (var i = 0; i < MaxAttemptRetries; i++)
         {
-            // the user may have been deleted during the sign-in: nothing to count (and no exception)
-            if (await Update(user).Select(u => (int?)EF.Property<int>(u, Failed)).FirstOrDefaultAsync(ct).ConfigureAwait(false) is not { } current)
-                return 0;
-            var updated = await Update(user).Where(u => EF.Property<int>(u, Failed) == current)
-                .ExecuteUpdateAsync(s => s.SetProperty(u => EF.Property<int>(u, Failed), current + 1), ct).ConfigureAwait(false);
-            if (updated == 1) return current + 1;
+            var state = await Update(user)
+                .Select(u => new { Count = EF.Property<int>(u, counter), End = EF.Property<DateTimeOffset?>(u, end) })
+                .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+            if (state is null) return null;   // deleted during the sign-in
+            if (attempt.IsLockedOut(state.End)) return SlimAttemptReservation.LockedOut(state.End!.Value);
+
+            int oldCount = state.Count, newCount = oldCount + 1;
+            DateTimeOffset? oldEnd = state.End, newEnd = attempt.NextLockoutEnd(newCount, oldEnd);
+            var updated = await Update(user)
+                .Where(u => EF.Property<int>(u, counter) == oldCount && EF.Property<DateTimeOffset?>(u, end) == oldEnd)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(u => EF.Property<int>(u, counter), newCount)
+                    .SetProperty(u => EF.Property<DateTimeOffset?>(u, end), newEnd), ct).ConfigureAwait(false);
+            if (updated == 1) return SlimAttemptReservation.Reserved(newCount);
         }
+        return null;   // permanent contention: the attempt is not checked
     }
 
     /// <inheritdoc />
-    public Task SetLockoutEndAsync(SlimUser user, DateTimeOffset? lockoutEndUtc, CancellationToken ct) =>
-        Update(user).ExecuteUpdateAsync(s => s
-            .SetProperty(u => EF.Property<DateTimeOffset?>(u, nameof(ISlimUserEntity<TKey>.LockoutEndUtc)), lockoutEndUtc), ct);
-
-    /// <inheritdoc />
-    public Task ResetFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct) =>
-        Update(user).ExecuteUpdateAsync(s => s
-            .SetProperty(u => EF.Property<int>(u, Failed), 0)
-            .SetProperty(u => EF.Property<DateTimeOffset?>(u, nameof(ISlimUserEntity<TKey>.LockoutEndUtc)), (DateTimeOffset?)null), ct);
+    public Task ResetFailedAttemptsAsync(SlimUser user, SlimAttemptFactor factor, CancellationToken ct)
+    {
+        var (counter, end) = AttemptColumns(factor);
+        return Update(user).ExecuteUpdateAsync(s => s
+            .SetProperty(u => EF.Property<int>(u, counter), 0)
+            .SetProperty(u => EF.Property<DateTimeOffset?>(u, end), (DateTimeOffset?)null), ct);
+    }
 
     /// <inheritdoc />
     public Task UpdatePasswordHashAsync(SlimUser user, string currentHash, string newHash, CancellationToken ct) =>
@@ -193,21 +214,26 @@ public class SlimEfUserStore<TContext, TUser, TKey>(SlimEfContext<TContext> cont
             .ConfigureAwait(false) == 1;
 
     /// <inheritdoc />
-    public async Task<bool> UpdateEmailAsync(SlimUser user, string newEmail, CancellationToken ct)
+    public async Task<SlimEmailUpdateResult> UpdateEmailAsync(SlimUser user, string newEmail, string expectedStamp, string newStamp, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(newEmail);
+        ArgumentNullException.ThrowIfNull(expectedStamp);
+        ArgumentNullException.ThrowIfNull(newStamp);
         var normalized = Normalize(newEmail);
         try
         {
             // the unique index decides – no check-then-act race
-            return await Update(user).ExecuteUpdateAsync(s => s
+            var updated = await WithStamp(user, expectedStamp).ExecuteUpdateAsync(s => s
                 .SetProperty(u => EF.Property<string>(u, nameof(ISlimUserEntity<TKey>.Email)), newEmail)
-                .SetProperty(u => EF.Property<string>(u, nameof(ISlimUserEntity<TKey>.NormalizedEmail)), normalized), ct).ConfigureAwait(false) == 1;
+                .SetProperty(u => EF.Property<string>(u, nameof(ISlimUserEntity<TKey>.NormalizedEmail)), normalized)
+                .SetProperty(u => EF.Property<bool>(u, nameof(ISlimUserEntity<TKey>.EmailConfirmed)), true)
+                .SetProperty(u => EF.Property<string>(u, nameof(ISlimUserEntity<TKey>.SecurityStamp)), newStamp), ct).ConfigureAwait(false);
+            return updated == 1 ? SlimEmailUpdateResult.Updated : SlimEmailUpdateResult.StampChanged;
         }
         catch (DbException)
         {
             // ExecuteUpdate bypasses SaveChanges: the provider's own exception arrives, not DbUpdateException
-            if (await IsEmailTakenAsync(normalized, Key(user), ct).ConfigureAwait(false)) return false;
+            if (await IsEmailTakenAsync(normalized, Key(user), ct).ConfigureAwait(false)) return SlimEmailUpdateResult.EmailTaken;
             throw;
         }
     }
@@ -229,7 +255,9 @@ public class SlimEfUserStore<TContext, TUser, TKey>(SlimEfContext<TContext> cont
         {
             Id = SlimEf.KeyToString(u.Id), Email = u.Email, PasswordHash = u.PasswordHash, SecurityStamp = u.SecurityStamp,
             IsActive = u.IsActive, EmailConfirmed = u.EmailConfirmed, FailedLoginAttempts = u.FailedLoginAttempts,
-            LockoutEndUtc = u.LockoutEndUtc, TwoFactorEnabled = u.TwoFactorEnabled, PasswordChangeRequired = u.PasswordChangeRequired,
+            LockoutEndUtc = u.LockoutEndUtc, FailedSecondFactorAttempts = u.FailedSecondFactorAttempts,
+            SecondFactorLockoutEndUtc = u.SecondFactorLockoutEndUtc,
+            TwoFactorEnabled = u.TwoFactorEnabled, PasswordChangeRequired = u.PasswordChangeRequired,
         };
     }
 
@@ -525,7 +553,7 @@ public class SlimEfPasskeyStore<TContext, TKey>(SlimEfContext<TContext> context)
         {
             CredentialIdHash = hash, CredentialId = passkey.CredentialId, UserId = key, PublicKey = passkey.PublicKey,
             SignCount = passkey.SignCount, LastChallengeAt = passkey.LastChallengeAt, Name = passkey.Name,
-            BackupEligible = passkey.BackupEligible, BackedUp = passkey.BackedUp,
+            BackupEligible = passkey.BackupEligible, BackedUp = passkey.BackedUp, UserHandle = passkey.UserHandle,
             CreatedUtc = passkey.CreatedUtc, LastUsedUtc = passkey.LastUsedUtc,
         };
         context.BeforeWrite();
@@ -590,6 +618,88 @@ public class SlimEfPasskeyStore<TContext, TKey>(SlimEfContext<TContext> context)
     {
         UserId = SlimEf.KeyToString(p.UserId), CredentialId = p.CredentialId, PublicKey = p.PublicKey, SignCount = (uint)p.SignCount,
         LastChallengeAt = p.LastChallengeAt, Name = p.Name, CreatedUtc = p.CreatedUtc, LastUsedUtc = p.LastUsedUtc,
-        BackupEligible = p.BackupEligible, BackedUp = p.BackedUp,
+        BackupEligible = p.BackupEligible, BackedUp = p.BackedUp, UserHandle = p.UserHandle,
     };
+}
+
+/// <summary>
+/// <see cref="ISlimSharedState"/> on the table <c>SlimSharedState</c>: single-use markers through the primary key,
+/// counters through a compare-and-set update. Expired rows are taken over in place and deleted now and then.
+/// </summary>
+public class SlimEfSharedState<TContext>(SlimEfContext<TContext> context, TimeProvider time) : ISlimSharedState
+    where TContext : DbContext
+{
+    private const int MaxAttempts = 50;
+    private const int CleanupOneIn = 100;
+
+    private DbSet<SlimSharedStateEntity> Entries => context.Db.Set<SlimSharedStateEntity>();
+
+    /// <inheritdoc />
+    public async Task<bool> TryAddAsync(string key, DateTimeOffset expiresAt, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        var now = time.GetUtcNow().ToUnixTimeMilliseconds();
+        var expires = expiresAt.ToUnixTimeMilliseconds();
+        await CleanupSometimesAsync(now, ct).ConfigureAwait(false);
+
+        // an expired marker is taken over atomically – only one caller's update matches
+        if (await context.Writing(Entries).Where(e => e.Key == key && e.ExpiresAt <= now)
+                .ExecuteUpdateAsync(s => s.SetProperty(e => e.ExpiresAt, expires).SetProperty(e => e.Count, 0L), ct).ConfigureAwait(false) == 1)
+            return true;
+        return await TryInsertAsync(key, 0, expires, ct).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
+    public async Task<long> IncrementAsync(string key, TimeSpan window, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+        for (var attempt = 0; attempt < MaxAttempts; attempt++)
+        {
+            var now = time.GetUtcNow().ToUnixTimeMilliseconds();
+            var end = now + (long)window.TotalMilliseconds;
+            var current = await Entries.AsNoTracking().Where(e => e.Key == key)
+                .Select(e => new { e.Count, e.ExpiresAt }).FirstOrDefaultAsync(ct).ConfigureAwait(false);
+            if (current is null)
+            {
+                if (await TryInsertAsync(key, 1, end, ct).ConfigureAwait(false)) return 1;
+                continue;
+            }
+
+            var (count, expires) = current.ExpiresAt > now ? (current.Count + 1, current.ExpiresAt) : (1L, end);
+            if (await context.Writing(Entries)
+                    .Where(e => e.Key == key && e.Count == current.Count && e.ExpiresAt == current.ExpiresAt)
+                    .ExecuteUpdateAsync(s => s.SetProperty(e => e.Count, count).SetProperty(e => e.ExpiresAt, expires), ct).ConfigureAwait(false) == 1)
+                return count;
+        }
+        throw new InvalidOperationException($"SlimIdentity: the counter could not be updated after {MaxAttempts} attempts (heavy contention).");
+    }
+
+    private async Task<bool> TryInsertAsync(string key, long count, long expiresAt, CancellationToken ct)
+    {
+        var db = context.Db;
+        var entity = new SlimSharedStateEntity { Key = key, Count = count, ExpiresAt = expiresAt };
+        context.BeforeWrite();
+        Entries.Add(entity);
+        try
+        {
+            await db.SaveChangesAsync(ct).ConfigureAwait(false);
+            return true;
+        }
+        catch (DbUpdateException)
+        {
+            // inserted concurrently (primary key) – anything else is rethrown
+            db.Entry(entity).State = EntityState.Detached;
+            if (await Entries.AsNoTracking().AnyAsync(e => e.Key == key, ct).ConfigureAwait(false)) return false;
+            throw;
+        }
+        finally
+        {
+            db.ChangeTracker.Clear();
+        }
+    }
+
+    private Task CleanupSometimesAsync(long now, CancellationToken ct) =>
+        System.Security.Cryptography.RandomNumberGenerator.GetInt32(CleanupOneIn) == 0
+            ? context.Writing(Entries).Where(e => e.ExpiresAt <= now).ExecuteDeleteAsync(ct)
+            : Task.CompletedTask;
 }

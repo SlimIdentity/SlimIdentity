@@ -77,15 +77,14 @@ public sealed class SlimIdentityOptions
 /// </remarks>
 public sealed class SlimEndpointOptions
 {
-    /// <summary><c>/register</c>. Disable for invite-only applications or custom registration endpoints.</summary>
+    /// <summary><c>/register</c> (with mail also <c>/register/verify</c> and <c>/register/password</c>). Disable for invite-only applications or custom registration endpoints.</summary>
     public bool EnableRegistration { get; set; } = true;
-    /// <summary><c>/verify-email</c> and <c>/resend-verification</c>; verification mail after registration.</summary>
-    public bool EnableEmailVerification { get; set; } = true;
-    /// <summary><c>/forgot-password</c> and <c>/reset-password</c>.</summary>
+
+    /// <summary><c>/forgot-password</c>; the link continues at <c>/flow</c>.</summary>
     public bool EnablePasswordReset { get; set; } = true;
     /// <summary><c>/change-password</c>. Disable for LDAP-only setups – the password then lives in the directory.</summary>
     public bool EnableChangePassword { get; set; } = true;
-    /// <summary><c>/change-email</c> and <c>/confirm-email-change</c>. Disable if the login identifier is managed elsewhere (LDAP, SSO).</summary>
+    /// <summary><c>/change-email</c> and <c>/change-email/confirm</c>. Disable if the login identifier is managed elsewhere (LDAP, SSO).</summary>
     public bool EnableChangeEmail { get; set; } = true;
 
     /// <summary>Allows cookie sessions (<c>?useCookies=true</c>). JWT bearer tokens are allowed when <see cref="SlimTokenOptions.JwtSecret"/> is set.</summary>
@@ -107,9 +106,6 @@ public sealed class SlimEndpointOptions
 /// <summary>Sign-in requirements and answers.</summary>
 public sealed class SlimSignInOptions
 {
-    /// <summary>Rejects logins (403 <c>email_not_confirmed</c>) until the e-mail is verified.</summary>
-    public bool RequireConfirmedEmail { get; set; }
-
     /// <summary>
     /// <c>false</c> (default, OWASP): <c>/login</c> answers inactive and locked accounts exactly like a wrong password
     /// (401 <c>invalid_credentials</c>, same hashing time), so the response reveals neither existence nor state.
@@ -120,8 +116,10 @@ public sealed class SlimSignInOptions
 
 /// <summary>
 /// Progressive lockout (NIST SP 800-63B: throttle rather than lock hard): every <see cref="MaxFailedAttempts"/>
-/// consecutive failures lock the account, starting with <see cref="Duration"/> and doubling each time up to
-/// <see cref="MaxDuration"/>. The counter is only reset by a successful sign-in.
+/// consecutive failures lock the factor, starting with <see cref="Duration"/> and doubling each time up to
+/// <see cref="MaxDuration"/>. Password and second factor have separate counters with the same policy; each is reset
+/// by a success of its own factor. Passkeys, external logins and <c>ISlimAuthManager.SignInAsync</c> are not affected
+/// (nothing to guess) – block an account with <c>IsActive</c>.
 /// </summary>
 public sealed class SlimLockoutOptions
 {
@@ -259,8 +257,9 @@ public sealed class SlimExternalLoginOptions
     /// Automatically links an external login to an existing account with the same, verified e-mail – if that account has
     /// no password of its own (external-only, LDAP). An account with a password is never joined automatically: whoever
     /// set it may not be the owner of the mailbox (pre-account hijacking), so the user signs in and links the provider
-    /// with the link flow (<c>/login/{provider}?link=true</c>, <c>POST /link/external</c>). Unconfirmed accounts are
-    /// taken over by the verified owner instead. Default <c>true</c>.
+    /// with the link flow (<c>/login/{provider}?link=true</c>, <c>POST /link/external</c>). An unconfirmed account
+    /// without any way in (no password, external login or passkey) is confirmed and linked; one with a way in answers
+    /// <c>account_conflict</c>. Default <c>true</c>.
     /// </summary>
     public bool AutoLinkVerifiedEmails { get; set; } = true;
     /// <summary>Creates a new (password-less) user for unknown external identities. Default <c>true</c>.</summary>
@@ -279,8 +278,7 @@ public sealed class SlimLinkOptions
 {
     /// <summary>
     /// Base address of your front end, e.g. <c>https://app.example.com</c>. Links then point to
-    /// <c>/verify-email</c>, <c>/reset-password</c>, <c>/accept-invitation</c> and <c>/confirm-email-change</c>
-    /// (each with <c>?token=…</c>). Its origin is trusted like an entry in <see cref="SlimIdentityOptions.TrustedOrigins"/>.
+    /// <c>/verify-email</c>, <c>/reset-password</c> and <c>/accept-invitation</c> (each with <c>?token=…</c>). Its origin is trusted like an entry in <see cref="SlimIdentityOptions.TrustedOrigins"/>.
     /// </summary>
     public string? BaseUrl { get; set; }
 
@@ -290,13 +288,10 @@ public sealed class SlimLinkOptions
     public string? PasswordResetUrl { get; set; }
     /// <summary>Overrides the invitation link, e.g. <c>https://app.example.com/invite?token={token}</c>.</summary>
     public string? InvitationUrl { get; set; }
-    /// <summary>Overrides the e-mail change link (sent to the new address), e.g. <c>https://app.example.com/change-email?token={token}</c>.</summary>
-    public string? EmailChangeUrl { get; set; }
 
     internal string? EmailVerificationTemplate => EmailVerificationUrl ?? FromBase("/verify-email");
     internal string? PasswordResetTemplate => PasswordResetUrl ?? FromBase("/reset-password");
     internal string? InvitationTemplate => InvitationUrl ?? FromBase("/accept-invitation");
-    internal string? EmailChangeTemplate => EmailChangeUrl ?? FromBase("/confirm-email-change");
 
     private string? FromBase(string path) =>
         string.IsNullOrWhiteSpace(BaseUrl) ? null : $"{BaseUrl.TrimEnd('/')}{path}?token={{token}}";

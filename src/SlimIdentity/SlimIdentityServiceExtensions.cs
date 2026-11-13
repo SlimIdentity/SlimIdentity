@@ -62,14 +62,19 @@ public static class SlimIdentityServiceExtensions
         services.TryAddScoped<SlimAuthManager>();
         services.TryAddScoped<ISlimAuthManager>(sp => sp.GetRequiredService<SlimAuthManager>());
         services.TryAddScoped<SlimLoginHandlers>();
+        services.TryAddScoped<SlimSignInFlow>();
         services.TryAddScoped<SlimAccountHandlers>();
         services.TryAddScoped<SlimRegistrationService>();
+        services.TryAddScoped<SlimRegistrationFlow>();
+        services.TryAddScoped<SlimCredentialSetup>();
         services.TryAddScoped<SlimSignInMethodHandlers>();
 
         // ---------------------------------------------------------------- mail dispatch (enumeration-safe timing)
         services.TryAddSingleton<SlimEmailQueue>();
-        services.TryAddSingleton<SlimMailThrottle>();
-        services.TryAddSingleton<SlimAttemptGate>();
+        services.TryAddSingleton<SlimMemorySharedState>();
+        services.TryAddSingleton<ISlimSharedState>(sp => sp.GetRequiredService<SlimMemorySharedState>());
+        services.TryAddScoped<SlimSharedStateAccess>();
+        services.TryAddScoped<SlimMailThrottle>();
         services.TryAddSingleton<SlimHookRunner>();
         services.TryAddSingleton<ISlimOriginPolicy, SlimTrustedOriginsPolicy>();
         services.TryAddSingleton<SlimLinks>();
@@ -136,8 +141,10 @@ public static class SlimIdentityServiceExtensions
                 cookie.SlidingExpiration = c.SlidingExpiration;
                 cookie.Events.OnValidatePrincipal = SlimSecurityStampValidator.ValidateCookieAsync;
                 // JSON API: never redirect to a login page
-                cookie.Events.OnRedirectToLogin = ctx => { ctx.Response.StatusCode = StatusCodes.Status401Unauthorized; return Task.CompletedTask; };
-                cookie.Events.OnRedirectToAccessDenied = ctx => { ctx.Response.StatusCode = StatusCodes.Status403Forbidden; return Task.CompletedTask; };
+                cookie.Events.OnRedirectToLogin = ctx => SlimResults.WriteProblemAsync(ctx.Response, StatusCodes.Status401Unauthorized,
+                    SlimErrorCodes.Unauthenticated, "Authentication is required.");
+                cookie.Events.OnRedirectToAccessDenied = ctx => SlimResults.WriteProblemAsync(ctx.Response, StatusCodes.Status403Forbidden,
+                    SlimErrorCodes.Forbidden, "The principal lacks the permission.");
             });
 
         services.AddOptions<CookieAuthenticationOptions>(SlimIdentityDefaults.ExternalScheme)
@@ -150,7 +157,8 @@ public static class SlimIdentityServiceExtensions
                 cookie.Cookie.IsEssential = true;
                 cookie.ExpireTimeSpan = TimeSpan.FromMinutes(10);
                 cookie.SlidingExpiration = false;
-                cookie.Events.OnRedirectToLogin = ctx => { ctx.Response.StatusCode = StatusCodes.Status401Unauthorized; return Task.CompletedTask; };
+                cookie.Events.OnRedirectToLogin = ctx => SlimResults.WriteProblemAsync(ctx.Response, StatusCodes.Status401Unauthorized,
+                    SlimErrorCodes.Unauthenticated, "Authentication is required.");
             });
 
         services.AddOptions<JwtBearerOptions>(SlimIdentityDefaults.BearerScheme)

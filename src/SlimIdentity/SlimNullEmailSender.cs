@@ -7,9 +7,9 @@ namespace SlimIdentity;
 public sealed class SlimNullEmailSender(ILogger<SlimNullEmailSender> logger) : ISlimEmailSender
 {
     /// <inheritdoc />
-    public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string verificationTokenOrLink, CancellationToken ct)
+    public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string code, string verificationTokenOrLink, CancellationToken ct)
     {
-        Log.NullMailVerification(logger, email, verificationTokenOrLink);
+        Log.NullMailVerification(logger, email, code, verificationTokenOrLink);
         return Task.CompletedTask;
     }
 
@@ -28,9 +28,16 @@ public sealed class SlimNullEmailSender(ILogger<SlimNullEmailSender> logger) : I
     }
 
     /// <inheritdoc />
-    public Task SendEmailChangeConfirmationAsync(SlimEmailContext context, string newEmail, string confirmationTokenOrLink, CancellationToken ct)
+    public Task SendEmailVerificationCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct)
     {
-        Log.NullMailEmailChange(logger, newEmail, confirmationTokenOrLink);
+        Log.NullMailVerificationCode(logger, email, code);
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public Task SendEmailChangeCodeAsync(SlimEmailContext context, string newEmail, string code, CancellationToken ct)
+    {
+        Log.NullMailEmailChange(logger, newEmail, code);
         return Task.CompletedTask;
     }
 

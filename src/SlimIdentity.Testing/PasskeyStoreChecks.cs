@@ -11,6 +11,7 @@ internal static class PasskeyStoreChecks
         PublicKey = RandomNumberGenerator.GetBytes(77),
         SignCount = signCount,
         BackupEligible = true,
+        UserHandle = RandomNumberGenerator.GetBytes(32),
         Name = "Conformance key",
         CreatedUtc = ConformanceRun.WholeSeconds(DateTimeOffset.UtcNow),
     };
@@ -37,6 +38,7 @@ internal static class PasskeyStoreChecks
                 Expect.Equal(7u, found?.SignCount, "SignCount");
                 Expect.Equal("Conformance key", found?.Name, "Name");
                 Expect.True(found is { BackupEligible: true, BackedUp: false }, "BackupEligible / BackedUp came back changed.");
+                Expect.True(found?.UserHandle is { } handle && handle.AsSpan().SequenceEqual(mine.UserHandle), "The user handle came back changed.");
                 Expect.SameInstant(mine.CreatedUtc, found?.CreatedUtc, "CreatedUtc");
 
                 var shorter = mine.CredentialId[..^1];
@@ -47,7 +49,7 @@ internal static class PasskeyStoreChecks
                 Expect.Equal(1, listed.Count, "passkeys of the user");
             });
 
-        await run.CheckAsync(Store, "a credential id is registered once",
+        await run.CheckRaceAsync(Store, "a credential id is registered once",
             "Unique index on the credential id; AddPasskeyAsync returns false instead of throwing – also in parallel.",
             async () =>
             {
@@ -60,7 +62,7 @@ internal static class PasskeyStoreChecks
                 Expect.Equal(1, results.Count(r => r), "successful AddPasskeyAsync calls with one credential id");
             });
 
-        await run.CheckAsync(Store, "TryRecordUseAsync is single use and compare-and-set",
+        await run.CheckRaceAsync(Store, "TryRecordUseAsync is single use and compare-and-set",
             "One statement: UPDATE … WHERE credential_id = @id AND sign_count = @expected AND (last_challenge_at IS NULL OR last_challenge_at < @issuedAt).",
             async () =>
             {
@@ -89,7 +91,7 @@ internal static class PasskeyStoreChecks
                 Expect.Equal(1, parallel.Count(r => r), "parallel uses with the same expected counter that succeeded");
             });
 
-        await run.CheckAsync(Store, "a challenge is single use even when the counter stays 0 (synced passkeys)",
+        await run.CheckRaceAsync(Store, "a challenge is single use even when the counter stays 0 (synced passkeys)",
             "Synced passkeys always report sign count 0, so the challenge is the only replay protection: the WHERE clause must include last_challenge_at < @issuedAt and the update must be one atomic statement.",
             async () =>
             {

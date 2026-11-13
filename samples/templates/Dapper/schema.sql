@@ -11,6 +11,8 @@ CREATE TABLE users (
     email_confirmed       boolean      NOT NULL DEFAULT false,
     failed_login_attempts int          NOT NULL DEFAULT 0,
     lockout_end_utc       timestamptz  NULL,
+    failed_second_factor_attempts int  NOT NULL DEFAULT 0,
+    second_factor_lockout_end_utc timestamptz NULL,
     two_factor_enabled    boolean      NOT NULL DEFAULT false,
     password_change_required boolean   NOT NULL DEFAULT false,
     totp_secret           text         NULL,   -- ISlimTwoFactorStore; already encrypted by SlimIdentity
@@ -75,6 +77,7 @@ CREATE TABLE passkeys (
     sign_count         bigint       NOT NULL DEFAULT 0,
     backup_eligible    boolean      NOT NULL DEFAULT false,   -- may be synced – fixed for the passkey
     backed_up          boolean      NOT NULL DEFAULT false,   -- currently synced – updated at every sign-in
+    user_handle        bytea,                                 -- WebAuthn user handle (random, at most 64 bytes)
     last_challenge_at  bigint       NULL,
     name               varchar(64)  NOT NULL,
     created_utc        timestamptz  NOT NULL,

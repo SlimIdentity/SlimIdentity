@@ -36,11 +36,12 @@ against your real database checks all of the following, including the parallel c
   `SlimNewUser.Profile` (your [registration profile](../docs/guides/registration-profile.md)) is written in the same
   transaction – nothing of it when the address is taken.
 - `UpdateSecurityStateAsync` persists only the security fields of `SlimUser`
-  (PasswordHash, SecurityStamp, EmailConfirmed, FailedLoginAttempts, LockoutEndUtc, TwoFactorEnabled, PasswordChangeRequired).
-- The sign-in bookkeeping methods touch **only their own columns**, in a single statement:
-  `IncrementFailedLoginAttemptsAsync` (`SET failed = failed + 1 … RETURNING failed`), `SetLockoutEndAsync`,
-  `ResetFailedLoginAttemptsAsync` and `UpdatePasswordHashAsync` (`… WHERE password_hash = @currentHash`). Never
-  implement them by writing back the whole user – a concurrent password change could be undone.
+  (PasswordHash, SecurityStamp, EmailConfirmed, TwoFactorEnabled, PasswordChangeRequired) – never the attempt counters.
+- The sign-in bookkeeping methods touch **only their own columns**: `TryBeginAttemptAsync` reads and writes the
+  counter and lockout end of one factor in one atomic step (`SELECT … FOR UPDATE` in a transaction, or a
+  compare-and-set `UPDATE` retried on 0 rows), `ResetFailedAttemptsAsync` clears one factor, and
+  `UpdatePasswordHashAsync` writes only `… WHERE password_hash = @currentHash`. Never implement them by writing back
+  the whole user – a concurrent password change could be undone.
 - `UpdateEmailAsync` changes the address and its normalized column and returns `false` if it is already taken – let
   the unique constraint decide instead of checking first.
 - `ValidateAndConsumeRefreshTokenAsync` / `ValidateAndConsumeRecoveryCodeAsync` must delete **atomically**
@@ -52,7 +53,7 @@ against your real database checks all of the following, including the parallel c
 - `ISlimSessionStore`: `FindAsync` must not return revoked sessions (deleting the row is enough); clean up expired rows
   regularly (`DELETE … WHERE expires_utc < now()`). `UserAgent` / `IpAddress` are personal data – only store them if
   your device list needs them.
-- Invited users are created with an empty `passwordHash` (`CreateAsync(new SlimNewUser { Email = email })`) before calling
-  `CreateInvitationAsync`; a `null` result means the address is already registered.
+- Invited users are created without a password (`ISlimAuthManager.CreateUserAsync(email)`) before calling
+  `CreateInvitationAsync`; `409 email_taken` means the address is already registered.
 - Custom claims from `GetClaimsAsync`: `ClaimTypes.Role` is normalized to `role`; reserved claims
   (`sub`, `email`, `slim_stamp`, `amr`, `act`, `sid`, `auth_time`) are ignored.

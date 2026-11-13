@@ -32,9 +32,10 @@ public sealed class SmtpSettings
 /// </summary>
 public sealed class MailKitEmailSender(IOptions<SmtpSettings> settings) : ISlimEmailSender
 {
-    public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string link, CancellationToken ct) =>
-        SendAsync(email, "Please confirm your e-mail address",
-            $"<p>Welcome! Please confirm your address:</p><p><a href=\"{link}\">Confirm e-mail</a></p>", ct);
+    public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string code, string link, CancellationToken ct) =>
+        SendAsync(email, $"Confirm your e-mail address: {code}",
+            $"<p>Welcome! Enter <b>{code}</b> to confirm your address, or open this link:</p><p><a href=\"{link}\">Confirm e-mail</a></p>" +
+            "<p>If you did not register, you can ignore this e-mail.</p>", ct);
 
     public Task SendPasswordResetEmailAsync(SlimEmailContext context, string email, string link, CancellationToken ct) =>
         SendAsync(email, "Reset your password",
@@ -44,9 +45,14 @@ public sealed class MailKitEmailSender(IOptions<SmtpSettings> settings) : ISlimE
     public Task SendTwoFactorCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) =>
         SendAsync(email, $"Your sign-in code: {code}", $"<p>Your code is <b>{code}</b>. It expires in a few minutes.</p>", ct);
 
-    public Task SendEmailChangeConfirmationAsync(SlimEmailContext context, string newEmail, string link, CancellationToken ct) =>
-        SendAsync(newEmail, "Confirm your new e-mail address",
-            $"<p>Please confirm that this address should be used for your account:</p><p><a href=\"{link}\">Confirm address</a></p>" +
+    public Task SendEmailVerificationCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) =>
+        SendAsync(email, $"Confirm your e-mail address: {code}",
+            $"<p>Enter <b>{code}</b> to confirm this address and finish signing in. It expires in a few minutes.</p>" +
+            "<p>If you did not try to sign in, you can ignore this e-mail.</p>", ct);
+
+    public Task SendEmailChangeCodeAsync(SlimEmailContext context, string newEmail, string code, CancellationToken ct) =>
+        SendAsync(newEmail, $"Confirm your new e-mail address: {code}",
+            $"<p>Enter <b>{code}</b> in your account settings to use this address for your account. It expires in 15 minutes.</p>" +
             "<p>If you did not request this, you can ignore this e-mail.</p>", ct);
 
     // Optional (default: no mail) – sent to the old address after the change. Encode user input in HTML!
@@ -89,8 +95,8 @@ public sealed class SendGridEmailSender(ISendGridClient client, ILogger<SendGrid
 {
     private static readonly EmailAddress From = new("no-reply@example.com", "MyApp");
 
-    public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string link, CancellationToken ct) =>
-        SendAsync(email, "Please confirm your e-mail address", $"<a href=\"{link}\">Confirm e-mail</a>", ct);
+    public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string code, string link, CancellationToken ct) =>
+        SendAsync(email, $"Confirm your e-mail address: {code}", $"Your code is <b>{code}</b>, or <a href=\"{link}\">confirm e-mail</a>.", ct);
 
     public Task SendPasswordResetEmailAsync(SlimEmailContext context, string email, string link, CancellationToken ct) =>
         SendAsync(email, "Reset your password", $"<a href=\"{link}\">Reset password</a>", ct);
@@ -98,8 +104,11 @@ public sealed class SendGridEmailSender(ISendGridClient client, ILogger<SendGrid
     public Task SendTwoFactorCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) =>
         SendAsync(email, $"Your sign-in code: {code}", $"Your code is <b>{code}</b>.", ct);
 
-    public Task SendEmailChangeConfirmationAsync(SlimEmailContext context, string newEmail, string link, CancellationToken ct) =>
-        SendAsync(newEmail, "Confirm your new e-mail address", $"<a href=\"{link}\">Confirm address</a>", ct);
+    public Task SendEmailVerificationCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) =>
+        SendAsync(email, $"Confirm your e-mail address: {code}", $"Your confirmation code is <b>{code}</b>.", ct);
+
+    public Task SendEmailChangeCodeAsync(SlimEmailContext context, string newEmail, string code, CancellationToken ct) =>
+        SendAsync(newEmail, $"Confirm your new e-mail address: {code}", $"Your confirmation code is <b>{code}</b>.", ct);
 
     private async Task SendAsync(string to, string subject, string html, CancellationToken ct)
     {
@@ -113,7 +122,7 @@ public sealed class SendGridEmailSender(ISendGridClient client, ILogger<SendGrid
 /// <summary>Development: records that a mail would have been sent without logging its contents or recipient.</summary>
 public sealed class LoggingEmailSender(ILogger<LoggingEmailSender> logger) : ISlimEmailSender
 {
-    public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string link, CancellationToken ct)
+    public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string code, string link, CancellationToken ct)
     { logger.LogInformation("Development mail sink: verification email."); return Task.CompletedTask; }
 
     public Task SendPasswordResetEmailAsync(SlimEmailContext context, string email, string link, CancellationToken ct)
@@ -122,6 +131,9 @@ public sealed class LoggingEmailSender(ILogger<LoggingEmailSender> logger) : ISl
     public Task SendTwoFactorCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct)
     { logger.LogInformation("Development mail sink: two-factor code email."); return Task.CompletedTask; }
 
-    public Task SendEmailChangeConfirmationAsync(SlimEmailContext context, string newEmail, string link, CancellationToken ct)
-    { logger.LogInformation("Development mail sink: email change confirmation."); return Task.CompletedTask; }
+    public Task SendEmailVerificationCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct)
+    { logger.LogInformation("Development mail sink: e-mail verification code."); return Task.CompletedTask; }
+
+    public Task SendEmailChangeCodeAsync(SlimEmailContext context, string newEmail, string code, CancellationToken ct)
+    { logger.LogInformation("Development mail sink: e-mail change code."); return Task.CompletedTask; }
 }

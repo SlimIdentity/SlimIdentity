@@ -34,8 +34,8 @@ What `AddSlimIdentity()` + `MapSlimIdentityApi()` give you, with the EF Core pac
   with rotation, reuse detection and an absolute session lifetime.
 - **Server-side sessions**: real per-device logout, device list, sign out everywhere (EF Core package: included; own
   stores: `ISlimSessionStore`).
-- **The account flows**: registration, e-mail verification, password reset and change, e-mail change – stateless,
-  single-use links.
+- **The account flows**: registration, e-mail verification, password reset and change, e-mail change – one
+  step-by-step sign-in flow with single-use codes and links, no state in the database.
 - **Brute-force protection**: per-client rate limiting plus progressive account lockout; uniform answers and timing
   against account enumeration; pluggable password rules (e.g. breached-password check).
 - **2FA**: TOTP (authenticator apps), e-mail codes, recovery codes – secrets encrypted at rest, every code usable once.
@@ -136,10 +136,10 @@ links to every guide and reference.
 
 ## Roadmap
 
-After 1.0, roughly in this order – nothing here needs a breaking change:
+After 1.0, roughly in this order:
 
 - Device-bound tokens (DPoP) for bearer clients.
-- Passkeys: accounts with a passkey only (registration without a password); a relying party per tenant domain.
+- Passkeys: a relying party per tenant domain.
 - API-key entity in the EF Core package; npm package of the TypeScript client if there is demand.
 
 ## Contributing

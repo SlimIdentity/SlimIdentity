@@ -56,7 +56,7 @@ internal static class TwoFactorStoreChecks
                 Expect.True(await Consume(other, otherCode), "Replacing the codes of one user removed the codes of another user.");
             });
 
-        await run.CheckAsync(Store, "a recovery code is accepted once even under parallel requests",
+        await run.CheckRaceAsync(Store, "a recovery code is accepted once even under parallel requests",
             "Consume with one atomic statement (DELETE … WHERE user_id = @id AND code_hash = @hash, then check that exactly one row was deleted).",
             async () =>
             {
@@ -103,7 +103,7 @@ internal static class TwoFactorStoreChecks
             Expect.True(await Mark(other, now), $"{method}: the value of one user blocked another user.");
         });
 
-        await run.CheckAsync(Store, $"{method} accepts a value once even under parallel requests", hint, async () =>
+        await run.CheckRaceAsync(Store, $"{method} accepts a value once even under parallel requests", hint, async () =>
         {
             var user = await run.NewUserAsync();
             var value = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
@@ -150,7 +150,7 @@ internal static class RefreshTokenStoreChecks
                 Expect.Equal<string?>(null, await Consume(hash), "consumption of an expired token");
             });
 
-        await run.CheckAsync(Store, "a refresh token is consumed once even under parallel requests",
+        await run.CheckRaceAsync(Store, "a refresh token is consumed once even under parallel requests",
             "Consume atomically: DELETE … RETURNING user_id, or check that the DELETE affected exactly one row.",
             async () =>
             {

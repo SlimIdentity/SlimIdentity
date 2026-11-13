@@ -17,8 +17,8 @@ public sealed class WithoutEmailTests
     [Theory]
     [InlineData("/auth/forgot-password")]
     [InlineData("/auth/register")]
-    [InlineData("/auth/verify-email")]
-    [InlineData("/auth/resend-verification")]
+    [InlineData("/auth/register/verify")]
+    [InlineData("/auth/login/verify-email")]
     [InlineData("/auth/change-email")]
     [InlineData("/auth/confirm-email-change")]
     public async Task Mail_based_endpoints_are_not_mapped(string path)
@@ -37,8 +37,8 @@ public sealed class WithoutEmailTests
         await me.PostJsonAsync("/auth/change-password", new { currentPassword = TestApp.UserPassword, newPassword = "Changed-Pass-123" });
         await app.LoginBearerAsync(TestApp.UserEmail, "Changed-Pass-123");
 
-        // /reset-password stays for links the administrator hands over
-        await app.CreateClient().PostJsonAsync("/auth/reset-password", new { token = "invalid", newPassword = "Another-Pass-123" }, HttpStatusCode.BadRequest);
+        // reset links the administrator hands over still open the flow
+        await app.CreateClient().ResetPasswordJsonAsync("invalid", "Another-Pass-123", HttpStatusCode.Unauthorized);
     }
 
     [Fact]
@@ -56,14 +56,6 @@ public sealed class WithoutEmailTests
         await using var app = await TestApp.StartAsync(Mailless(allowSelfRegistration: true));
         await app.CreateClient().PostJsonAsync("/auth/register", new { email = "new@test.local", password = "New-Member-Pass-1" });
         await app.LoginBearerAsync("new@test.local", "New-Member-Pass-1");
-    }
-
-    [Fact]
-    public async Task Self_registration_with_required_confirmation_cannot_start()
-    {
-        var error = await Assert.ThrowsAnyAsync<Exception>(() => TestApp.StartAsync(
-            Mailless(allowSelfRegistration: true, configure: o => o.SignIn.RequireConfirmedEmail = true)));
-        Assert.Contains("RequireConfirmedEmail", error.ToString());
     }
 
     [Fact]
@@ -100,10 +92,10 @@ public sealed class WithoutEmailTests
         await app.Users.UpdateSecurityStateAsync(user, default);
 
         var challenge = await app.CreateClient().PostJsonAsync("/auth/login?useCookies=false",
-            new { email = TestApp.UserEmail, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized);
+            new { email = TestApp.UserEmail, password = TestApp.UserPassword });
 
-        Assert.Equal("requires_two_factor", challenge.Str("status"));
-        Assert.Equal("recovery", challenge.Str("twoFactorMethod"));
+        Assert.Equal("second_factor", challenge.GetProperty("actions")[0].GetString());
+        Assert.Equal("recovery", challenge.GetProperty("details").GetProperty("secondFactor").GetProperty("methods")[0].GetString());
     }
 
     [Theory]
@@ -111,7 +103,7 @@ public sealed class WithoutEmailTests
     [InlineData(false)]   // mail available, TwoFactor.AllowEmailCodes = false
     public async Task The_2fa_status_reports_recovery_when_codes_cannot_be_sent(bool withoutEmail)
     {
-        // review finding F-07: GET /2fa said "email" while the sign-in already asked for a recovery code
+        // GET /2fa must not say "email" while the sign-in asks for a recovery code
         await using var app = await TestApp.StartAsync(withoutEmail
             ? Mailless()
             : new TestAppOptions { Configure = o => o.TwoFactor.AllowEmailCodes = false });

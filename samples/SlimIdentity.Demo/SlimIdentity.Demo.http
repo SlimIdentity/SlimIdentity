@@ -74,16 +74,40 @@ GET {{auth}}/password-policy
 
 ###
 
+# registration: the address only – answers { status: "action_required", actions: ["verify_email", "set_credential"], flowToken }
+# and mails a 6-digit code plus a link (printed to the console)
 POST {{auth}}/register
 Content-Type: application/json
 
-{ "email": "new@demo.local", "password": "NewUser123!" }
+{ "email": "new@demo.local" }
 
 ###
-POST {{auth}}/verify-email
+POST {{auth}}/register/verify
+Content-Type: application/json
+
+{ "flowToken": "<flowToken>", "code": "123456" }
+
+###
+# or the token of the link instead of the code
+POST {{auth}}/flow
 Content-Type: application/json
 
 { "token": "<token from console>" }
+
+###
+# step set_credential: creates the account (address confirmed) and signs in
+POST {{auth}}/register/password
+Content-Type: application/json
+
+{ "flowToken": "<flowToken>", "password": "NewUser123!" }
+
+###
+# or at sign-in: login of the unconfirmed account answers 200 { status: "action_required", actions: ["verify_email"], flowToken }
+# and mails a 6-digit code (printed to the console)
+POST {{auth}}/login/verify-email
+Content-Type: application/json
+
+{ "flowToken": "<flowToken>", "code": "123456" }
 
 ###
 POST {{auth}}/forgot-password
@@ -92,10 +116,17 @@ Content-Type: application/json
 { "email": "user@demo.local" }
 
 ###
-POST {{auth}}/reset-password
+# the reset link continues as a flow: answers { status: "action_required", actions: ["set_credential"], flowToken }
+POST {{auth}}/flow
 Content-Type: application/json
 
-{ "token": "<token from console>", "newPassword": "Changed123!" }
+{ "token": "<token from console>" }
+
+###
+POST {{auth}}/register/password
+Content-Type: application/json
+
+{ "flowToken": "<flowToken>", "password": "Changed123!" }
 
 ###
 POST {{auth}}/change-password
@@ -114,18 +145,20 @@ Content-Type: application/json
 { "email": "invited@demo.local" }
 
 ###
-POST {{auth}}/invitation/info
+# the invitation link continues as a flow: answers { status: "action_required", actions: ["set_credential"], flowToken,
+# details: { setCredential: { email } } }
+POST {{auth}}/flow
 Content-Type: application/json
 
 { "token": "{{invite.response.body.$.token}}" }
 
 ###
-POST {{auth}}/invitation/accept
+POST {{auth}}/register/password
 Content-Type: application/json
 
-{ "token": "{{invite.response.body.$.token}}", "password": "Invited123!" }
+{ "flowToken": "<flowToken>", "password": "Invited123!" }
 
-### ---------------------------------------------------------------- E-mail change (link is printed to the console)
+### ---------------------------------------------------------------- E-mail change (code is printed to the console)
 
 POST {{auth}}/change-email
 Authorization: Bearer {{accessToken}}
@@ -134,10 +167,12 @@ Content-Type: application/json
 { "newEmail": "admin-new@demo.local", "password": "Admin123!" }
 
 ###
-POST {{auth}}/confirm-email-change
+# token from the answer above; any session of the account may confirm, it continues with new tokens
+POST {{auth}}/change-email/confirm
+Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
-{ "token": "<token from console>" }
+{ "token": "<token>", "code": "<code from console>" }
 
 ### ---------------------------------------------------------------- 2FA (TOTP)
 
@@ -153,11 +188,11 @@ Content-Type: application/json
 { "setupToken": "<setupToken>", "code": "123456", "password": "User1234!" }
 
 ###
-# login now answers 401 { status: "requires_two_factor", preAuthToken }
+# login now answers 200 { status: "action_required", actions: ["second_factor"], flowToken }
 POST {{auth}}/login/2fa
 Content-Type: application/json
 
-{ "preAuthToken": "<preAuthToken>", "code": "123456" }
+{ "flowToken": "<flowToken>", "code": "123456" }
 
 ### ---------------------------------------------------------------- Sudo mode & impersonation
 

@@ -21,7 +21,9 @@ public sealed class EfCoreTemplateConformanceTests
         var connectionString = new SqliteConnectionStringBuilder { DataSource = file, DefaultTimeout = 30, Pooling = false }.ToString();
         try
         {
-            await VerifyAsync(o => o.UseSqlite(connectionString), async db => await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;"));
+            // SQLite serializes all writes, so repeated race rounds find little there; the server databases run the default.
+            await VerifyAsync(o => o.UseSqlite(connectionString), async db => await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;"),
+                new SlimConformanceOptions { RaceRounds = 2 });
         }
         finally
         {
@@ -48,7 +50,8 @@ public sealed class EfCoreTemplateConformanceTests
         await VerifyAsync(o => o.UseSqlServer(connectionString));
     }
 
-    private static async Task VerifyAsync(Action<DbContextOptionsBuilder> provider, Func<AppDbContext, Task>? prepare = null)
+    private static async Task VerifyAsync(Action<DbContextOptionsBuilder> provider, Func<AppDbContext, Task>? prepare = null,
+        SlimConformanceOptions? options = null)
     {
         await using var services = new ServiceCollection()
             .AddDbContextFactory<AppDbContext>(provider)
@@ -70,7 +73,7 @@ public sealed class EfCoreTemplateConformanceTests
             if (prepare is not null) await prepare(db);
         }
 
-        var report = await SlimStoreConformance.VerifyAsync(services);
+        var report = await SlimStoreConformance.VerifyAsync(services, options);
         Assert.Contains(report.Results, r => r.Store == nameof(ISlimSessionStore));   // every capability was checked
     }
 }

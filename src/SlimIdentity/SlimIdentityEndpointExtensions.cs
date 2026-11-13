@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using SlimIdentity.Contracts;
 using SlimIdentity.Endpoints;
 using SlimIdentity.Http;
+using SlimIdentity.Services;
 
 namespace SlimIdentity;
 
@@ -42,6 +43,9 @@ public static class SlimIdentityEndpointExtensions
         if (o.Email.Enabled && !Has<ISlimEmailSender>())
             throw new InvalidOperationException(
                 "SlimIdentity: no ISlimEmailSender registered. Call .AddEmailSender<T>() or .AddNullEmailSender() – or .WithoutEmail() for a host without mail.");
+        if (Has<ISlimSecondFactorPolicy>() && !Has<ISlimTwoFactorStore>())
+            throw new InvalidOperationException(
+                "SlimIdentity: AddSecondFactorPolicy() needs an ISlimTwoFactorStore. Call .AddTwoFactorStore<T>() or use the EF Core stores.");
         if (!o.Email.Enabled && Has<ISlimEmailSender>())
             throw new InvalidOperationException(
                 "SlimIdentity: WithoutEmail() and a mail sender are both registered. Remove one of them.");
@@ -81,8 +85,12 @@ public static class SlimIdentityEndpointExtensions
             .Any(m => m.HttpMethods.Any(x => x is not ("GET" or "HEAD" or "OPTIONS")));
         var has403 = endpoint.Metadata.OfType<IProducesResponseTypeMetadata>().Any(m => m.StatusCode == StatusCodes.Status403Forbidden);
         if (stateChanging && !has403)
-            endpoint.Metadata.Add(new ProducesResponseTypeMetadata(StatusCodes.Status403Forbidden, typeof(SlimStatusResponse), ["application/json"]));
+            endpoint.Metadata.Add(new ProducesResponseTypeMetadata(StatusCodes.Status403Forbidden, typeof(SlimProblemResponse), [SlimResults.ProblemContentType]));
     }
+
+    /// <summary>OpenAPI: the endpoint can answer <paramref name="statusCode"/> with a <see cref="SlimProblemResponse"/>.</summary>
+    internal static RouteHandlerBuilder ProducesSlimProblem(this RouteHandlerBuilder builder, int statusCode) =>
+        builder.Produces<SlimProblemResponse>(statusCode, SlimResults.ProblemContentType);
 
     /// <summary>Applies the SlimIdentity CSRF check (custom header + Origin) to a host endpoint.</summary>
     public static TBuilder RequireSlimCsrf<TBuilder>(this TBuilder builder) where TBuilder : IEndpointConventionBuilder =>
@@ -95,26 +103,82 @@ public static class SlimIdentityEndpointExtensions
         group.MapPost("/login", static ([FromBody] SlimLoginRequest request, [FromQuery] bool? useCookies,
                 [FromServices] SlimLoginHandlers h, CancellationToken ct) => h.LoginAsync(request, useCookies, ct))
             .WithName("SlimIdentity_Login")
-            .WithSummary("Sign in with e-mail and password (cookie or JWT, see ?useCookies).")
+            .WithSummary("Sign in with e-mail and password (cookie or JWT, see ?useCookies): the session, or action_required with the steps that follow.")
             .Produces<SlimAuthResponse>()
-            .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
-            .Produces<SlimLoginChallengeResponse>(StatusCodes.Status401Unauthorized)
-            .Produces<SlimStatusResponse>(StatusCodes.Status403Forbidden)
-            .Produces<SlimLockedResponse>(StatusCodes.Status423Locked)
-            .Produces(StatusCodes.Status429TooManyRequests)
+            .Produces<SlimActionRequiredResponse>()
+            .ProducesSlimProblem(StatusCodes.Status400BadRequest)
+            .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
+            .ProducesSlimProblem(StatusCodes.Status403Forbidden)
+            .ProducesSlimProblem(StatusCodes.Status423Locked)
+            .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
             .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
             .AllowAnonymous();
+
+        if (o.Email.Enabled)
+        {
+            group.MapPost("/login/verify-email", static ([FromBody] SlimVerifyEmailLoginRequest request,
+                    [FromServices] SlimLoginHandlers h, CancellationToken ct) => h.VerifyEmailAsync(request, ct))
+                .WithName("SlimIdentity_LoginVerifyEmail")
+                .WithSummary("Step verify_email: flowToken + the code mailed with it confirms the address; the session or the next step.")
+                .Produces<SlimAuthResponse>()
+                .Produces<SlimActionRequiredResponse>()
+                .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
+                .ProducesSlimProblem(StatusCodes.Status403Forbidden)
+                .ProducesSlimProblem(StatusCodes.Status423Locked)
+                .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
+                .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
+                .AllowAnonymous();
+        }
 
         if (twoFactor)
         {
             group.MapPost("/login/2fa", static ([FromBody] SlimTwoFactorLoginRequest request,
                     [FromServices] SlimLoginHandlers h, CancellationToken ct) => h.LoginTwoFactorAsync(request, ct))
                 .WithName("SlimIdentity_LoginTwoFactor")
-                .WithSummary("Exchange preAuthToken + TOTP / e-mail / recovery code for the final session.")
+                .WithSummary("Step second_factor: flowToken + TOTP / e-mail / recovery code; the session or the next step.")
                 .Produces<SlimAuthResponse>()
-                .Produces<SlimStatusResponse>(StatusCodes.Status401Unauthorized)
-                .Produces<SlimLockedResponse>(StatusCodes.Status423Locked)
-                .Produces(StatusCodes.Status429TooManyRequests)
+                .Produces<SlimActionRequiredResponse>()
+                .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
+                .ProducesSlimProblem(StatusCodes.Status403Forbidden)
+                .ProducesSlimProblem(StatusCodes.Status423Locked)
+                .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
+                .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
+                .AllowAnonymous();
+
+            group.MapPost("/login/2fa/setup", static ([FromBody] SlimFlowStepRequest request,
+                    [FromServices] SlimLoginHandlers h, CancellationToken ct) => h.SetupTwoFactorAsync(request, ct))
+                .WithName("SlimIdentity_LoginTwoFactorSetup")
+                .WithSummary("Step setup_second_factor: a new authenticator secret (shared key, otpauth URI, setup token); nothing is stored yet.")
+                .Produces<SlimTwoFactorSetupResponse>()
+                .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
+                .ProducesSlimProblem(StatusCodes.Status423Locked)
+                .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
+                .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
+                .AllowAnonymous();
+
+            group.MapPost("/login/2fa/enable", static ([FromBody] SlimTwoFactorSetupLoginRequest request,
+                    [FromServices] SlimLoginHandlers h, CancellationToken ct) => h.EnableTwoFactorAsync(request, ct))
+                .WithName("SlimIdentity_LoginTwoFactorEnable")
+                .WithSummary("Step setup_second_factor: flowToken + setup token + first code enables the authenticator; then confirm_recovery_codes with the codes.")
+                .Produces<SlimAuthResponse>()
+                .Produces<SlimActionRequiredResponse>()
+                .ProducesSlimProblem(StatusCodes.Status400BadRequest)
+                .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
+                .ProducesSlimProblem(StatusCodes.Status423Locked)
+                .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
+                .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
+                .AllowAnonymous();
+
+            group.MapPost("/login/2fa/recovery-codes-saved", static ([FromBody] SlimFlowStepRequest request,
+                    [FromServices] SlimLoginHandlers h, CancellationToken ct) => h.ConfirmRecoveryCodesAsync(request, ct))
+                .WithName("SlimIdentity_LoginRecoveryCodesSaved")
+                .WithSummary("Step confirm_recovery_codes: the recovery codes are saved; the session or the next step.")
+                .Produces<SlimAuthResponse>()
+                .Produces<SlimActionRequiredResponse>()
+                .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
+                .ProducesSlimProblem(StatusCodes.Status403Forbidden)
+                .ProducesSlimProblem(StatusCodes.Status423Locked)
+                .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
                 .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
                 .AllowAnonymous();
         }
@@ -122,12 +186,24 @@ public static class SlimIdentityEndpointExtensions
         group.MapPost("/login/password-change", static ([FromBody] SlimPasswordChangeLoginRequest request,
                 [FromServices] SlimLoginHandlers h, CancellationToken ct) => h.CompletePasswordChangeAsync(request, ct))
             .WithName("SlimIdentity_LoginPasswordChange")
-            .WithSummary("Replace a password set by an administrator (passwordChangeToken from /login); then 2FA or the session.")
+            .WithSummary("Step change_password: flowToken + a new password replacing one set by an administrator; the session or the next step.")
             .Produces<SlimAuthResponse>()
-            .Produces<SlimLoginChallengeResponse>(StatusCodes.Status401Unauthorized)
-            .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
-            .ProducesValidationProblem()
-            .Produces(StatusCodes.Status429TooManyRequests)
+            .Produces<SlimActionRequiredResponse>()
+            .ProducesSlimProblem(StatusCodes.Status400BadRequest)
+            .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
+            .ProducesSlimProblem(StatusCodes.Status403Forbidden)
+            .ProducesSlimProblem(StatusCodes.Status423Locked)
+            .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
+            .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
+            .AllowAnonymous();
+
+        group.MapPost("/flow", static ([FromBody] SlimFlowRequest request, [FromQuery] bool? useCookies,
+                [FromServices] SlimLoginHandlers h, CancellationToken ct) => h.ReadFlowAsync(request, useCookies, ct))
+            .WithName("SlimIdentity_Flow")
+            .WithSummary("The open steps of a flow (flowToken), e.g. after an external sign-in; or the flow a mailed link (token) continues.")
+            .Produces<SlimActionRequiredResponse>()
+            .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
+            .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
             .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
             .AllowAnonymous();
 
@@ -138,8 +214,8 @@ public static class SlimIdentityEndpointExtensions
                 .WithName("SlimIdentity_Refresh")
                 .WithSummary("Rotate a refresh token into a new JWT pair (single use; reuse revokes the session).")
                 .Produces<SlimAuthResponse>()
-                .Produces<SlimStatusResponse>(StatusCodes.Status401Unauthorized)
-                .Produces(StatusCodes.Status429TooManyRequests)
+                .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
+                .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
                 .RequireRateLimiting(SlimIdentityDefaults.RefreshPolicy)
                 .AllowAnonymous();
         }
@@ -155,7 +231,7 @@ public static class SlimIdentityEndpointExtensions
             .WithName("SlimIdentity_LogoutAll")
             .WithSummary("Sign out on all devices (rotates the security stamp, revokes all sessions).")
             .Produces<SlimStatusResponse>()
-            .Produces(StatusCodes.Status401Unauthorized)
+            .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
             .RequireAuthorization(SlimAuthorize);
     }
 
@@ -167,36 +243,50 @@ public static class SlimIdentityEndpointExtensions
 
         if (e.EnableRegistration)
         {
-            group.MapPost("/register", static ([FromBody] SlimRegisterRequest request,
-                    [FromServices] SlimAccountHandlers h, CancellationToken ct) => h.RegisterAsync(request, ct))
+            group.MapPost("/register", static ([FromBody] SlimRegisterRequest request, [FromQuery] bool? useCookies,
+                    [FromServices] SlimAccountHandlers h, CancellationToken ct) => h.RegisterAsync(request, useCookies, ct))
                 .WithName("SlimIdentity_Register")
-                .WithSummary("Register with e-mail and password only. Always 200 (enumeration prevention).")
+                .WithSummary(o.Email.Enabled
+                    ? "Start a registration with an e-mail address: action_required with verify_email (code and link by mail). The same answer for every address."
+                    : "Register with sign-in name and password. Always 200 (enumeration prevention).")
                 .Produces<SlimStatusResponse>()
-                .ProducesValidationProblem()
-                .Produces(StatusCodes.Status429TooManyRequests)
+                .Produces<SlimActionRequiredResponse>()
+                .ProducesSlimProblem(StatusCodes.Status400BadRequest)
+                .ProducesSlimProblem(StatusCodes.Status403Forbidden)
+                .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
                 .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
                 .AllowAnonymous();
         }
 
-        if (e.EnableEmailVerification)
+        // the steps of a registration with mail – also for flows a host's own endpoint started (ISlimAuthManager.BeginRegistrationAsync)
+        if (o.Email.Enabled)
         {
-            group.MapPost("/verify-email", static ([FromBody] SlimVerifyEmailRequest request,
-                    [FromServices] SlimAccountHandlers h, CancellationToken ct) => h.VerifyEmailAsync(request, ct))
-                .WithName("SlimIdentity_VerifyEmail")
-                .WithSummary("Confirm the e-mail address with the token from the verification mail.")
-                .Produces<SlimStatusResponse>()
-                .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
-                .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
-                .AllowAnonymous();
-
-            group.MapPost("/resend-verification", static ([FromBody] SlimEmailRequest request,
-                    [FromServices] SlimAccountHandlers h, CancellationToken ct) => h.ResendVerificationAsync(request, ct))
-                .WithName("SlimIdentity_ResendVerification")
-                .WithSummary("Send the verification mail again. Always 200.")
-                .Produces<SlimStatusResponse>()
+            group.MapPost("/register/verify", static ([FromBody] SlimVerifyEmailLoginRequest request,
+                    [FromServices] SlimRegistrationFlow h, CancellationToken ct) => h.VerifyAsync(request, ct))
+                .WithName("SlimIdentity_RegisterVerify")
+                .WithSummary("Step verify_email of a registration: flowToken + the mailed code; next is set_credential.")
+                .Produces<SlimActionRequiredResponse>()
+                .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
+                .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
                 .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
                 .AllowAnonymous();
         }
+
+        // step set_credential of every flow – registration, reset and invitation links (administrators hand them out
+        // without mail as well)
+        group.MapPost("/register/password", static ([FromBody] SlimRegisterPasswordRequest request,
+                [FromServices] SlimRegistrationFlow h, CancellationToken ct) => h.CompleteWithPasswordAsync(request, ct))
+            .WithName("SlimIdentity_RegisterPassword")
+            .WithSummary("Step set_credential with a password: creates the account of a registration or replaces the password of an existing one; the session or the next step.")
+            .Produces<SlimAuthResponse>()
+            .Produces<SlimActionRequiredResponse>()
+            .ProducesSlimProblem(StatusCodes.Status400BadRequest)
+            .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
+            .ProducesSlimProblem(StatusCodes.Status403Forbidden)
+            .ProducesSlimProblem(StatusCodes.Status409Conflict)
+            .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
+            .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
+            .AllowAnonymous();
 
         if (e.EnablePasswordReset && o.Email.Enabled)
         {
@@ -209,41 +299,6 @@ public static class SlimIdentityEndpointExtensions
                 .AllowAnonymous();
         }
 
-        // also without mail: administrators hand out reset links (ISlimAuthManager.CreatePasswordResetAsync)
-        if (e.EnablePasswordReset)
-        {
-            group.MapPost("/reset-password", static ([FromBody] SlimResetPasswordRequest request,
-                    [FromServices] SlimAccountHandlers h, CancellationToken ct) => h.ResetPasswordAsync(request, ct))
-                .WithName("SlimIdentity_ResetPassword")
-                .WithSummary("Set a new password with the reset token. Rotates the security stamp.")
-                .Produces<SlimStatusResponse>()
-                .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
-                .ProducesValidationProblem()
-                .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
-                .AllowAnonymous();
-        }
-
-        // invitations: harmless without links – only the host can create them (ISlimAuthManager.CreateInvitationAsync)
-        group.MapPost("/invitation/info", static ([FromBody] SlimInvitationInfoRequest request,
-                [FromServices] SlimAccountHandlers h, CancellationToken ct) => h.InvitationInfoAsync(request, ct))
-            .WithName("SlimIdentity_InvitationInfo")
-            .WithSummary("Check an invitation link and return the invited e-mail address (for the \"set your password\" form).")
-            .Produces<SlimInvitationInfoResponse>()
-            .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
-            .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
-            .AllowAnonymous();
-
-        group.MapPost("/invitation/accept", static ([FromBody] SlimAcceptInvitationRequest request, [FromQuery] bool? useCookies,
-                [FromServices] SlimAccountHandlers h, CancellationToken ct) => h.AcceptInvitationAsync(request, useCookies, ct))
-            .WithName("SlimIdentity_AcceptInvitation")
-            .WithSummary("Accept an invitation: set the password, confirm the e-mail and sign in (cookie or JWT, see ?useCookies).")
-            .Produces<SlimAuthResponse>()
-            .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
-            .ProducesValidationProblem()
-            .Produces(StatusCodes.Status429TooManyRequests)
-            .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
-            .AllowAnonymous();
-
         if (e.EnableChangePassword)
         {
             group.MapPost("/change-password", static ([FromBody] SlimChangePasswordRequest request,
@@ -251,10 +306,9 @@ public static class SlimIdentityEndpointExtensions
                 .WithName("SlimIdentity_ChangePassword")
                 .WithSummary("Change the password of the signed-in user; signs out all other devices.")
                 .Produces<SlimAuthResponse>()
-                .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
-                .ProducesValidationProblem()
-                .Produces(StatusCodes.Status401Unauthorized)
-                .Produces<SlimLockedResponse>(StatusCodes.Status423Locked)
+                .ProducesSlimProblem(StatusCodes.Status400BadRequest)
+                .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
+                .ProducesSlimProblem(StatusCodes.Status423Locked)
                 .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
                 .RequireAuthorization(SlimAuthorize);
         }
@@ -264,23 +318,25 @@ public static class SlimIdentityEndpointExtensions
             group.MapPost("/change-email", static ([FromBody] SlimChangeEmailRequest request,
                     [FromServices] SlimAccountHandlers h, CancellationToken ct) => h.ChangeEmailAsync(request, ct))
                 .WithName("SlimIdentity_ChangeEmail")
-                .WithSummary("Request an e-mail change (password required). A confirmation link is sent to the new address. Always 200.")
-                .Produces<SlimStatusResponse>()
-                .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
-                .ProducesValidationProblem()
-                .Produces(StatusCodes.Status401Unauthorized)
-                .Produces<SlimLockedResponse>(StatusCodes.Status423Locked)
+                .WithSummary("Request an e-mail change (password required). A code is sent to the new address; the answer carries the token for /change-email/confirm.")
+                .Produces<SlimEmailChangeResponse>()
+                .ProducesSlimProblem(StatusCodes.Status400BadRequest)
+                .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
+                .ProducesSlimProblem(StatusCodes.Status423Locked)
                 .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
                 .RequireAuthorization(SlimAuthorize);
 
-            group.MapPost("/confirm-email-change", static ([FromBody] SlimConfirmEmailChangeRequest request,
+            group.MapPost("/change-email/confirm", static ([FromBody] SlimConfirmEmailChangeRequest request,
                     [FromServices] SlimAccountHandlers h, CancellationToken ct) => h.ConfirmEmailChangeAsync(request, ct))
                 .WithName("SlimIdentity_ConfirmEmailChange")
-                .WithSummary("Confirm the e-mail change with the token from the mail; all sessions end.")
-                .Produces<SlimStatusResponse>()
-                .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
+                .WithSummary("Confirm the e-mail change with the token and the mailed code; other sessions end, the calling one is renewed.")
+                .Produces<SlimAuthResponse>()
+                .ProducesSlimProblem(StatusCodes.Status400BadRequest)
+                .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
+                .ProducesSlimProblem(StatusCodes.Status409Conflict)
+                .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
                 .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
-                .AllowAnonymous();
+                .RequireAuthorization(SlimAuthorize);
         }
 
         group.MapGet("/password-policy", static ([FromServices] IOptions<SlimIdentityOptions> options,
@@ -298,7 +354,7 @@ public static class SlimIdentityEndpointExtensions
             .WithName("SlimIdentity_Me")
             .WithSummary("Current user, impersonation info and claims (for SPA state after reload).")
             .Produces<SlimMeResponse>()
-            .Produces(StatusCodes.Status401Unauthorized)
+            .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
             .RequireAuthorization(SlimAuthorize);
     }
 
@@ -312,15 +368,15 @@ public static class SlimIdentityEndpointExtensions
             .WithName("SlimIdentity_Sessions")
             .WithSummary("Active sessions (devices) of the signed-in user.")
             .Produces<List<SlimSessionDto>>()
-            .Produces(StatusCodes.Status401Unauthorized);
+            .ProducesSlimProblem(StatusCodes.Status401Unauthorized);
 
         group.MapDelete("/{sessionId}", static (string sessionId, [FromServices] SlimAccountHandlers h, CancellationToken ct) =>
                 h.RevokeSessionAsync(sessionId, ct))
             .WithName("SlimIdentity_RevokeSession")
             .WithSummary("Sign out one device. Revoking the current session also deletes the cookie.")
             .Produces<SlimStatusResponse>()
-            .Produces<SlimStatusResponse>(StatusCodes.Status404NotFound)
-            .Produces(StatusCodes.Status401Unauthorized);
+            .ProducesSlimProblem(StatusCodes.Status404NotFound)
+            .ProducesSlimProblem(StatusCodes.Status401Unauthorized);
     }
 
     // ------------------------------------------------------------------ 2FA management
@@ -344,7 +400,7 @@ public static class SlimIdentityEndpointExtensions
             .WithName("SlimIdentity_TwoFactorEnable")
             .WithSummary("Confirm the first TOTP code; enables 2FA and returns recovery codes.")
             .Produces<SlimRecoveryCodesResponse>()
-            .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
+            .ProducesSlimProblem(StatusCodes.Status400BadRequest)
             .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy);
 
         if (o.EmailCodesEnabled)
@@ -354,7 +410,7 @@ public static class SlimIdentityEndpointExtensions
                 .WithName("SlimIdentity_TwoFactorEnableEmail")
                 .WithSummary("Enable 2FA with e-mail codes (password confirmation required).")
                 .Produces<SlimRecoveryCodesResponse>()
-                .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
+                .ProducesSlimProblem(StatusCodes.Status400BadRequest)
                 .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy);
         }
 
@@ -363,7 +419,7 @@ public static class SlimIdentityEndpointExtensions
             .WithName("SlimIdentity_TwoFactorDisable")
             .WithSummary("Disable 2FA (password confirmation required).")
             .Produces<SlimAuthResponse>()
-            .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
+            .ProducesSlimProblem(StatusCodes.Status400BadRequest)
             .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy);
 
         group.MapPost("/forget-device", static ([FromServices] SlimTwoFactorHandlers h) => h.ForgetDevice())
@@ -377,14 +433,14 @@ public static class SlimIdentityEndpointExtensions
             .WithName("SlimIdentity_TwoFactorForgetAllDevices")
             .WithSummary("All remembered devices ask for the second factor again; other sessions end, this one is renewed.")
             .Produces<SlimAuthResponse>()
-            .Produces(StatusCodes.Status401Unauthorized);
+            .ProducesSlimProblem(StatusCodes.Status401Unauthorized);
 
         group.MapPost("/recovery-codes", static ([FromBody] SlimPasswordConfirmationRequest request,
                 [FromServices] SlimTwoFactorHandlers h, CancellationToken ct) => h.RegenerateRecoveryCodesAsync(request, ct))
             .WithName("SlimIdentity_TwoFactorRecoveryCodes")
             .WithSummary("Replace all recovery codes (password confirmation required).")
             .Produces<SlimRecoveryCodesResponse>()
-            .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
+            .ProducesSlimProblem(StatusCodes.Status400BadRequest)
             .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy);
     }
 
@@ -405,9 +461,9 @@ public static class SlimIdentityEndpointExtensions
             .WithName("SlimIdentity_RemoveExternalLogin")
             .WithSummary("Remove a linked external login (password required if the account has one) – never the last sign-in method.")
             .Produces<SlimStatusResponse>()
-            .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
-            .Produces<SlimStatusResponse>(StatusCodes.Status404NotFound)
-            .Produces<SlimStatusResponse>(StatusCodes.Status409Conflict)
+            .ProducesSlimProblem(StatusCodes.Status400BadRequest)
+            .ProducesSlimProblem(StatusCodes.Status404NotFound)
+            .ProducesSlimProblem(StatusCodes.Status409Conflict)
             .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy);
         return group;
     }
@@ -420,8 +476,8 @@ public static class SlimIdentityEndpointExtensions
             .WithSummary("OpenID Connect Back-Channel Logout: the identity provider posts a signed logout_token (form); the user's sessions end.")
             .Accepts<IFormCollection>("application/x-www-form-urlencoded")
             .Produces(StatusCodes.Status200OK)
-            .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
-            .Produces<SlimStatusResponse>(StatusCodes.Status404NotFound)
+            .ProducesSlimProblem(StatusCodes.Status400BadRequest)
+            .ProducesSlimProblem(StatusCodes.Status404NotFound)
             .WithMetadata(new SlimNoCookieAuthentication())
             .AllowAnonymous();
     }
@@ -434,9 +490,11 @@ public static class SlimIdentityEndpointExtensions
             group.MapPost("/login/external/exchange", static ([FromBody] SlimExternalExchangeRequest request,
                     [FromServices] SlimExternalLoginHandlers h, CancellationToken ct) => h.ExchangeAsync(request, ct))
                 .WithName("SlimIdentity_ExternalExchange")
-                .WithSummary("Exchange the one-time code from the external-login redirect (#code=…) and the PKCE verifier for a JWT pair – or a 2FA challenge.")
+                .WithSummary("Exchange the one-time code from the external-login redirect (#code=…) and the PKCE verifier                 for a JWT pair – or action_required with the steps that follow.")
                 .Produces<SlimAuthResponse>()
-                .Produces<SlimStatusResponse>(StatusCodes.Status401Unauthorized)
+                                .Produces<SlimActionRequiredResponse>()
+                .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
+                                .ProducesSlimProblem(StatusCodes.Status403Forbidden)
                 .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
                 .AllowAnonymous();
         }
@@ -448,8 +506,8 @@ public static class SlimIdentityEndpointExtensions
             .WithName("SlimIdentity_ExternalChallenge")
             .WithSummary("Start an OAuth / OIDC login (Google, Apple, Entra ID, Keycloak, …). Browser navigation, not fetch.")
             .Produces(StatusCodes.Status302Found)
-            .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
-            .Produces<SlimStatusResponse>(StatusCodes.Status404NotFound)
+            .ProducesSlimProblem(StatusCodes.Status400BadRequest)
+            .ProducesSlimProblem(StatusCodes.Status404NotFound)
             .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
             .AllowAnonymous();
 
@@ -458,10 +516,10 @@ public static class SlimIdentityEndpointExtensions
             .WithName("SlimIdentity_ExternalLink")
             .WithSummary("Link the external identity of a link flow (#slim_link_code=…, PKCE verifier, password) to the signed-in account.")
             .Produces<SlimStatusResponse>()
-            .Produces<SlimStatusResponse>(StatusCodes.Status400BadRequest)
-            .Produces<SlimStatusResponse>(StatusCodes.Status401Unauthorized)
-            .Produces<SlimStatusResponse>(StatusCodes.Status403Forbidden)
-            .Produces<SlimStatusResponse>(StatusCodes.Status409Conflict)
+            .ProducesSlimProblem(StatusCodes.Status400BadRequest)
+            .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
+            .ProducesSlimProblem(StatusCodes.Status403Forbidden)
+            .ProducesSlimProblem(StatusCodes.Status409Conflict)
             .RequireAuthorization(SlimAuthorize)
             .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy);
 

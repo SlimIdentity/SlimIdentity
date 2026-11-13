@@ -1,7 +1,7 @@
 # LDAP and legacy passwords
 
-`ISlimCustomPasswordValidator` replaces the built-in `PasswordHasher` check of `/login`. Everything else – rate
-limiting, lockout, 2FA, sessions – stays the same.
+`ISlimCustomPasswordValidator` replaces the built-in `PasswordHasher` check. Rate limiting, lockout, 2FA and sessions
+stay the same.
 
 ## LDAP / Active Directory
 
@@ -16,24 +16,19 @@ builder.Services.AddSlimIdentity(o =>
     .AddCustomPasswordValidator<LdapPasswordValidator>();
 ```
 
-The validator binds against the directory with the user's credentials (LDAPS); a complete implementation using
-`System.DirectoryServices.Protocols` is in [`samples/templates/Enterprise/LdapPasswordValidator.cs`](../../samples/templates/Enterprise/LdapPasswordValidator.cs).
-Return `false` on infrastructure errors and log them – never allow anonymous binds (empty password).
+The validator binds with the user's credentials over LDAPS
+([`LdapPasswordValidator.cs`](../../samples/templates/Enterprise/LdapPasswordValidator.cs)). Return `false` on
+infrastructure errors and log them; never allow anonymous binds (empty password).
 
-Invitations cannot set a password in this mode (`400 password_managed_externally`). Keep the three switches above:
-a local password change or reset would store a hash the directory check never reads – the user would be told it worked.
-
-Every account counts as having a password (in the directory), so sensitive changes ask for it. Accounts that sign in
-only externally override `HasPasswordAsync` (below) and confirm such changes with a fresh sign-in instead.
+Keep the three switches: a local change or reset would store a hash the directory check never reads. Invitations
+cannot set a password (`400 password_managed_externally`). Every account counts as having a password, so sensitive
+changes ask for it; to treat external-only accounts differently, override `HasPasswordAsync` (below).
 
 ## Migrating legacy hashes
-
-The same interface can verify old hashes once and upgrade them in place:
 
 ```csharp
 public sealed class LegacyHashMigrationValidator(IPasswordHasher<SlimUser> hasher, ISlimUserStore store) : ISlimCustomPasswordValidator
 {
-    // accounts without any hash (external login, passkeys only) have no password to ask for
     public ValueTask<bool> HasPasswordAsync(SlimUser user, CancellationToken ct) =>
         ValueTask.FromResult(!string.IsNullOrEmpty(user.PasswordHash));
 
@@ -44,7 +39,7 @@ public sealed class LegacyHashMigrationValidator(IPasswordHasher<SlimUser> hashe
             return hasher.VerifyHashedPassword(user, user.PasswordHash, password) != PasswordVerificationResult.Failed;
 
         if (!VerifyLegacy(user.PasswordHash, password)) return false;   // your old algorithm, constant-time compare
-        var upgraded = hasher.HashPassword(user, password);              // upgrade to PBKDF2
+        var upgraded = hasher.HashPassword(user, password);
         await store.UpdatePasswordHashAsync(user, user.PasswordHash, upgraded, ct); // only if unchanged meanwhile
         user.PasswordHash = upgraded;
         return true;
@@ -52,5 +47,5 @@ public sealed class LegacyHashMigrationValidator(IPasswordHasher<SlimUser> hashe
 }
 ```
 
-Once all active users have signed in, remove the validator. Hashes created by ASP.NET Core Identity are already in the
-`PasswordHasher` format and need no migration (see [Migrating from ASP.NET Core Identity](migrating-from-aspnet-identity.md)).
+Remove the validator once all active users have signed in. ASP.NET Core Identity hashes need no migration
+([migrating from ASP.NET Core Identity](migrating-from-aspnet-identity.md)).

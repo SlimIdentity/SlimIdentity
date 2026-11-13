@@ -29,6 +29,8 @@ public sealed class DapperUserStore(NpgsqlDataSource db) : ISlimUserStore
         email_confirmed        AS EmailConfirmed,
         failed_login_attempts  AS FailedLoginAttempts,
         lockout_end_utc        AS LockoutEndUtc,
+        failed_second_factor_attempts AS FailedSecondFactorAttempts,
+        second_factor_lockout_end_utc AS SecondFactorLockoutEndUtc,
         two_factor_enabled     AS TwoFactorEnabled,
         password_change_required AS PasswordChangeRequired
         """;
@@ -50,48 +52,62 @@ public sealed class DapperUserStore(NpgsqlDataSource db) : ISlimUserStore
 
     public async Task<SlimUser?> CreateAsync(SlimNewUser newUser, CancellationToken ct)
     {
-        var (email, passwordHash) = (newUser.Email, newUser.PasswordHash);
+        var (email, passwordHash, confirmed) = (newUser.Email, newUser.PasswordHash, newUser.EmailConfirmed);
         await using var c = await db.OpenConnectionAsync(ct);
         // ON CONFLICT: a concurrent registration with the same address yields no row → null (UNIQUE on normalized_email).
         // With a registration profile (newUser.Profile): open a transaction, insert the profile with the returned id in it
         // only if a row came back, then commit – account and profile together or not at all.
         return await c.QuerySingleOrDefaultAsync<SlimUser>(new CommandDefinition($"""
-            INSERT INTO users (email, normalized_email, password_hash, security_stamp)
-            VALUES (@email, @normalized, @hash, @stamp)
+            INSERT INTO users (email, normalized_email, password_hash, email_confirmed, security_stamp)
+            VALUES (@email, @normalized, @hash, @confirmed, @stamp)
             ON CONFLICT (normalized_email) DO NOTHING
             RETURNING {Columns}
             """,
-            new { email, normalized = email.ToUpperInvariant(), hash = passwordHash, stamp = SlimUser.NewSecurityStamp() },
+            new { email, normalized = email.ToUpperInvariant(), hash = passwordHash, confirmed, stamp = SlimUser.NewSecurityStamp() },
             cancellationToken: ct));
     }
 
     // ---- sign-in bookkeeping: narrow, atomic statements (never write back a whole, possibly outdated user)
 
-    public async Task<int> IncrementFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct)
+    // Reserves an attempt before it is checked. The row lock serializes parallel attempts across all instances:
+    // exactly one reaches the threshold, every later one sees the lockout.
+    public async Task<SlimAttemptReservation?> TryBeginAttemptAsync(SlimUser user, SlimAttemptRequest attempt, CancellationToken ct)
     {
+        var (counter, end) = AttemptColumns(attempt.Factor);
         await using var c = await db.OpenConnectionAsync(ct);
-        return await c.ExecuteScalarAsync<int>(new CommandDefinition("""
-            UPDATE users SET failed_login_attempts = failed_login_attempts + 1
-            WHERE id = @id::uuid
-            RETURNING failed_login_attempts
-            """, new { id = user.Id }, cancellationToken: ct));
+        await using var tx = await c.BeginTransactionAsync(ct);
+        var current = await c.QuerySingleOrDefaultAsync<AttemptState>(new CommandDefinition(
+            $"SELECT {counter} AS Count, {end} AS LockoutEndUtc FROM users WHERE id = @id::uuid FOR UPDATE",
+            new { id = user.Id }, tx, cancellationToken: ct));
+        if (current is null) return null;   // deleted during the sign-in
+        if (attempt.IsLockedOut(current.LockoutEnd)) return SlimAttemptReservation.LockedOut(current.LockoutEnd!.Value);
+
+        var count = current.Count + 1;
+        await c.ExecuteAsync(new CommandDefinition(
+            $"UPDATE users SET {counter} = @count, {end} = @newEnd WHERE id = @id::uuid",
+            new { id = user.Id, count, newEnd = attempt.NextLockoutEnd(count, current.LockoutEnd) }, tx, cancellationToken: ct));
+        await tx.CommitAsync(ct);
+        return SlimAttemptReservation.Reserved(count);
     }
 
-    public async Task SetLockoutEndAsync(SlimUser user, DateTimeOffset? lockoutEndUtc, CancellationToken ct)
+    private sealed record AttemptState(int Count, DateTime? LockoutEndUtc)
     {
-        await using var c = await db.OpenConnectionAsync(ct);
-        await c.ExecuteAsync(new CommandDefinition(
-            "UPDATE users SET lockout_end_utc = @lockoutEndUtc WHERE id = @id::uuid",
-            new { id = user.Id, lockoutEndUtc }, cancellationToken: ct));
+        public DateTimeOffset? LockoutEnd => LockoutEndUtc is { } end ? new DateTimeOffset(DateTime.SpecifyKind(end, DateTimeKind.Utc)) : null;
     }
 
-    public async Task ResetFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct)
+    public async Task ResetFailedAttemptsAsync(SlimUser user, SlimAttemptFactor factor, CancellationToken ct)
     {
+        var (counter, end) = AttemptColumns(factor);
         await using var c = await db.OpenConnectionAsync(ct);
         await c.ExecuteAsync(new CommandDefinition(
-            "UPDATE users SET failed_login_attempts = 0, lockout_end_utc = NULL WHERE id = @id::uuid",
+            $"UPDATE users SET {counter} = 0, {end} = NULL WHERE id = @id::uuid",
             new { id = user.Id }, cancellationToken: ct));
     }
+
+    private static (string Counter, string End) AttemptColumns(SlimAttemptFactor factor) =>
+        factor == SlimAttemptFactor.Password
+            ? ("failed_login_attempts", "lockout_end_utc")
+            : ("failed_second_factor_attempts", "second_factor_lockout_end_utc");
 
     // conditional: a password change in the meantime wins over the transparent rehash
     public async Task UpdatePasswordHashAsync(SlimUser user, string currentHash, string newHash, CancellationToken ct)
@@ -102,20 +118,23 @@ public sealed class DapperUserStore(NpgsqlDataSource db) : ISlimUserStore
             new { id = user.Id, currentHash, newHash }, cancellationToken: ct));
     }
 
-    public async Task UpdateSecurityStateAsync(SlimUser user, CancellationToken ct)
+    // compare-and-set on the whole stamp: a change based on an outdated copy is never written back over a newer one
+    public async Task<bool> UpdateSecurityStateAsync(SlimUser user, string expectedStamp, CancellationToken ct)
     {
         await using var c = await db.OpenConnectionAsync(ct);
-        await c.ExecuteAsync(new CommandDefinition("""
+        return await c.ExecuteAsync(new CommandDefinition("""
             UPDATE users SET
                 password_hash = @PasswordHash,
                 security_stamp = @SecurityStamp,
                 email_confirmed = @EmailConfirmed,
-                failed_login_attempts = @FailedLoginAttempts,
-                lockout_end_utc = @LockoutEndUtc,
                 two_factor_enabled = @TwoFactorEnabled,
                 password_change_required = @PasswordChangeRequired
-            WHERE id = @Id::uuid
-            """, user, cancellationToken: ct));
+            WHERE id = @Id::uuid AND COALESCE(security_stamp, '') = @expectedStamp
+            """, new
+            {
+                user.Id, user.PasswordHash, user.SecurityStamp, user.EmailConfirmed, user.TwoFactorEnabled,
+                user.PasswordChangeRequired, expectedStamp,
+            }, cancellationToken: ct)) == 1;
     }
 
     // compare-and-set: a concurrent password or 2FA change is never written back over
@@ -127,19 +146,23 @@ public sealed class DapperUserStore(NpgsqlDataSource db) : ISlimUserStore
             new { id = user.Id, expectedStamp, newStamp }, cancellationToken: ct)) == 1;
     }
 
-    public async Task<bool> UpdateEmailAsync(SlimUser user, string newEmail, CancellationToken ct)
+    public async Task<SlimEmailUpdateResult> UpdateEmailAsync(SlimUser user, string newEmail, string expectedStamp, string newStamp, CancellationToken ct)
     {
         await using var c = await db.OpenConnectionAsync(ct);
         try
         {
             // the UNIQUE constraint on normalized_email decides – no check-then-act race
-            return await c.ExecuteAsync(new CommandDefinition(
-                "UPDATE users SET email = @newEmail, normalized_email = @normalized WHERE id = @id::uuid",
-                new { id = user.Id, newEmail, normalized = newEmail.ToUpperInvariant() }, cancellationToken: ct)) == 1;
+            return await c.ExecuteAsync(new CommandDefinition("""
+                UPDATE users SET email = @newEmail, normalized_email = @normalized, email_confirmed = TRUE, security_stamp = @newStamp
+                WHERE id = @id::uuid AND COALESCE(security_stamp, '') = @expectedStamp
+                """,
+                new { id = user.Id, newEmail, normalized = newEmail.ToUpperInvariant(), expectedStamp, newStamp }, cancellationToken: ct)) == 1
+                ? SlimEmailUpdateResult.Updated
+                : SlimEmailUpdateResult.StampChanged;
         }
         catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation)
         {
-            return false;
+            return SlimEmailUpdateResult.EmailTaken;
         }
     }
 
@@ -363,11 +386,11 @@ public sealed class DapperPasskeyStore(NpgsqlDataSource db) : ISlimPasskeyStore
     private const string Columns = """
         credential_id AS CredentialId, user_id::text AS UserId, public_key AS PublicKey, sign_count AS SignCount,
         last_challenge_at AS LastChallengeAt, name AS Name, created_utc AS CreatedUtc, last_used_utc AS LastUsedUtc,
-        backup_eligible AS BackupEligible, backed_up AS BackedUp
+        backup_eligible AS BackupEligible, backed_up AS BackedUp, user_handle AS UserHandle
         """;
 
     private sealed record Row(byte[] CredentialId, string UserId, byte[] PublicKey, long SignCount, long? LastChallengeAt,
-        string Name, DateTime CreatedUtc, DateTime? LastUsedUtc, bool BackupEligible, bool BackedUp);
+        string Name, DateTime CreatedUtc, DateTime? LastUsedUtc, bool BackupEligible, bool BackedUp, byte[]? UserHandle);
 
     private static byte[] Hash(byte[] credentialId) => System.Security.Cryptography.SHA256.HashData(credentialId);
 
@@ -392,14 +415,14 @@ public sealed class DapperPasskeyStore(NpgsqlDataSource db) : ISlimPasskeyStore
         await using var c = await db.OpenConnectionAsync(ct);
         return await c.ExecuteAsync(new CommandDefinition("""
             INSERT INTO passkeys (credential_id_hash, credential_id, user_id, public_key, sign_count, last_challenge_at, name, created_utc,
-                                  last_used_utc, backup_eligible, backed_up)
+                                  last_used_utc, backup_eligible, backed_up, user_handle)
             VALUES (@hash, @CredentialId, @UserId::uuid, @PublicKey, @SignCount, @LastChallengeAt, @Name, @CreatedUtc,
-                    @LastUsedUtc, @BackupEligible, @BackedUp)
+                    @LastUsedUtc, @BackupEligible, @BackedUp, @UserHandle)
             ON CONFLICT (credential_id_hash) DO NOTHING
             """, new
             {
                 hash = Hash(p.CredentialId), p.CredentialId, p.UserId, p.PublicKey, SignCount = (long)p.SignCount,
-                p.LastChallengeAt, p.Name, p.CreatedUtc, p.LastUsedUtc, p.BackupEligible, p.BackedUp,
+                p.LastChallengeAt, p.Name, p.CreatedUtc, p.LastUsedUtc, p.BackupEligible, p.BackedUp, p.UserHandle,
             }, cancellationToken: ct)) == 1;
     }
 
@@ -441,7 +464,7 @@ public sealed class DapperPasskeyStore(NpgsqlDataSource db) : ISlimPasskeyStore
     private static SlimPasskey Map(Row r) => new()
     {
         UserId = r.UserId, CredentialId = r.CredentialId, PublicKey = r.PublicKey, SignCount = (uint)r.SignCount,
-        LastChallengeAt = r.LastChallengeAt, Name = r.Name, BackupEligible = r.BackupEligible, BackedUp = r.BackedUp,
+        LastChallengeAt = r.LastChallengeAt, Name = r.Name, BackupEligible = r.BackupEligible, BackedUp = r.BackedUp, UserHandle = r.UserHandle,
         CreatedUtc = new DateTimeOffset(DateTime.SpecifyKind(r.CreatedUtc, DateTimeKind.Utc)),
         LastUsedUtc = r.LastUsedUtc is { } used ? new DateTimeOffset(DateTime.SpecifyKind(used, DateTimeKind.Utc)) : null,
     };

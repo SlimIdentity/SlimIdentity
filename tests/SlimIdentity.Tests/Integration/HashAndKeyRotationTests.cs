@@ -19,7 +19,7 @@ public sealed class HashAndKeyRotationTests
     [Fact]
     public async Task Passwords_are_hashed_with_the_owasp_iteration_count_by_default()
     {
-        await using var app = await TestApp.StartAsync();
+        await using var app = await TestApp.StartAsync(new TestAppOptions { FastHashing = false });
         Assert.Equal(210_000, app.App.Services.GetRequiredService<IOptions<PasswordHasherOptions>>().Value.IterationCount);
     }
 
@@ -36,7 +36,7 @@ public sealed class HashAndKeyRotationTests
     [Fact]
     public async Task Weaker_hashes_are_upgraded_at_the_next_sign_in()
     {
-        await using var app = await TestApp.StartAsync();
+        await using var app = await TestApp.StartAsync(new TestAppOptions { FastHashing = false });
         var user = app.Users.Get(TestApp.UserEmail);
         var weak = new PasswordHasher<SlimUser>(Options.Create(new PasswordHasherOptions { IterationCount = 100_000 }))
             .HashPassword(user, TestApp.UserPassword);
@@ -70,7 +70,7 @@ public sealed class HashAndKeyRotationTests
         var current = (await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword)).AccessToken;
 
         var client = app.CreateClient();
-        // exactly as the old instance signed it – including its key id (review round 5: one shared id broke this)
+        // exactly as the old instance signed it – including its key id
         client.BearerToken = ResignWith(current!, SlimIdentity.Services.SlimJwtTokenFactory.CreateSigningKey(OldSecret));
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/auth/me")).StatusCode);
 

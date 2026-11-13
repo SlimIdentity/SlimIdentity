@@ -32,7 +32,7 @@ public sealed class PasswordPolicyEndpointTests
     public async Task Long_passwords_need_no_character_classes()
     {
         await using var app = await TestApp.StartAsync();
-        var response = await app.CreateClient().PostAsync("/auth/register", new { email = "nist@test.local", password = "correct horse battery staple" });
+        var response = await app.RegisterAsync("nist@test.local", "correct horse battery staple");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 

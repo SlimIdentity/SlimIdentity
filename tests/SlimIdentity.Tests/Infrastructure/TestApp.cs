@@ -5,6 +5,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
@@ -28,6 +29,11 @@ public sealed class TestAppOptions
     public Action<WebApplication>? Map { get; init; }
     /// <summary>Receives all log output (minimum level Trace) – e.g. to assert that no secret is ever logged.</summary>
     public ILoggerProvider? LoggerProvider { get; init; }
+    /// <summary>
+    /// Password hashes with <see cref="TestApp.FastHashIterations"/> instead of the production setting. Off for tests of
+    /// the hash parameters and of the response timing.
+    /// </summary>
+    public bool FastHashing { get; init; } = true;
 }
 
 /// <summary>An in-memory host with SlimIdentity, test stores, a fake clock and a few host endpoints.</summary>
@@ -37,6 +43,7 @@ public sealed class TestApp : IAsyncDisposable
     public const string AdminPassword = "Admin123!";
     public const string UserEmail = "user@test.local";
     public const string UserPassword = "User1234!";
+    public const int FastHashIterations = 1_000;
 
     private TestApp(WebApplication app, FakeTimeProvider time)
     {
@@ -67,6 +74,7 @@ public sealed class TestApp : IAsyncDisposable
         var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
         builder.Services.AddSingleton<TimeProvider>(time);
 
+        if (options.FastHashing) builder.Services.Configure<PasswordHasherOptions>(o => o.IterationCount = FastHashIterations);
         var slim = builder.Services.AddSlimIdentity(o =>
             {
                 o.Tokens.JwtSecret = "test-secret-0123456789-abcdefghijklmnopqrstuvwxyz";
@@ -92,6 +100,7 @@ public sealed class TestApp : IAsyncDisposable
 
         if (app.Services.GetRequiredService<ISlimUserStore>() is TestUserStore users)
         {
+            users.HashIterations = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<PasswordHasherOptions>>().Value.IterationCount;
             users.Seed(AdminEmail, AdminPassword, "Admin");
             users.Seed(UserEmail, UserPassword);
         }
@@ -144,13 +153,105 @@ public sealed class TestApp : IAsyncDisposable
     /// <summary>A client with its own cookie jar (one "browser" / "device").</summary>
     public ApiClient CreateClient() => new(App.GetTestClient());
 
-    /// <summary>Bearer login; returns the token response.</summary>
+    /// <summary>Bearer login that must end in a session; returns the token response.</summary>
     public async Task<AuthTokens> LoginBearerAsync(string email, string password)
     {
         var client = CreateClient();
         var response = await client.PostAsync("/auth/login", new { email, password });
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        return (await response.Content.ReadFromJsonAsync<AuthTokens>(ApiClient.Json))!;
+        var tokens = (await response.Content.ReadFromJsonAsync<AuthTokens>(ApiClient.Json))!;
+        Assert.False(string.IsNullOrEmpty(tokens.AccessToken), "no session: " + await response.Content.ReadAsStringAsync());
+        return tokens;
+    }
+
+    /// <summary>
+    /// Sets the confirmation flag directly in the store and keeps the stamp, so running sessions stay valid
+    /// (an address changed by the host, imported data).
+    /// </summary>
+    public async Task SetEmailConfirmedAsync(string email, bool confirmed)
+    {
+        var user = Users.Get(email);
+        user.EmailConfirmed = confirmed;
+        await Users.UpdateSecurityStateAsync(user, default);
+    }
+
+    /// <summary>
+    /// Bearer login of an account whose address is not confirmed yet: takes step <c>verify_email</c> with the mailed code.
+    /// </summary>
+    public async Task<AuthTokens> LoginConfirmingAsync(string email, string password)
+    {
+        var steps = await CreateClient().PostJsonAsync("/auth/login", new { email, password });
+        Assert.True(steps.TryGetProperty("actions", out var actions), steps.ToString());
+        Assert.Equal("verify_email", actions[0].GetString());
+        var code = (await Mail.WaitForAsync("verification-code", email)).Payload;
+        var response = await CreateClient().PostAsync("/auth/login/verify-email", new { flowToken = steps.GetProperty("flowToken").GetString(), code });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var tokens = (await response.Content.ReadFromJsonAsync<AuthTokens>(ApiClient.Json))!;
+        Assert.False(string.IsNullOrEmpty(tokens.AccessToken), "no session: " + await response.Content.ReadAsStringAsync());
+        return tokens;
+    }
+
+    /// <summary>
+    /// <c>POST /register</c> → the mailed code at <c>/register/verify</c> → <c>/register/password</c>. Returns the last answer
+    /// (the session, or open steps).
+    /// </summary>
+    public async Task<HttpResponseMessage> RegisterAsync(string email, string password, object? profile = null, ApiClient? client = null)
+    {
+        client ??= CreateClient();
+        var flowToken = await VerifyRegistrationAsync(email, client);
+        return await client.PostAsync("/auth/register/password", new { flowToken, password, profile });
+    }
+
+    /// <summary><c>POST /register</c> and <c>/register/verify</c> with the mailed code; returns the flow token of step <c>set_credential</c>.</summary>
+    public async Task<string> VerifyRegistrationAsync(string email, ApiClient? client = null)
+    {
+        client ??= CreateClient();
+        var before = Mail.Mails.Count(m => m.Kind == "verification" && string.Equals(m.To, email, StringComparison.OrdinalIgnoreCase));
+        var started = await client.PostJsonAsync("/auth/register", new { email });
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (Mail.Mails.Count(m => m.Kind == "verification" && string.Equals(m.To, email, StringComparison.OrdinalIgnoreCase)) == before)
+        {
+            if (DateTime.UtcNow > deadline) throw new TimeoutException($"No new verification mail to {email} was sent.");
+            await Task.Delay(20);
+        }
+        var code = (await Mail.WaitForAsync("verification", email)).Payload;
+        var verified = await client.PostJsonAsync("/auth/register/verify", new { flowToken = started.Str("flowToken"), code });
+        return verified.Str("flowToken");
+    }
+
+    /// <summary>
+    /// Waits until every mail queued so far has been handed to the sender – the background queue is processed in order.
+    /// For assertions that a mail was <em>not</em> sent.
+    /// </summary>
+    public Task WaitForQueuedMailAsync() => WaitForQueuedMailAsync(App.Services);
+
+    /// <inheritdoc cref="WaitForQueuedMailAsync()"/>
+    public static async Task WaitForQueuedMailAsync(IServiceProvider services)
+    {
+        var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var marker = new SlimIdentity.Services.SlimEmailJob("test-marker",
+            new SlimEmailContext { Kind = "test-marker", Culture = System.Globalization.CultureInfo.InvariantCulture },
+            (_, _, _) => { done.TrySetResult(); return Task.CompletedTask; });
+        Assert.True(services.GetRequiredService<SlimIdentity.Services.SlimEmailQueue>().TryEnqueue(marker));
+        await done.Task.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    /// <summary>The token of a mailed link (the link itself without a link template).</summary>
+    public static string LinkToken(string link) =>
+        link.IndexOf("token=", StringComparison.Ordinal) is var i and >= 0 ? Uri.UnescapeDataString(link[(i + 6)..]) : link;
+
+    /// <summary>
+    /// An account with a password whose address nobody proved – an import, or an account of an earlier version that
+    /// created accounts before the mailbox was proven.
+    /// </summary>
+    public async Task PreRegisterUnconfirmedAsync(string email, string password)
+    {
+        await using var scope = App.Services.CreateAsyncScope();
+        var normalized = SlimEmailAddress.Normalize(email)!;
+        var hash = scope.ServiceProvider.GetRequiredService<IPasswordHasher<SlimUser>>().HashPassword(new SlimUser { Email = normalized }, password);
+        var user = await Users.CreateAsync(new SlimNewUser { Email = normalized, PasswordHash = hash }, default);
+        Assert.NotNull(user);
+        Assert.False(user.EmailConfirmed);
     }
 
     public async ValueTask DisposeAsync()
@@ -194,6 +295,27 @@ public sealed class ApiClient(HttpClient http)
         var response = await PostAsync(path, body);
         var content = await response.Content.ReadAsStringAsync();
         Assert.True(response.StatusCode == expected, $"{path}: expected {(int)expected}, got {(int)response.StatusCode}: {content}");
+        return content.Length == 0 ? default : JsonDocument.Parse(content).RootElement.Clone();
+    }
+
+    /// <summary>
+    /// A reset link: <c>POST /flow</c> with its token, then <c>/register/password</c>. Returns the last answer – the
+    /// one of <c>/flow</c> when it fails or opens another step before <c>set_credential</c>.
+    /// </summary>
+    public async Task<HttpResponseMessage> ResetPasswordAsync(string token, string newPassword)
+    {
+        var started = await PostAsync("/auth/flow", new { token });
+        if (started.StatusCode != HttpStatusCode.OK) return started;
+        var body = JsonDocument.Parse(await started.Content.ReadAsStringAsync()).RootElement;
+        if (body.GetProperty("actions")[0].GetString() != "set_credential") return started;
+        return await PostAsync("/auth/register/password", new { flowToken = body.Str("flowToken"), password = newPassword });
+    }
+
+    public async Task<JsonElement> ResetPasswordJsonAsync(string token, string newPassword, HttpStatusCode expected = HttpStatusCode.OK)
+    {
+        var response = await ResetPasswordAsync(token, newPassword);
+        var content = await response.Content.ReadAsStringAsync();
+        Assert.True(response.StatusCode == expected, $"reset: expected {(int)expected}, got {(int)response.StatusCode}: {content}");
         return content.Length == 0 ? default : JsonDocument.Parse(content).RootElement.Clone();
     }
 
