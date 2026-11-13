@@ -145,16 +145,18 @@ Content-Type: application/json
 { "email": "invited@demo.local" }
 
 ###
-POST {{auth}}/invitation/info
+# the invitation link continues as a flow: answers { status: "action_required", actions: ["set_credential"], flowToken,
+# details: { setCredential: { email } } }
+POST {{auth}}/flow
 Content-Type: application/json
 
 { "token": "{{invite.response.body.$.token}}" }
 
 ###
-POST {{auth}}/invitation/accept
+POST {{auth}}/register/password
 Content-Type: application/json
 
-{ "token": "{{invite.response.body.$.token}}", "password": "Invited123!" }
+{ "flowToken": "<flowToken>", "password": "Invited123!" }
 
 ### ---------------------------------------------------------------- E-mail change (link is printed to the console)
 

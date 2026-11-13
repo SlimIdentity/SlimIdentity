@@ -95,7 +95,7 @@ These are deliberately not configurable – changing them would only weaken the 
 | External-login exchange code | 1 minute, single use |
 | TOTP | RFC 6238, 30-second steps, ±1 step tolerance |
 | Recovery codes | 10 codes of 80 bits each |
-| Always mapped | `/login`, `/logout`, `/logout-all`, `/me`, `/password-policy`, `/invitation/*` (invitation links can only be created by the host) |
+| Always mapped | `/login`, `/logout`, `/logout-all`, `/me`, `/password-policy`, `/flow` (invitation links can only be created by the host) |
 
 ## Passwords
 

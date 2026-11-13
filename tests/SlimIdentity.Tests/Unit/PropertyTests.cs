@@ -137,7 +137,7 @@ public sealed class PropertyTests
     {
         var token = Tokens.Protect(SlimWorkflowTokens.LinkPurpose, new SlimLinkPayload(SlimLinkPayload.Reset, "flow-1", Uid: "user-1", Stamp: "stamp"), TimeSpan.FromHours(1));
         Assert.True(Tokens.TryUnprotect<SlimLinkPayload>(SlimWorkflowTokens.LinkPurpose, token, out _));
-        Assert.False(Tokens.TryUnprotect<SlimLinkPayload>(SlimWorkflowTokens.InvitationPurpose, token, out _));
+        Assert.False(Tokens.TryUnprotect<SlimLinkPayload>(SlimWorkflowTokens.SignInFlowPurpose, token, out _));
     }
 
     // ------------------------------------------------------------------ claims

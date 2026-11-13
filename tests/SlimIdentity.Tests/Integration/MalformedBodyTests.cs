@@ -15,7 +15,6 @@ public sealed class MalformedBodyTests
         "/auth/login", "/auth/login/2fa", "/auth/login/password-change", "/auth/login/external/exchange", "/auth/link/external",
         "/auth/refresh", "/auth/logout", "/auth/logout-all", "/auth/register", "/auth/register/verify", "/auth/register/password",
         "/auth/forgot-password", "/auth/change-password", "/auth/change-email", "/auth/confirm-email-change",
-        "/auth/invitation/info", "/auth/invitation/accept",
         "/auth/2fa/setup", "/auth/2fa/enable", "/auth/2fa/enable-email", "/auth/2fa/disable", "/auth/2fa/recovery-codes",
         "/auth/2fa/forget-device", "/auth/2fa/forget-all-devices",
         "/auth/sign-in-methods/external/remove",

@@ -26,7 +26,6 @@ internal sealed class SlimWorkflowTokens(
     public const string ExternalExchangePurpose = "SlimIdentity.ExternalExchange.v1";
     public const string ExternalLinkPurpose = "SlimIdentity.ExternalLink.v1";
     public const string RefreshTokenPurpose = "SlimIdentity.RefreshToken.v1";
-    public const string InvitationPurpose = "SlimIdentity.Invitation.v1";
     public const string EmailChangePurpose = "SlimIdentity.EmailChange.v1";
     public const string RememberDevicePurpose = "SlimIdentity.TwoFactorRememberDevice.v1";
 
@@ -121,8 +120,9 @@ internal sealed record SlimFlowPayload(string Uid, string Stamp, string FlowId, 
 }
 /// <summary>
 /// The link of a mail or of an administrator: starts or continues a flow (<c>FlowId</c>). A <see cref="Registration"/>
-/// carries the address, the links of an existing account (<see cref="Reset"/>, <see cref="AdminReset"/>) its
-/// <c>Uid</c> and <c>Stamp</c> – the next security change ends them.
+/// carries the address, the links of an existing account (<see cref="Reset"/>, <see cref="AdminReset"/>,
+/// <see cref="Invitation"/>) its <c>Uid</c> and <c>Stamp</c> – the next security change ends them. An invitation also
+/// carries the invited <c>Email</c>.
 /// </summary>
 internal sealed record SlimLinkPayload(string Kind, string FlowId, string? Email = null, string? Uid = null, string? Stamp = null)
 {
@@ -132,6 +132,8 @@ internal sealed record SlimLinkPayload(string Kind, string FlowId, string? Email
     public const string Reset = "reset";
     /// <summary>A reset an administrator handed over: proves no mailbox.</summary>
     public const string AdminReset = "admin_reset";
+    /// <summary>An invitation to an account without a way to sign in yet: delivered to its mailbox, proves it.</summary>
+    public const string Invitation = "invitation";
 }
 /// <summary>"Remember this device" for 2FA; <c>ExpiresAt</c> (unix seconds) is checked against the injected clock.</summary>
 internal sealed record SlimRememberDevicePayload(string Uid, string Stamp, long ExpiresAt);
@@ -143,4 +145,3 @@ internal sealed record SlimExternalLinkPayload(string Provider, string ProviderK
 internal sealed record SlimExchangePayload(string Uid, string Stamp, string Provider, string Nonce, string CodeChallenge);
 /// <summary><c>AuthTime</c> = unix seconds of the original sign-in (absolute lifetime), <c>Sid</c> = server-side session (optional).</summary>
 internal sealed record SlimRefreshPayload(string Uid, string Stamp, string Amr, string Nonce, long AuthTime, string? Sid);
-internal sealed record SlimInvitationPayload(string Uid, string Email, string Stamp);

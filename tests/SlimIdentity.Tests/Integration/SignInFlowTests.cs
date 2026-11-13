@@ -109,7 +109,7 @@ public sealed class SignInFlowTests
     }
 
     [Fact]
-    public async Task An_accepted_invitation_continues_with_the_second_factor()
+    public async Task An_invitation_asks_the_second_factor_before_the_password_with_a_mailed_code()
     {
         await using var app = await TestApp.StartAsync();
         var admin = app.CreateClient();
@@ -120,11 +120,13 @@ public sealed class SignInFlowTests
         await app.Users.UpdateSecurityStateAsync(invited, default);
         app.Time.Advance(TimeSpan.FromSeconds(1));
 
-        var answer = await app.CreateClient().PostJsonAsync("/auth/invitation/accept", new { token, password = "Invited123!" });
+        var answer = await app.CreateClient().PostJsonAsync("/auth/flow", new { token });
 
-        Assert.Equal(["second_factor"], Actions(answer));
+        Assert.Equal(["second_factor", "set_credential"], Actions(answer));
         var code = (await app.Mail.WaitForAsync("two-factor", "invited@test.local")).Payload;
-        var session = await app.CreateClient().PostJsonAsync("/auth/login/2fa", new { flowToken = answer.Str("flowToken"), code });
+        var verified = await app.CreateClient().PostJsonAsync("/auth/login/2fa", new { flowToken = answer.Str("flowToken"), code });
+        Assert.Equal(["set_credential"], Actions(verified));
+        var session = await app.CreateClient().PostJsonAsync("/auth/register/password", new { flowToken = verified.Str("flowToken"), password = "Invited123!" });
         Assert.False(string.IsNullOrEmpty(session.Str("accessToken")));
     }
 }

@@ -59,8 +59,8 @@ internal sealed class SlimCredentialSetup(
     /// <summary>
     /// Completes the step for an existing account with <paramref name="newPassword"/>, or – <c>null</c> – with the passkey
     /// <paramref name="addPasskey"/> adds (it answers <c>null</c> on success). The new way replaces the password and ends
-    /// every session; a reset that proves the mailbox of an unconfirmed account for the first time confirms it and
-    /// removes every other way in. Then the flow continues like a sign-in with the new way – the session.
+    /// every session; a link that proves the mailbox confirms the address – a reset of an unconfirmed account also
+    /// removes every other way in, an invitation does not (the administrator set the account up). Then the flow continues like a sign-in with the new way – the session.
     /// </summary>
     public async Task<IResult> CompleteAsync(SlimUser user, SlimFlowPayload state, string? newPassword,
         Func<CancellationToken, Task<IResult?>>? addPasskey, CancellationToken ct)
@@ -74,13 +74,16 @@ internal sealed class SlimCredentialSetup(
         }
 
         var takeover = false;
+        var confirms = false;
         var written = await store.TryWriteSecurityStateAsync(user, u =>
         {
             // rotates the stamp: the flow and its link are single-use, every session ends
             if (newPassword is not null) credentials.ApplyNewPassword(u, newPassword);
             else SlimCredentialService.RemovePassword(u);
             takeover = SlimSignInChain.ResetsUnconfirmedAccount(u, state);
-            if (takeover) (u.TwoFactorEnabled, u.EmailConfirmed) = (false, true);
+            confirms = !u.EmailConfirmed && state.Proofs.HasFlag(SlimSignInProofs.Mailbox);
+            if (takeover) u.TwoFactorEnabled = false;
+            if (confirms) u.EmailConfirmed = true;
         }, ct);
         if (!written) return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
 
@@ -98,15 +101,18 @@ internal sealed class SlimCredentialSetup(
                 await externalLogins.RemoveExternalLoginsAsync(user.Id, ct);
             if (services.GetService<ISlimPasskeySignInMethods>() is { } passkeys)
                 await passkeys.RemoveAllAsync(user.Id, ct);
-            await hooks.RaiseAsync(SlimEventTypes.EmailConfirmed, user.Id, ct: ct);
         }
+        if (confirms) await hooks.RaiseAsync(SlimEventTypes.EmailConfirmed, user.Id, ct: ct);
         if (addPasskey is not null && await addPasskey(ct) is { } refused) return refused;
 
         await credentials.ResetAttemptsAsync(user, SlimAttemptFactor.Password, ct);   // the link proved the account
         await authManager.RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
-        Log.PasswordReset(logger, user.Id);
-        if (newPassword is not null) await hooks.RaiseAsync(SlimEventTypes.PasswordChanged, user.Id, reason: "reset", ct: ct);
-        metrics.PasswordReset("completed");
+        var invitation = state.Link == SlimLinkPayload.Invitation;
+        if (invitation) Log.InvitationAccepted(logger, user.Id);
+        else Log.PasswordReset(logger, user.Id);
+        if (newPassword is not null) await hooks.RaiseAsync(SlimEventTypes.PasswordChanged, user.Id, reason: invitation ? "invitation" : "reset", ct: ct);
+        if (invitation) metrics.Invitation("accepted");
+        else metrics.PasswordReset("completed");
 
         var passkey = newPassword is null;
         var result = await flow.ContinueAsync(user, state with

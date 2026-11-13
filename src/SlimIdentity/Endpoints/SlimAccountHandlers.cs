@@ -5,7 +5,7 @@ using SlimIdentity.Services;
 
 namespace SlimIdentity.Endpoints;
 
-/// <summary>Registration, e-mail change, password flows, invitations, sessions and <c>/me</c>.</summary>
+/// <summary>Registration, e-mail change, password flows, sessions and <c>/me</c>.</summary>
 internal sealed class SlimAccountHandlers(
     ISlimUserStore store,
     SlimEmailDispatcher mail,
@@ -141,66 +141,6 @@ internal sealed class SlimAccountHandlers(
         await hooks.RaiseAsync(SlimEventTypes.EmailChanged, user.Id, ct: ct);
         metrics.EmailChange("completed");
         return SlimResults.Status("email_changed", "The e-mail address has been changed. Please sign in again.");
-    }
-
-    // ------------------------------------------------------------------ POST /invitation/info & /invitation/accept
-
-    public async Task<IResult> InvitationInfoAsync(SlimInvitationInfoRequest? request, CancellationToken ct)
-    {
-        var (user, expiresAt) = await LoadInvitationAsync(request?.Token, ct);
-        return user is null
-            ? SlimResults.InvalidToken()
-            : Results.Ok(new SlimInvitationInfoResponse(user.Email, expiresAt));
-    }
-
-    public async Task<IResult> AcceptInvitationAsync(SlimAcceptInvitationRequest? request, bool? useCookies, CancellationToken ct)
-    {
-        if (!SlimModes.TryResolve(O, useCookies, out var cookies, out var modeError)) return modeError!;
-
-        var (user, _) = await LoadInvitationAsync(request?.Token, ct);
-        if (user is null) return SlimResults.InvalidToken();
-
-        if (services.GetService<ISlimCustomPasswordValidator>() is not null)
-            return SlimResults.BadRequest(SlimErrorCodes.PasswordManagedExternally,
-                "Passwords are validated externally (LDAP / custom validator); invitations cannot set one.");
-        if (await passwordPolicy.ValidateAsync(request!.Password, user.Email, ct) is { } errors)
-            return SlimResults.Validation(errors);
-
-        var written = await store.TryWriteSecurityStateAsync(user, u =>
-        {
-            credentials.ApplyNewPassword(u, request.Password); // rotates the stamp → the link is single-use
-            u.EmailConfirmed = true;                           // the invitation was delivered to this mailbox
-        }, ct);
-        if (!written) return SlimResults.InvalidToken();
-        await authManager.RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
-        Log.InvitationAccepted(logger, user.Id);
-        await hooks.RaiseAsync(SlimEventTypes.PasswordChanged, user.Id, reason: "invitation", ct: ct);
-        metrics.Invitation("accepted");
-
-        // the invitation proves the mailbox and sets an own password – the second factor of an account the host set up
-        // with one follows in the sign-in flow
-        var result = await services.GetRequiredService<SlimSignInFlow>().StartAsync(user, cookies, rememberMe: false, SlimAuthManager.MethodPassword,
-            SlimSignInProofs.None, checkRememberedDevice: false, rememberToken: null, refuseLockedSecondFactor: false, ct);
-        if (result.Succeeded || result.ActionRequired is not null || result.Vetoed) return SlimLoginHandlers.ToResult(result);
-        return result.Error == SlimErrorCodes.TwoFactorUnavailable
-            ? services.GetRequiredService<SlimSignInFlow>().ToHttpResult(result, user)
-            : SlimResults.InvalidToken();
-    }
-
-    private async Task<(SlimUser? User, DateTimeOffset ExpiresAt)> LoadInvitationAsync(string? token, CancellationToken ct)
-    {
-        if (!workflow.TryUnprotect<SlimInvitationPayload>(SlimWorkflowTokens.InvitationPurpose, token, out var payload, out var expiresAt))
-            return (null, default);
-
-        var user = await store.FindByIdAsync(payload.Uid, ct);
-        if (user is null
-            || !user.IsActive
-            || !string.IsNullOrEmpty(user.PasswordHash) // already completed
-            || !string.Equals(user.Email, payload.Email, StringComparison.OrdinalIgnoreCase)
-            || !SlimUser.IsSameSecurityState(user.SecurityStamp, payload.Stamp))
-            return (null, default);
-
-        return (user, expiresAt);
     }
 
     // ------------------------------------------------------------------ GET /sessions & DELETE /sessions/{id}

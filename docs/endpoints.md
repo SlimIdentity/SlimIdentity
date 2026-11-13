@@ -33,7 +33,7 @@ metadata (tag `SlimIdentity`), so typed clients can be generated from `/openapi/
 | `POST /login/2fa` ⏱ | `flowToken` + `code` or `recoveryCode`, `rememberDevice` | `200` session (+ `twoFactorRememberToken` in bearer mode / cookie `SlimAuth.2fa` in cookie mode when remembered), or `200 action_required` with the remaining steps | `401 invalid_token`, `401 invalid_two_factor_code`, `423 locked_out` |
 | `POST /login/verify-email` ⏱ | `flowToken`, `code` (from the mail of kind `verification-code`) | `200` session, or `200 action_required` with the remaining steps; the address is confirmed | `401 invalid_token`, `401 invalid_verification_code`, `429 too_many_attempts` (5 wrong codes per flow, 10 per address in 24 hours) |
 | `POST /login/password-change` ⏱ | `flowToken`, `newPassword` | `200` session, or `200 action_required` with the remaining steps | `400 password_unchanged`, `400` validation, `401 invalid_token`, `423 locked_out` |
-| `POST /flow?useCookies=…` ⏱ | `flowToken`, or `token` of a registration link | `flowToken`: `200 action_required` with the open steps of the token – read only, nothing is sent or consumed. `token`: proves the mailbox of a [registration](#registration) and continues it in the mode of this request (the link may open on another device) | `401 invalid_token` (also for a completed, expired or outdated flow, and for an address that has an account by now) |
+| `POST /flow?useCookies=…` ⏱ | `flowToken`, or `token` of a registration, reset or invitation link | `flowToken`: `200 action_required` with the open steps of the token – read only, nothing is sent or consumed. `token`: proves the mailbox of a [registration](#registration) and continues it in the mode of this request (the link may open on another device) | `401 invalid_token` (also for a completed, expired or outdated flow, and for an address that has an account by now) |
 | `POST /refresh` | `refreshToken` | `200` new token pair | `400 invalid_request`, `401 invalid_token`, `401 session_expired` |
 | `POST /logout` | `refreshToken` (optional) | `200 logged_out` – ends the caller's session; a refresh token ends its session only while it is valid (unused, current security stamp) | – |
 | `POST /logout-all` 🔒 | – | `200 logged_out_everywhere` | `401`, `403 not_allowed_while_impersonating` |
@@ -54,7 +54,7 @@ accepted). `second_factor` is completed at `/login/2fa`
 [running without e-mail](guides/without-email.md#the-forced-password-change)). Every step answers with the session or
 with the remaining steps and a new `flowToken`; a flow lasts 15 minutes from the first factor and completes once. A
 [registration](#registration) answers the same way with the steps `verify_email` and `set_credential`. The
-same answer comes from `/login/external/exchange`, `/passkeys/login`, `/invitation/accept` and
+same answer comes from `/login/external/exchange`, `/passkeys/login` and
 `ISlimAuthManager.SignInAsync`. `/login/verify-email`, `/login/2fa` and `/login/password-change` use the mode chosen at the start. `/refresh` only exists with `ISlimRefreshTokenStore`; `/login/2fa` only
 with `ISlimTwoFactorStore`; `/login/verify-email` not with `WithoutEmail()`.
 
@@ -145,12 +145,20 @@ to set (`400 password_managed_externally`). `profile` is refused in this flow.
 
 ## Invitations
 
-| Endpoint | Body | Success | Errors |
-| :--- | :--- | :--- | :--- |
-| `POST /invitation/info` ⏱ | `token` | `200` `email`, `expiresAt` | `400 invalid_token` |
-| `POST /invitation/accept` ⏱ | `token`, `password` | `200` session (or `200 invitation_accepted` for users with 2FA) | `400 invalid_token`, `400 password_managed_externally`, `400` validation |
-
 Links are created by the host with `ISlimAuthManager.CreateInvitationAsync` – see [Invitations](guides/invitations.md).
+An invitation link continues as a flow like a [password reset](#password-reset):
+
+```
+POST /flow               { "token" }                  → action_required [ "second_factor"?, "set_credential"], flowToken
+POST /register/password  { "flowToken", "password" }  → session; the address is confirmed, all other sessions end
+  or POST /register/passkey/options + /register/passkey (package SlimIdentity.Passkeys)
+```
+
+The link proves the mailbox: an account with a second factor (enabled by the host beforehand) passes `second_factor`,
+a mailed code included. `details.setCredential` names the `email`. The link works once, only until the security stamp
+changes and only while the account has no password and its address is unchanged; otherwise `/flow` answers
+`401 invalid_token`. With an `ISlimCustomPasswordValidator` and no passkeys there is nothing to set
+(`400 password_managed_externally`).
 
 ## Sessions (`ISlimSessionStore`)
 

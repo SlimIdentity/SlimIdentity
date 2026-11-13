@@ -94,8 +94,8 @@ public static class AdminEndpoints
 
         // Invite-only B2B (built-in /register disabled via Endpoints.EnableRegistration = false):
         // the admin creates the account with business data but WITHOUT password and mails the link.
-        // The invitee opens it in the SPA, which calls POST /auth/invitation/info (shows the e-mail)
-        // and POST /auth/invitation/accept { token, password } (sets the password, confirms the mail, signs in).
+        // The invitee opens it in the SPA, which continues it with POST /auth/flow { token } and
+        // POST /auth/register/password { flowToken, password } (sets the password, confirms the mail, signs in).
         admin.MapPost("/invitations", async (InviteRequest req, ClaimsPrincipal me,
                 ISlimAuthManager auth, IInvitationMailer mailer, CancellationToken ct) =>
             {

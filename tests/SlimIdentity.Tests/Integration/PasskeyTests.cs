@@ -278,6 +278,33 @@ public sealed class PasskeyTests
     }
 
     [Fact]
+    public async Task An_invitation_can_be_accepted_with_a_passkey()
+    {
+        await using var app = await RegistrationAppAsync();
+        string token;
+        using (var scope = app.App.Services.CreateScope())
+        {
+            var auth = scope.ServiceProvider.GetRequiredService<ISlimAuthManager>();
+            var created = await auth.CreateUserAsync("invited@test.local");
+            token = (await auth.CreateInvitationAsync(created.User!)).Token;
+        }
+        var client = app.CreateClient();
+        using var key = new SoftwarePasskey();
+
+        var started = await client.PostJsonAsync("/auth/flow", new { token });
+        var (options, state) = await NewAccountOptionsAsync(client, started.Str("flowToken"));
+        var session = await client.PostJsonAsync("/auth/register/passkey",
+            new { flowToken = started.Str("flowToken"), state, credential = key.Create(options, Origin), name = "Phone" });
+
+        Assert.False(string.IsNullOrEmpty(session.Str("accessToken")));
+        var invited = app.Users.Get("invited@test.local");
+        Assert.True(invited.EmailConfirmed);
+        Assert.True(string.IsNullOrEmpty(invited.PasswordHash));
+        Assert.Equal(HttpStatusCode.OK, (await LoginAsync(app, key)).Status);
+        await client.PostJsonAsync("/auth/flow", new { token }, HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
     public async Task A_passkey_completes_a_registration_without_a_password()
     {
         await using var app = await RegistrationAppAsync();

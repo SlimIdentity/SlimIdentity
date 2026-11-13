@@ -22,16 +22,18 @@ public sealed class InvitationAndImpersonationTests
         var token = (await admin.PostJsonAsync("/api/invite", new { email = "invited@test.local" })).Str("token");
         var anonymous = app.CreateClient();
 
-        var info = await anonymous.PostJsonAsync("/auth/invitation/info", new { token });
-        Assert.Equal("invited@test.local", info.Str("email"));
+        var started = await anonymous.PostJsonAsync("/auth/flow", new { token });
+        Assert.Equal("""["set_credential"]""", started.GetProperty("actions").GetRawText());
+        Assert.Equal("invited@test.local", started.GetProperty("details").GetProperty("setCredential").Str("email"));
+        var flowToken = started.Str("flowToken");
 
-        await anonymous.PostJsonAsync("/auth/invitation/accept", new { token, password = "weak" }, HttpStatusCode.BadRequest);
-        var session = await anonymous.PostJsonAsync("/auth/invitation/accept", new { token, password = "Invited123!" });
+        await anonymous.PostJsonAsync("/auth/register/password", new { flowToken, password = "weak" }, HttpStatusCode.BadRequest);
+        var session = await anonymous.PostJsonAsync("/auth/register/password", new { flowToken, password = "Invited123!" });
         Assert.False(string.IsNullOrEmpty(session.Str("accessToken")));
         Assert.True(app.Users.Get("invited@test.local").EmailConfirmed);
 
-        await anonymous.PostJsonAsync("/auth/invitation/accept", new { token, password = "Other1234!" }, HttpStatusCode.BadRequest);
-        await anonymous.PostJsonAsync("/auth/invitation/info", new { token }, HttpStatusCode.BadRequest);
+        await anonymous.PostJsonAsync("/auth/register/password", new { flowToken, password = "Other1234!" }, HttpStatusCode.Unauthorized);
+        await anonymous.PostJsonAsync("/auth/flow", new { token }, HttpStatusCode.Unauthorized);
     }
 
     [Fact]

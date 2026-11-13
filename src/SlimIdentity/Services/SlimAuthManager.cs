@@ -392,8 +392,9 @@ internal sealed class SlimAuthManager(
         if (validity <= TimeSpan.Zero || validity > TimeSpan.FromDays(30))
             throw new ArgumentOutOfRangeException(nameof(lifetime), "SlimIdentity: invitation lifetime must be between 0 and 30 days.");
 
-        var token = workflow.Protect(SlimWorkflowTokens.InvitationPurpose,
-            new SlimInvitationPayload(user.Id, user.Email, user.SecurityStamp), validity);
+        var flowId = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
+        var token = workflow.Protect(SlimWorkflowTokens.LinkPurpose,
+            new SlimLinkPayload(SlimLinkPayload.Invitation, flowId, user.Email, user.Id, user.SecurityStamp), validity);
         metrics.Invitation("created");
         var link = services.GetRequiredService<SlimLinks>().Build(SlimLinkKind.Invitation, token);
         return Task.FromResult(new SlimInvitation(token, link, time.GetUtcNow() + validity));

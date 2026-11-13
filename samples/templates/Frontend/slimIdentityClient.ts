@@ -24,7 +24,7 @@ export interface AuthResponse {
  * answers with the remaining ones and a new flowToken – or with the session.
  * A registration answers the same way: "verify_email" at verifyRegistration (or the mailed link at openLink),
  * then "set_credential" at completeRegistration or completeRegistrationWithPasskey. A reset link (openLink) ends in
- * "set_credential" as well – possibly after "verify_email" or "second_factor".
+ * "set_credential" as well – possibly after "verify_email" or "second_factor" – and so does an invitation link.
  */
 export interface ActionRequired {
   status: "action_required";
@@ -266,8 +266,9 @@ export const cookieAuth = {
   },
 
   /**
-   * Page behind a mailed link (/verify-email?token=…, /reset-password?token=…) – also on another device. Next is
-   * "set_credential"; after a reset all other sessions of the account end.
+   * Page behind a link (/verify-email, /reset-password, /accept-invitation – each ?token=…) – also on another device.
+   * Next is "set_credential" (`details.setCredential.email` names the account); after a reset or an invitation all
+   * other sessions of the account end.
    */
   async openLink(token: string): Promise<LoginResult> {
     return toLoginResult(await cookieFetch("/auth/flow?useCookies=true", { method: "POST", body: JSON.stringify({ token }) }));
@@ -338,21 +339,6 @@ export const cookieAuth = {
 
   async revokeSession(id: string) {
     await cookieFetch(`/auth/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
-  },
-
-  /** Invitation page: /accept-invitation?token=... → show e-mail, ask for a password, then accept. */
-  async invitationInfo(token: string): Promise<{ email: string; expiresAt: string } | null> {
-    const r = await cookieFetch("/auth/invitation/info", { method: "POST", body: JSON.stringify({ token }) });
-    return r.ok ? r.json() : null;
-  },
-
-  /** Sets the password and signs in – or { kind: "action_required" } when the second factor follows. */
-  async acceptInvitation(token: string, password: string): Promise<LoginResult> {
-    const r = await cookieFetch("/auth/invitation/accept?useCookies=true", {
-      method: "POST",
-      body: JSON.stringify({ token, password }),
-    });
-    return toLoginResult(r);
   },
 
   /** Social login is a full-page navigation, not fetch. */
@@ -680,7 +666,7 @@ export const bearerAuth = {
     return flowStep("/register/verify", { flowToken, code });
   },
 
-  /** Page behind a mailed link (/verify-email?token=…, /reset-password?token=…) – also on another device. */
+  /** Page behind a link (/verify-email, /reset-password, /accept-invitation – each ?token=…) – also on another device. */
   async openLink(token: string): Promise<LoginResult> {
     return toLoginResult(await fetch(`${AUTH}/flow?useCookies=false`, { method: "POST", headers: jsonHeaders, body: JSON.stringify({ token }) }));
   },
@@ -896,24 +882,6 @@ export const bearerAuth = {
 
   async revokeSession(id: string) {
     await bearerFetch(`/auth/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
-  },
-
-  /** Invitation page: show the address, ask for a password, then accept. */
-  async invitationInfo(token: string): Promise<{ email: string; expiresAt: string } | null> {
-    const r = await fetch(`${AUTH}/invitation/info`, { method: "POST", headers: jsonHeaders, body: JSON.stringify({ token }) });
-    return r.ok ? r.json() : null;
-  },
-
-  /** Sets the password and signs in – or { kind: "action_required" } when the second factor follows. */
-  async acceptInvitation(token: string, password: string): Promise<LoginResult> {
-    const r = await fetch(`${AUTH}/invitation/accept?useCookies=false`, {
-      method: "POST",
-      headers: jsonHeaders,
-      body: JSON.stringify({ token, password }),
-    });
-    const result = await toLoginResult(r);
-    if (result.kind === "ok") storeTokens(result.auth);
-    return result;
   },
 
   api: bearerFetch,

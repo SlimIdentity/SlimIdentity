@@ -259,27 +259,6 @@ public static class SlimIdentityEndpointExtensions
                 .AllowAnonymous();
         }
 
-        // invitations: harmless without links – only the host can create them (ISlimAuthManager.CreateInvitationAsync)
-        group.MapPost("/invitation/info", static ([FromBody] SlimInvitationInfoRequest request,
-                [FromServices] SlimAccountHandlers h, CancellationToken ct) => h.InvitationInfoAsync(request, ct))
-            .WithName("SlimIdentity_InvitationInfo")
-            .WithSummary("Check an invitation link and return the invited e-mail address (for the \"set your password\" form).")
-            .Produces<SlimInvitationInfoResponse>()
-            .ProducesSlimProblem(StatusCodes.Status400BadRequest)
-            .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
-            .AllowAnonymous();
-
-        group.MapPost("/invitation/accept", static ([FromBody] SlimAcceptInvitationRequest request, [FromQuery] bool? useCookies,
-                [FromServices] SlimAccountHandlers h, CancellationToken ct) => h.AcceptInvitationAsync(request, useCookies, ct))
-            .WithName("SlimIdentity_AcceptInvitation")
-            .WithSummary("Accept an invitation: set the password,             confirm the e-mail and sign in (cookie or JWT, see ?useCookies) – or action_required when a second factor follows.")
-            .Produces<SlimAuthResponse>()
-                        .Produces<SlimActionRequiredResponse>()
-            .ProducesSlimProblem(StatusCodes.Status400BadRequest)
-            .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
-            .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
-            .AllowAnonymous();
-
         if (e.EnableChangePassword)
         {
             group.MapPost("/change-password", static ([FromBody] SlimChangePasswordRequest request,

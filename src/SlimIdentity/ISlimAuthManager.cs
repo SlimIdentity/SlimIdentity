@@ -190,7 +190,8 @@ public interface ISlimAuthManager
     /// Creates an invitation / "complete your registration" link for an existing user <b>without</b> password
     /// (create it first via <see cref="CreateUserAsync"/> without a start password, with your business data as profile).
     /// The link is stateless, bound to the user's security stamp and therefore single-use. Sending it is up to the host.
-    /// Accepted via <c>POST /auth/invitation/accept</c>.
+    /// Opened with <c>POST /auth/flow</c> (the token); the flow ends in step <c>set_credential</c>, which confirms the
+    /// address.
     /// </summary>
     Task<SlimInvitation> CreateInvitationAsync(SlimUser user, TimeSpan? lifetime = null, CancellationToken ct = default);
 }

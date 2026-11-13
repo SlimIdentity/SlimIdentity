@@ -263,30 +263,6 @@ public sealed record SlimExternalLinkRequest(string Code, string? CodeVerifier =
     }
 }
 
-/// <summary>Body of <c>POST /auth/invitation/info</c>.</summary>
-/// <param name="Token">Token from the invitation link.</param>
-public sealed record SlimInvitationInfoRequest(string Token)
-{
-    private bool PrintMembers(System.Text.StringBuilder builder)
-    {
-        builder.Append("Token = ").Append(SlimRedaction.Mask(Token));
-        return true;
-    }
-}
-
-/// <summary>Body of <c>POST /auth/invitation/accept</c>.</summary>
-/// <param name="Token">Token from the invitation link.</param>
-/// <param name="Password">The password to set, according to the password policy.</param>
-public sealed record SlimAcceptInvitationRequest(string Token, string Password)
-{
-    private bool PrintMembers(System.Text.StringBuilder builder)
-    {
-        builder.Append("Token = ").Append(SlimRedaction.Mask(Token));
-        builder.Append(", Password = ").Append(SlimRedaction.Mask(Password));
-        return true;
-    }
-}
-
 /// <summary>Body of <c>POST /auth/change-email</c>.</summary>
 /// <param name="NewEmail">The new e-mail address (receives the confirmation link).</param>
 /// <param name="Password">The current password.</param>
@@ -497,11 +473,6 @@ public sealed record SlimPasswordPolicyResponse(
     int MinimumLength,
     int MaximumLength,
     bool HasAdditionalRules);
-
-/// <summary>Body of <c>POST /auth/invitation/info</c>.</summary>
-/// <param name="Email">The invited address (lets the "set your password" form show it).</param>
-/// <param name="ExpiresAt">End of validity of the link.</param>
-public sealed record SlimInvitationInfoResponse(string Email, DateTimeOffset ExpiresAt);
 
 /// <summary>An active session / device of the signed-in user (<c>GET /auth/sessions</c>).</summary>
 /// <param name="Id">Session id (for <c>DELETE /auth/sessions/{id}</c>).</param>

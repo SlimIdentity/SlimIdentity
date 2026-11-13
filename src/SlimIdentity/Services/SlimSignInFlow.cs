@@ -120,7 +120,7 @@ internal sealed class SlimSignInFlow(
 
     /// <summary>
     /// <c>POST /flow</c> with the token of a link, in the mode of this request (the link may open on another device): a
-    /// registration continues, a reset starts the flow to its new way to sign in.
+    /// registration continues, a reset or an invitation starts the flow to its new way to sign in.
     /// </summary>
     private async Task<IResult> ExchangeAsync(string token, bool? useCookies, CancellationToken ct)
     {
@@ -129,9 +129,13 @@ internal sealed class SlimSignInFlow(
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
         if (link.Kind == SlimLinkPayload.Registration)
             return await services.GetRequiredService<SlimRegistrationFlow>().ExchangeAsync(link, cookies, ct);
-        if (link.Kind is not (SlimLinkPayload.Reset or SlimLinkPayload.AdminReset) || link.Uid is null
+        if (link.Kind is not (SlimLinkPayload.Reset or SlimLinkPayload.AdminReset or SlimLinkPayload.Invitation) || link.Uid is null
             || await store.FindByIdAsync(link.Uid, ct) is not { IsActive: true } user
             || !SlimUser.IsSameSecurityState(user.SecurityStamp, link.Stamp))
+            return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
+        // an invitation goes to the address it was created for, and only until the account has a password
+        if (link.Kind == SlimLinkPayload.Invitation
+            && (!string.IsNullOrEmpty(user.PasswordHash) || !string.Equals(user.Email, link.Email, StringComparison.OrdinalIgnoreCase)))
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
 
         // the owner's request does not give an account that signs in through SSO only a local way in; an administrator may
@@ -143,7 +147,7 @@ internal sealed class SlimSignInFlow(
             return SlimResults.BadRequest(SlimErrorCodes.PasswordManagedExternally,
                 "Passwords are validated externally (LDAP / custom validator) and no other way to sign in can be set.");
 
-        var proofs = link.Kind == SlimLinkPayload.Reset ? SlimSignInProofs.Mailbox : SlimSignInProofs.None;
+        var proofs = link.Kind == SlimLinkPayload.AdminReset ? SlimSignInProofs.None : SlimSignInProofs.Mailbox;
         var state = new SlimFlowPayload(user.Id, user.SecurityStamp, link.FlowId, time.GetUtcNow().ToUnixTimeMilliseconds(), proofs, "",
             cookies, RememberMe: false, Link: link.Kind);
         var result = await StepsAsync(user, state, SlimSignInChain.Evaluate(user, state, O), ct);
@@ -213,7 +217,8 @@ internal sealed class SlimSignInFlow(
         }
         else if (decision.Next == SlimSignInActions.SecondFactor && state.Method is null or SlimSignInActions.VerifyEmail)
         {
-            if (await ChallengeAsync(user, mailCode: state.Link is null, ct) is not { } challenge) return SlimAuthResult.Failed(SlimErrorCodes.TwoFactorUnavailable);
+            // a reset proves nothing beyond the mailbox – a mailed code would prove the same once more
+            if (await ChallengeAsync(user, mailCode: state.Link is not (SlimLinkPayload.Reset or SlimLinkPayload.AdminReset), ct) is not { } challenge) return SlimAuthResult.Failed(SlimErrorCodes.TwoFactorUnavailable);
             state = state with { Method = challenge.Method, CodeHash = challenge.CodeHash, IssuedAt = challenge.IssuedAt };
         }
 

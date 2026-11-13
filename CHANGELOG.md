@@ -383,6 +383,11 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
   for an administrator's link to an unconfirmed account while confirmation is required. A used, outdated or invalid
   link answers `401 invalid_token`; with a custom password validator and no passkeys `400 password_managed_externally`.
   TypeScript client: `openRegistrationLink` becomes `openLink`, `account.resetPassword` is removed.
+- **Breaking** (wire format): `POST /auth/invitation/info` and `POST /auth/invitation/accept` are removed. An
+  invitation link is opened with `POST /auth/flow { token }` and ends in step `set_credential` (password or passkey);
+  `details.setCredential.email` replaces `/invitation/info`. An account with a second factor passes `second_factor`
+  first, a mailed code included. The link answers `401 invalid_token` once the account has a password or another
+  address. TypeScript client: `invitationInfo` and `acceptInvitation` are removed; `openLink` covers invitation links.
 - **Breaking** with `UseTenantKey`: the tenant of the request is part of the Data Protection purpose of every token
   (mail links, invitations, sign-in flows, refresh tokens, remembered devices, exchange and link codes, passkey
   ceremonies). A token of one tenant no longer decrypts in another; tokens issued before the update, or outside a

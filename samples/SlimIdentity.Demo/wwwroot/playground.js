@@ -4,7 +4,7 @@
 import { installVirtualPasskey } from "./virtual-passkey.js";
 
 const $ = (id) => document.getElementById(id);
-const state = { accessToken: null, refreshToken: null, flowToken: null, step: null, rememberToken: null, totpSecret: null, link: null };
+const state = { accessToken: null, refreshToken: null, flowToken: null, step: null, rememberToken: null, totpSecret: null };
 
 // ------------------------------------------------------------------ HTTP
 
@@ -13,7 +13,7 @@ function mode() { return $("mode").value; }
 async function call(method, path, body) {
   const headers = { "Content-Type": "application/json", "X-CSRF": "1" };   // CSRF header: required in cookie mode
   if (mode() === "bearer" && state.accessToken) headers.Authorization = `Bearer ${state.accessToken}`;
-  const url = path.startsWith("/auth/") && ["/auth/login", "/auth/register", "/auth/flow", "/auth/invitation/accept"].includes(path) ? `${path}?useCookies=${mode() === "cookie"}` : path;
+  const url = path.startsWith("/auth/") && ["/auth/login", "/auth/register", "/auth/flow"].includes(path) ? `${path}?useCookies=${mode() === "cookie"}` : path;
   const response = await fetch(url, { method, headers, credentials: "same-origin", body: body === undefined ? undefined : JSON.stringify(body) });
   const text = await response.text();
   let json = null;
@@ -191,14 +191,6 @@ const actions = {
       if (link) li.append(button("Open link", () => { location.href = link; }));
       list.append(li);
     }
-  },
-
-  async completeLink() {
-    const { kind, token } = state.link ?? {};
-    if (kind === "accept-invitation") { const r = await call("POST", "/auth/invitation/accept", { token, password: $("linkPassword").value }); if (r.ok) storeSession(r.json); }
-    $("linkForm").hidden = true;
-    history.replaceState(null, "", "/");
-    await updateWho();
   },
 
   async users() {
@@ -442,20 +434,13 @@ async function handleLinkPage() {
   const kind = location.pathname.slice(1);
   const token = new URLSearchParams(location.search).get("token");
   if (!token) return;
-  if (kind === "verify-email" || kind === "reset-password") {
-    // both links continue as a flow; a reset ends in set_credential like a registration
+  if (kind === "verify-email" || kind === "reset-password" || kind === "accept-invitation") {
+    // every link continues as a flow ending in set_credential, like a registration
     state.registration = kind === "verify-email";
     showSteps((await call("POST", "/auth/flow", { token })).json);
     history.replaceState(null, "", "/");
   }
   else if (kind === "confirm-email-change") { await call("POST", "/auth/confirm-email-change", { token }); history.replaceState(null, "", "/"); }
-  else if (kind === "accept-invitation") {
-    state.link = { kind, token };
-    $("linkTitle").textContent = "Accept the invitation – choose a password";
-    const info = await call("POST", "/auth/invitation/info", { token });
-    if (info.ok) $("linkTitle").textContent += ` for ${info.json.email}`;
-    $("linkForm").hidden = false;
-  }
 }
 
 // ------------------------------------------------------------------ virtual authenticator (RFC 6238, WebCrypto)
