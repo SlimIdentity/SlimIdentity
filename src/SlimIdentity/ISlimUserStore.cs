@@ -120,7 +120,7 @@ public sealed class SlimNewUser
     public required string Email { get; init; }
 
     /// <summary>
-    /// The password hash – empty for accounts without a password (external login, invitation, created by an
+    /// The password hash – empty for accounts without a password (external login, passkey, invitation, created by an
     /// administrator).
     /// </summary>
     public string PasswordHash { get; init; } = string.Empty;
@@ -133,7 +133,7 @@ public sealed class SlimNewUser
 
     /// <summary>
     /// Your business data for the new account: what <see cref="ISlimRegistrationProfile"/> returned for the
-    /// <c>profile</c> of <c>/register</c>, what your endpoint passed to <see cref="ISlimAuthManager.RegisterAsync"/>, or
+    /// <c>profile</c> of a registration, what your endpoint passed to <see cref="ISlimAuthManager.RegisterAsync"/>, or
     /// what you set yourself. <c>null</c> without a profile (always for an external login). Write it in the same
     /// transaction as the account.
     /// </summary>

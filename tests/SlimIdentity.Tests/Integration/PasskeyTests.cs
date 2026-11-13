@@ -229,6 +229,132 @@ public sealed class PasskeyTests
         await RegisterAsync(app, me, key, expected: HttpStatusCode.Conflict);
     }
 
+    // ------------------------------------------------------------------ the first sign-in method of a registration
+
+    private const string NewEmail = "new@test.local";
+
+    private static Task<TestApp> RegistrationAppAsync() => TestApp.StartAsync(new TestAppOptions
+    {
+        Builder = b => b.AddPasskeyStore<TestPasskeyStore>(ServiceLifetime.Singleton).AddPasskeys(o => o.RelyingPartyId = "test.local"),
+        Configure = o => o.Endpoints.DefaultUseCookies = false,
+    });
+
+    /// <summary>A registration with its mailbox proven: the answer with step <c>set_credential</c>.</summary>
+    private static async Task<JsonElement> MailboxProvenAsync(TestApp app, ApiClient client, string email = NewEmail)
+    {
+        var started = await client.PostJsonAsync("/auth/register", new { email });
+        var code = (await app.Mail.WaitForAsync("verification", email)).Payload;
+        return await client.PostJsonAsync("/auth/register/verify", new { flowToken = started.Str("flowToken"), code });
+    }
+
+    private static async Task<(JsonElement Options, string State)> NewAccountOptionsAsync(ApiClient client, string flowToken)
+    {
+        var start = await client.PostJsonAsync("/auth/register/passkey/options", new { flowToken });
+        return (start.GetProperty("options"), start.Str("state"));
+    }
+
+    [Fact]
+    public async Task A_passkey_completes_a_registration_without_a_password()
+    {
+        await using var app = await RegistrationAppAsync();
+        var client = app.CreateClient();
+        using var key = new SoftwarePasskey();
+        var verified = await MailboxProvenAsync(app, client);
+        Assert.Equal(["password", "passkey"],
+            verified.GetProperty("details").GetProperty("setCredential").GetProperty("kinds").EnumerateArray().Select(k => k.GetString()));
+
+        var (options, state) = await NewAccountOptionsAsync(client, verified.Str("flowToken"));
+        Assert.Equal(NewEmail, options.GetProperty("user").Str("name"));
+        Assert.Empty(options.GetProperty("excludeCredentials").EnumerateArray());
+        var session = await client.PostJsonAsync("/auth/register/passkey",
+            new { flowToken = verified.Str("flowToken"), state, credential = key.Create(options, Origin), name = "Phone" });
+
+        var user = app.Users.Get(NewEmail);
+        Assert.True(user.EmailConfirmed);
+        Assert.True(string.IsNullOrEmpty(user.PasswordHash));
+        var me = app.CreateClient();
+        me.BearerToken = session.Str("accessToken");
+        Assert.Equal("passkey", (await (await me.GetAsync("/auth/me")).Content.ReadFromJsonAsync<JsonElement>()).Str("authenticationMethod"));
+        Assert.Equal(HttpStatusCode.OK, (await LoginAsync(app, key)).Status);
+
+        // once: the flow is spent
+        using var other = new SoftwarePasskey();
+        var again = await client.PostJsonAsync("/auth/register/passkey/options", new { flowToken = verified.Str("flowToken") });
+        Assert.Equal("email_taken", (await client.PostJsonAsync("/auth/register/passkey", new
+        {
+            flowToken = verified.Str("flowToken"), state = again.Str("state"), credential = other.Create(again.GetProperty("options"), Origin),
+        }, HttpStatusCode.Conflict)).Str("code"));
+        Assert.Null(await app.App.Services.GetRequiredService<ISlimPasskeyStore>().FindPasskeyAsync(other.CredentialId, default));
+
+        // a passkey-only account adds passkeys after a recent sign-in – a stolen older session does not
+        using var second = new SoftwarePasskey();
+        await RegisterAsync(app, me, second, password: null);
+        Assert.Equal(key.UserHandle, second.UserHandle);
+        app.Time.Advance(TimeSpan.FromMinutes(6));
+        me.BearerToken = (await me.PostJsonAsync("/auth/refresh", new { refreshToken = session.Str("refreshToken") })).Str("accessToken");
+        Assert.Equal("reauthentication_required",
+            (await me.PostJsonAsync("/auth/passkeys/register/options", new { }, HttpStatusCode.Forbidden)).Str("code"));
+    }
+
+    [Fact]
+    public async Task A_passkey_of_a_registration_belongs_to_its_flow()
+    {
+        await using var app = await RegistrationAppAsync();
+        using var key = new SoftwarePasskey();
+        var client = app.CreateClient();
+        var mine = await MailboxProvenAsync(app, client);
+        var foreign = await MailboxProvenAsync(app, app.CreateClient(), "other@test.local");
+        var (options, state) = await NewAccountOptionsAsync(client, mine.Str("flowToken"));
+        var credential = key.Create(options, Origin);
+
+        // the state of another flow, of a signed-in ceremony, and a flow token before the mailbox is proven
+        await client.PostJsonAsync("/auth/register/passkey", new { flowToken = foreign.Str("flowToken"), state, credential }, HttpStatusCode.BadRequest);
+        var signedIn = await SignedInAsync(app);
+        var ceremony = await signedIn.PostJsonAsync("/auth/passkeys/register/options", new { password = TestApp.UserPassword });
+        await client.PostJsonAsync("/auth/register/passkey", new { flowToken = mine.Str("flowToken"), state = ceremony.Str("state"), credential }, HttpStatusCode.BadRequest);
+        await signedIn.PostJsonAsync("/auth/passkeys/register", new { state, credential }, HttpStatusCode.BadRequest);
+        var unproven = await app.CreateClient().PostJsonAsync("/auth/register", new { email = "third@test.local" });
+        await app.CreateClient().PostJsonAsync("/auth/register/passkey/options", new { flowToken = unproven.Str("flowToken") }, HttpStatusCode.Unauthorized);
+
+        // a forged ceremony
+        var forged = key.Create(options, Origin, new SoftwarePasskey.Tamper(Origin: "https://evil.test"));
+        await client.PostJsonAsync("/auth/register/passkey", new { flowToken = mine.Str("flowToken"), state, credential = forged }, HttpStatusCode.BadRequest);
+
+        Assert.DoesNotContain(app.Users.All, u => u.Email is NewEmail or "other@test.local");
+        Assert.Null(await app.App.Services.GetRequiredService<ISlimPasskeyStore>().FindPasskeyAsync(key.CredentialId, default));
+    }
+
+    [Fact]
+    public async Task A_known_credential_creates_no_account()
+    {
+        await using var app = await RegistrationAppAsync();
+        using var key = new SoftwarePasskey();
+        await RegisterAsync(app, await SignedInAsync(app), key);
+        var client = app.CreateClient();
+        var verified = await MailboxProvenAsync(app, client);
+
+        var (options, state) = await NewAccountOptionsAsync(client, verified.Str("flowToken"));
+        var refused = await client.PostJsonAsync("/auth/register/passkey",
+            new { flowToken = verified.Str("flowToken"), state, credential = key.Create(options, Origin) }, HttpStatusCode.Conflict);
+
+        Assert.Equal("passkey_exists", refused.Str("code"));
+        Assert.DoesNotContain(app.Users.All, u => u.Email == NewEmail);
+        Assert.Equal(app.Users.Get(TestApp.UserEmail).Id, (await app.App.Services.GetRequiredService<ISlimPasskeyStore>().FindPasskeyAsync(key.CredentialId, default))!.UserId);
+    }
+
+    [Fact]
+    public async Task Without_a_password_or_a_passkey_no_passkey_is_added_when_signed_in()
+    {
+        await using var app = await TestApp.StartAsync(WithPasskeys());
+        var me = await SignedInAsync(app);
+        var user = app.Users.Get(TestApp.UserEmail);
+        user.PasswordHash = string.Empty;
+        await app.Users.UpdateSecurityStateAsync(user, default);
+
+        Assert.Equal("password_required",
+            (await me.PostJsonAsync("/auth/passkeys/register/options", new { }, HttpStatusCode.Forbidden)).Str("code"));
+    }
+
     // ------------------------------------------------------------------ sign-in checks
 
     public static TheoryData<string> LoginForgeries => new()
@@ -481,7 +607,7 @@ public sealed class PasskeyTests
         browser.SendCsrfHeader = true;
         var start = await browser.GetAsync("/auth/login/Fake?useCookies=true&returnUrl=/done");
         await browser.GetAsync(start.Headers.Location!.OriginalString);
-        // such an account only comes from before passkeys needed a password: register with a temporary password, drop it
+        // an account with an external login and a passkey but no password: register with a temporary password, drop it
         var userId = app.Users.Get("social@test.local").Id;
         await using (var scope = app.App.Services.CreateAsyncScope())
             await scope.ServiceProvider.GetRequiredService<ISlimAuthManager>().SetPasswordAsync(app.Users.Get("social@test.local"), "Temporary-Pass-123", mustChange: false);

@@ -222,7 +222,11 @@ const actions = {
 
   async addPasskey() {
     stopAutofill();   // the browser runs one WebAuthn request at a time
-    const start = await call("POST", "/auth/passkeys/register/options", { password: password() || null });
+    // in the registration step set_credential the passkey becomes the first sign-in method of the new account
+    const registering = state.step === "set_credential" && !$("challenge").hidden;
+    const start = registering
+      ? await call("POST", "/auth/register/passkey/options", { flowToken: state.flowToken })
+      : await call("POST", "/auth/passkeys/register/options", { password: password() || null });
     if (start.ok) {
       const { options, state: ceremony } = start.json;
       const credential = await navigator.credentials.create({
@@ -234,7 +238,8 @@ const actions = {
         },
       }).catch((e) => { log("WebAuthn", "create", 0, e.message); return null; });
       if (credential) {
-        await call("POST", "/auth/passkeys/register", {
+        const r = await call("POST", registering ? "/auth/register/passkey" : "/auth/passkeys/register", {
+          flowToken: registering ? state.flowToken : undefined,
           state: ceremony,
           name: $("passkeyName").value || null,
           credential: {
@@ -246,7 +251,11 @@ const actions = {
             },
           },
         });
-        await actions.signInMethods();
+        if (registering) {
+          if (r.ok && !showSteps(r.json)) { storeSession(r.json); $("challenge").hidden = true; }
+          await updateWho();
+        }
+        else await actions.signInMethods();
       }
     }
     startAutofill();
@@ -399,7 +408,7 @@ function showSteps(json) {
     $("challenge").hidden = false;
   }
   else if (state.step === "set_credential") {
-    $("challengeTitle").textContent = "Address confirmed – enter a password above, then Continue";
+    $("challengeTitle").textContent = "Address confirmed – enter a password above, then Continue (or Add passkey)";
     $("challengeMethod").textContent = "registration";
     $("challenge").hidden = false;
   }

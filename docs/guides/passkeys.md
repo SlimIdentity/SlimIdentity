@@ -42,9 +42,24 @@ POST /auth/passkeys/register/options   { "password": "…" }        → { "optio
 POST /auth/passkeys/register            { "state", "credential", "name": "Laptop" }   → { "id", "name", "createdUtc", "backupEligible", "backedUp" }
 ```
 
-A passkey adds to a password: the account needs one (`403 password_required` otherwise – a pure SSO account gets no
-local sign-in method), and the password is asked – a stolen session must not add a permanent way in; the address
-must be confirmed, and not during an impersonation – the same rules as for 2FA and linking.
+A passkey adds to a local sign-in method – a password or another passkey (`403 password_required` otherwise: a pure
+SSO account gets no local sign-in method). The password is asked – a stolen session must not add a permanent way in;
+an account without a password needs a sign-in within the last 5 minutes instead (`403 reauthentication_required`). The
+address must be confirmed, and not during an impersonation – the same rules as for 2FA and linking.
+
+**Register with a passkey** (no password at all) – the registration's step `set_credential` accepts a passkey once the
+mailbox is proven ([registration](../endpoints.md#registration)); `details.setCredential.kinds` contains `"passkey"`:
+
+```http
+POST /auth/register/passkey/options   { "flowToken": "…" }                 → { "options": { …creation options… }, "state": "…" }
+     navigator.credentials.create({ publicKey: options })
+POST /auth/register/passkey            { "flowToken", "state", "credential", "name"?, "profile"? }   → session
+```
+
+The account is created with its address confirmed and the passkey as its only way in; the session has `amr: passkey`.
+The ceremony is bound to the flow (a state of another flow or of a signed-in ceremony is refused), and a credential that
+is already registered is refused before the account is created. Without a password, the account recovers with
+`/forgot-password` – the mailbox is the root of trust.
 
 **Sign in** (anonymous, no e-mail needed – discoverable credentials):
 
@@ -83,7 +98,7 @@ passkey: a sign-in that reports a change is refused.
 (`/sign-in-methods/passkeys/rename`, `/sign-in-methods/passkeys/remove`); removing needs the password (or a recent sign-in) if the account has
 one and never removes the last way in.
 
-TypeScript: `addPasskey(name, password)`, `loginWithPasskey()`, `loginWithPasskeyAutofill(signal)`, `signInMethods()`,
+TypeScript: `addPasskey(name, password)`, `completeRegistrationWithPasskey(flowToken, name, profile)`, `loginWithPasskey()`, `loginWithPasskeyAutofill(signal)`, `signInMethods()`,
 `renamePasskey(id, name)`, `removePasskey(id, password)`.
 
 **Taking over an account** – when the owner of an address proves the mailbox for the first time (password reset of an
@@ -103,7 +118,7 @@ Following Web Authentication Level 2 (§7.1 registration, §7.2 authentication):
 | User present **and** verified (biometrics / PIN) | ✓ | ✓ |
 | Backup flags consistent (backed up only if eligible); eligibility unchanged since registration | ✓ | ✓ |
 | Public key: ES256 (P-256) or RS256 (modulus of at least 2048 bit – zero padding does not count); credential id unique | ✓ | |
-| Registration state bound to the account and its security stamp | ✓ | |
+| Registration state bound to the account and its security stamp – or, for a new account, to the registration flow | ✓ | |
 | Signature over authenticator data + client data hash with the stored key | | ✓ |
 | Account active, address confirmed (else the `verify_email` step) – before the use is recorded | | ✓ |
 | User handle matches the passkey's owner | | ✓ |

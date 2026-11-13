@@ -23,7 +23,7 @@ export interface AuthResponse {
  * the mail) at verifyEmail, "second_factor" at loginTwoFactor / loginRecoveryCode, "change_password" (set by an administrator) at completePasswordChange. Each step
  * answers with the remaining ones and a new flowToken – or with the session.
  * A registration answers the same way: "verify_email" at verifyRegistration (or the mailed link at openRegistrationLink),
- * then "set_credential" at completeRegistration.
+ * then "set_credential" at completeRegistration or completeRegistrationWithPasskey.
  */
 export interface ActionRequired {
   status: "action_required";
@@ -282,6 +282,17 @@ export const cookieAuth = {
     return toLoginResult(await cookieFetch("/auth/register/password", { method: "POST", body: JSON.stringify({ flowToken, password, profile }) }));
   },
 
+  /**
+   * Registration step "set_credential" with a passkey instead of a password (offered when `details.setCredential.kinds`
+   * contains "passkey"): creates the account with the passkey and signs in. Errors: "cancelled", "unsupported", …
+   */
+  async completeRegistrationWithPasskey(flowToken: string, name?: string, profile?: object): Promise<LoginResult> {
+    const send = (path: string, init: RequestInit) => cookieFetch(path, init);
+    const created = await passkeyCreation(send, "/auth/register/passkey/options", { flowToken });
+    if (typeof created === "string") return { kind: "error", status: created };
+    return toLoginResult(await send("/auth/register/passkey", { method: "POST", body: JSON.stringify({ flowToken, ...created, name, profile }) }));
+  },
+
   /** "Remember this device" sets a cookie (if TwoFactor.RememberDeviceLifetime is configured on the server). */
   async loginTwoFactor(flowToken: string, code: string, rememberDevice = false): Promise<LoginResult> {
     const r = await cookieFetch("/auth/login/2fa", { method: "POST", body: JSON.stringify({ flowToken, code, rememberDevice }) });
@@ -486,7 +497,17 @@ async function statusOf(response: Promise<Response>): Promise<string> {
 }
 
 async function addPasskeyWith(send: (path: string, init: RequestInit) => Promise<Response>, name?: string, password?: string): Promise<string> {
-  const start = await send("/auth/passkeys/register/options", { method: "POST", body: JSON.stringify({ password }) });
+  const created = await passkeyCreation(send, "/auth/passkeys/register/options", { password });
+  if (typeof created === "string") return created;
+  return statusOf(send("/auth/passkeys/register", { method: "POST", body: JSON.stringify({ ...created, name }) }))
+    .then(status => (status === "http_200" ? "passkey_added" : status));
+}
+
+/** navigator.credentials.create with the options of the server: the state and the credential to post, or an error code. */
+async function passkeyCreation(send: (path: string, init: RequestInit) => Promise<Response>, optionsPath: string,
+    body: object): Promise<{ state: string; credential: object } | string> {
+  if (typeof PublicKeyCredential === "undefined") return "unsupported";
+  const start = await send(optionsPath, { method: "POST", body: JSON.stringify(body) });
   if (!start.ok) return statusOf(Promise.resolve(start));
   const { options, state } = await start.json();
 
@@ -501,23 +522,19 @@ async function addPasskeyWith(send: (path: string, init: RequestInit) => Promise
   if (!credential) return "cancelled";
 
   const response = credential.response as AuthenticatorAttestationResponse;
-  return statusOf(send("/auth/passkeys/register", {
-    method: "POST",
-    body: JSON.stringify({
-      state,
-      name,
-      credential: {
-        id: credential.id,
-        rawId: toBase64Url(credential.rawId),
-        type: credential.type,
-        response: {
-          clientDataJSON: toBase64Url(response.clientDataJSON),
-          attestationObject: toBase64Url(response.attestationObject),
-          transports: response.getTransports?.() ?? [],
-        },
+  return {
+    state,
+    credential: {
+      id: credential.id,
+      rawId: toBase64Url(credential.rawId),
+      type: credential.type,
+      response: {
+        clientDataJSON: toBase64Url(response.clientDataJSON),
+        attestationObject: toBase64Url(response.attestationObject),
+        transports: response.getTransports?.() ?? [],
       },
-    }),
-  })).then(status => (status === "http_200" ? "passkey_added" : status));
+    },
+  };
 }
 
 async function passkeyAssertion(send: (path: string, init: RequestInit) => Promise<Response>, useCookies: boolean,
@@ -671,6 +688,13 @@ export const bearerAuth = {
   /** Registration step "set_credential": creates the account and signs in (profile: see cookieAuth.completeRegistration). */
   async completeRegistration(flowToken: string, password: string, profile?: object): Promise<LoginResult> {
     return flowStep("/register/password", { flowToken, password, profile });
+  },
+
+  /** Registration step "set_credential" with a passkey – see cookieAuth.completeRegistrationWithPasskey. */
+  async completeRegistrationWithPasskey(flowToken: string, name?: string, profile?: object): Promise<LoginResult> {
+    const created = await passkeyCreation(anonymousFetch, "/auth/register/passkey/options", { flowToken });
+    if (typeof created === "string") return { kind: "error", status: created };
+    return flowStep("/register/passkey", { flowToken, ...created, name, profile });
   },
 
   async loginTwoFactor(flowToken: string, code: string, rememberDevice = false): Promise<LoginResult> {

@@ -55,6 +55,19 @@ public sealed record SlimPasskeyCredential(string Id, string RawId, string Type,
 /// <param name="Name">Display name (at most 64 characters).</param>
 public sealed record SlimPasskeyRegisterRequest(string State, SlimPasskeyCredential Credential, string? Name = null);
 
+/// <summary>Body of <c>POST /auth/register/passkey/options</c>.</summary>
+/// <param name="FlowToken">The flow token of a registration whose next step is <c>set_credential</c>.</param>
+public sealed record SlimRegisterPasskeyOptionsRequest(string FlowToken);
+
+/// <summary>Body of <c>POST /auth/register/passkey</c>: step <c>set_credential</c> with a passkey.</summary>
+/// <param name="FlowToken">The flow token of the registration.</param>
+/// <param name="State">The state of the options call.</param>
+/// <param name="Credential">The result of <c>navigator.credentials.create</c>.</param>
+/// <param name="Name">Display name of the passkey (at most 64 characters).</param>
+/// <param name="Profile">Business data for the new account, validated by <c>ISlimRegistrationProfile</c>.</param>
+public sealed record SlimRegisterPasskeyRequest(string FlowToken, string State, SlimPasskeyCredential Credential, string? Name = null,
+    System.Text.Json.JsonElement? Profile = null);
+
 /// <summary>Body of <c>POST /auth/passkeys/login</c>.</summary>
 public sealed record SlimPasskeyLoginRequest(string State, SlimPasskeyCredential Credential, bool RememberMe = false);
 
@@ -84,4 +97,7 @@ public sealed record SlimRemovePasskeyRequest(string Id, string? Password = null
 [JsonSerializable(typeof(SlimPasskeyInfo))]
 [JsonSerializable(typeof(SlimPasskeyRegistrationPayload))]
 [JsonSerializable(typeof(SlimPasskeyLoginPayload))]
+[JsonSerializable(typeof(SlimPasskeyNewAccountPayload))]
+[JsonSerializable(typeof(SlimRegisterPasskeyOptionsRequest))]
+[JsonSerializable(typeof(SlimRegisterPasskeyRequest))]
 internal sealed partial class SlimPasskeyJsonContext : JsonSerializerContext;

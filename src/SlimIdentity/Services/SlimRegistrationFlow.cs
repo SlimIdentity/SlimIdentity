@@ -24,6 +24,7 @@ internal sealed class SlimRegistrationFlow(
     IOptions<SlimIdentityOptions> options,
     TimeProvider time,
     IHttpContextAccessor httpContextAccessor,
+    IServiceProviderIsService isService,
     ILogger<SlimRegistrationFlow> logger)
 {
     private SlimIdentityOptions O => options.Value;
@@ -149,32 +150,61 @@ internal sealed class SlimRegistrationFlow(
     /// </summary>
     public async Task<IResult> CompleteWithPasswordAsync(SlimRegisterPasswordRequest? request, CancellationToken ct)
     {
-        if (request is null || !flow.TryRead(request.FlowToken, out var state, out _)
-            || !state.IsRegistration || !state.Proofs.HasFlag(SlimSignInProofs.Mailbox))
-            return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
-
-        if (state.UseCookies && SlimCsrfEndpointFilter.Validate(Http.Request, O, logger) is { } csrfError) return csrfError;
+        var (state, error) = ReadForCredential(request?.FlowToken);
+        if (state is null) return error!;
 
         var email = state.Email!;
-        if (await passwordPolicy.ValidateAsync(request.Password, email, ct) is { } errors) return SlimResults.Validation(errors);
+        if (await passwordPolicy.ValidateAsync(request!.Password, email, ct) is { } errors) return SlimResults.Validation(errors);
         var (profile, invalidProfile) = await registration.ValidateProfileAsync(email, request.Profile, ct);
         if (invalidProfile is not null) return invalidProfile;
 
         var hash = credentials.HashPassword(new SlimUser { Email = email }, request.Password);
-        var user = await store.CreateAsync(new SlimNewUser { Email = email, PasswordHash = hash, Profile = profile, EmailConfirmed = true }, ct);
+        var (user, taken) = await CreateAccountAsync(state, hash, profile, ct);
+        if (user is null) return taken!;
+        return await SignInAsync(user, state, SlimSignInProofs.Password, SlimAuthManager.MethodPassword, ct);
+    }
+
+    /// <summary>
+    /// The flow token of a registration whose mailbox is proven – the start of every <c>set_credential</c> endpoint,
+    /// with the CSRF check of cookie mode.
+    /// </summary>
+    internal (SlimFlowPayload? State, IResult? Error) ReadForCredential(string? flowToken)
+    {
+        if (!flow.TryRead(flowToken, out var state, out _) || !state.IsRegistration || !state.Proofs.HasFlag(SlimSignInProofs.Mailbox))
+            return (null, SlimResults.InvalidToken(StatusCodes.Status401Unauthorized));
+        if (state.UseCookies && SlimCsrfEndpointFilter.Validate(Http.Request, O, logger) is { } csrfError) return (null, csrfError);
+        return (state, null);
+    }
+
+    /// <summary>The profile of the registration, validated by the host's hook (<c>400</c> on failure).</summary>
+    internal Task<(object? Profile, IResult? Failure)> ValidateProfileAsync(SlimFlowPayload state, JsonElement? profile, CancellationToken ct) =>
+        registration.ValidateProfileAsync(state.Email!, profile, ct);
+
+    /// <summary>
+    /// Creates the account of the flow with its address confirmed – <c>409 email_taken</c> for a second completion, or
+    /// when the address got an account meanwhile.
+    /// </summary>
+    internal async Task<(SlimUser? User, IResult? Taken)> CreateAccountAsync(SlimFlowPayload state, string? passwordHash, object? profile, CancellationToken ct)
+    {
+        var user = await store.CreateAsync(new SlimNewUser { Email = state.Email!, PasswordHash = passwordHash ?? "", Profile = profile, EmailConfirmed = true }, ct);
         if (user is null)
         {
             // a second completion of the flow, or another registration of the address – the mailbox owner knows already
             Log.RegistrationRaceLost(logger);
-            return SlimResults.Status(SlimErrorCodes.EmailTaken, "The address already has an account.", StatusCodes.Status409Conflict);
+            return (null, SlimResults.Status(SlimErrorCodes.EmailTaken, "The address already has an account.", StatusCodes.Status409Conflict));
         }
         metrics.Registration("created");
         await hooks.RaiseAsync(SlimEventTypes.UserCreated, user.Id, reason: "registration", ct: ct);
         await hooks.RaiseAsync(SlimEventTypes.EmailConfirmed, user.Id, ct: ct);
+        return (user, null);
+    }
 
+    /// <summary>The new account continues like a sign-in with its first way in – the session, once per flow.</summary>
+    internal async Task<IResult> SignInAsync(SlimUser user, SlimFlowPayload state, SlimSignInProofs proof, string method, CancellationToken ct)
+    {
         var result = await flow.ContinueAsync(user, state with
         {
-            Uid = user.Id, Stamp = user.SecurityStamp, Proofs = state.Proofs | SlimSignInProofs.Password, Amr = SlimAuthManager.MethodPassword,
+            Uid = user.Id, Stamp = user.SecurityStamp, Proofs = state.Proofs | proof, Amr = method,
             Email = null, Method = null, CodeHash = null, IssuedAt = 0,
         }, ct);
         metrics.Login(SlimSignInFlow.MetricReason(result), state.UseCookies);
@@ -201,8 +231,9 @@ internal sealed class SlimRegistrationFlow(
         });
     }
 
-    private static SlimActionDetails? Details(SlimSignInDecision decision) =>
+    private SlimActionDetails? Details(SlimSignInDecision decision) =>
         decision.Next == SlimSignInActions.SetCredential
-            ? new SlimActionDetails { SetCredential = new SlimSetCredentialDetails { Kinds = ["password"] } }
+            ? new SlimActionDetails { SetCredential = new SlimSetCredentialDetails
+                { Kinds = isService.IsService(typeof(ISlimPasskeySignInMethods)) ? ["password", "passkey"] : ["password"] } }
             : null;
 }

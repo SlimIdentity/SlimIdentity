@@ -353,6 +353,12 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
   `slimidentity.registrations` reports the steps (`started`, `invalid_verification_code`, `too_many_attempts`, `created`).
 - TypeScript client: `register`, `verifyRegistration`, `openRegistrationLink` and `completeRegistration` on
   `cookieAuth` and `bearerAuth` replace `account.register`, `account.verifyEmail` and `account.resendVerification`.
+- Passkeys: a registration can start with a passkey instead of a password – `POST /auth/register/passkey/options
+  { flowToken }` and `POST /auth/register/passkey { flowToken, state, credential, name?, profile? }` create the account
+  with its address confirmed and the passkey as its only way in (`details.setCredential.kinds` contains `passkey`). The
+  ceremony is bound to the flow; a credential that is already registered is refused before the account exists. An
+  account without a password adds further passkeys after a recent sign-in. TypeScript client:
+  `completeRegistrationWithPasskey`.
 - **Breaking** with `UseTenantKey`: the tenant of the request is part of the Data Protection purpose of every token
   (mail links, invitations, sign-in flows, refresh tokens, remembered devices, exchange and link codes, passkey
   ceremonies). A token of one tenant no longer decrypts in another; tokens issued before the update, or outside a

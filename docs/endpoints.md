@@ -108,6 +108,9 @@ POST /register           { "email" }                                → action_r
 POST /register/verify    { "flowToken", "code" }                    → action_required ["set_credential"], flowToken
   or POST /flow          { "token" }  (the link of the mail)         → action_required ["set_credential"], flowToken
 POST /register/password  { "flowToken", "password", "profile"? }    → session
+  or with a passkey (package SlimIdentity.Passkeys):
+     POST /register/passkey/options  { "flowToken" }                       → options, state
+     POST /register/passkey          { "flowToken", "state", "credential", "name"?, "profile"? } → session
 ```
 
 `/register` answers every address the same way; the mail decides: a free address gets a 6-digit code and a link
@@ -115,7 +118,9 @@ POST /register/password  { "flowToken", "password", "profile"? }    → session
 mail limit per recipient nothing is sent. Nothing is stored before the last step. The flow lasts 15 minutes – from the
 proof of the mailbox on, the link itself is valid for `Tokens.EmailVerificationTokenLifetime`. In cookie mode
 `/register/verify` and `/register/password` need `X-CSRF` like every cookie request. A flow token of a registration is
-accepted by no sign-in step, and a sign-in flow token by no registration step.
+accepted by no sign-in step, and a sign-in flow token by no registration step. `details.setCredential.kinds` lists the
+ways the account can start with: `["password"]`, or `["password", "passkey"]` with the passkey package – an account
+created with a passkey has no password until it sets one with `/forgot-password`.
 
 ## Invitations
 
@@ -137,8 +142,10 @@ Links are created by the host with `ISlimAuthManager.CreateInvitationAsync` – 
 
 | Endpoint | Body | Success | Errors |
 | :--- | :--- | :--- | :--- |
-| `POST /passkeys/register/options` ⏱ 🔒 | `password` | `200` `options` (creation options, base64url), `state` | `400 invalid_password`, `403 password_required` (account without a password), `403 email_not_confirmed`, `403` during impersonation, `423` |
+| `POST /passkeys/register/options` ⏱ 🔒 | `password` (if the account has one) | `200` `options` (creation options, base64url), `state` | `400 invalid_password`, `403 password_required` (account with neither a password nor a passkey), `403 reauthentication_required` (no password and no sign-in within 5 minutes), `403 email_not_confirmed`, `403` during impersonation, `423` |
 | `POST /passkeys/register` ⏱ 🔒 | `state`, `credential` (result of `navigator.credentials.create`), `name` | `200` `id`, `name`, `createdUtc`, `backupEligible`, `backedUp` | `400 invalid_passkey`, `409 passkey_exists` |
+| `POST /register/passkey/options` ⏱ | `flowToken` (registration, mailbox proven) | `200` `options` (creation options for the new account), `state` | `401 invalid_token`, `403 csrf_validation_failed` |
+| `POST /register/passkey` ⏱ | `flowToken`, `state`, `credential`, `name`, `profile` (as for `/register/password`) | `200` session (`amr: passkey`) – the account is created with its address confirmed and the passkey, without a password | `400 invalid_passkey`, `400` profile validation, `401 invalid_token`, `409 passkey_exists` (no account is created), `409 email_taken` |
 | `POST /passkeys/login/options` ⏱ | – | `200` `options` (request options), `state` | – |
 | `POST /passkeys/login?useCookies=…` ⏱ | `state`, `credential` (result of `navigator.credentials.get`), `rememberMe` | `200` session (`amr: passkey`, no second factor), or `200 action_required` (`verify_email`, `change_password`) | `401 invalid_passkey`, `403 account_disabled`, `403 <veto>` |
 | `POST /sign-in-methods/passkeys/rename` 🔒 | `id`, `name` (1–64 characters) | `200 passkey_renamed` | `400 invalid_name`, `404 passkey_not_found` |
