@@ -10,11 +10,13 @@ namespace SlimIdentity.Tests.Integration;
 public sealed class SignInMethodTests
 {
     private const string SocialEmail = "social-only@test.local";
+    private const string Origin = "https://app.test.local";
 
-    private static TestAppOptions WithProvider() => new()
+    private static TestAppOptions WithProvider(bool passkeys = false) => new()
     {
         Builder = b =>
         {
+            if (passkeys) b.AddPasskeyStore<TestPasskeyStore>(ServiceLifetime.Singleton).AddPasskeys(o => o.RelyingPartyId = "test.local");
             b.AddExternalLoginStore<TestExternalLoginStore>(ServiceLifetime.Singleton);
             b.Authentication.AddScheme<FakeOAuthOptions, FakeOAuthHandler>("Fake", o => o.Claims =
                 [new Claim(ClaimTypes.NameIdentifier, "google-1"), new Claim(ClaimTypes.Email, SocialEmail), new Claim("email_verified", "true")]);
@@ -138,5 +140,53 @@ public sealed class SignInMethodTests
         var asUser = app.CreateClient();
         asUser.BearerToken = impersonation.Str("accessToken");
         await asUser.PostJsonAsync("/auth/sign-in-methods/external/remove", new { provider = "Fake", providerKey = "x", password = TestApp.UserPassword }, HttpStatusCode.Forbidden);
+    }
+
+    /// <summary>
+    /// A pure SSO account gets no local sign-in method – not right after a fresh sign-in either: neither a passkey
+    /// (passkeys need a password) nor a first password via /change-password or a self-service reset. An administrator's
+    /// reset link still sets one.
+    /// </summary>
+    [Fact]
+    public async Task A_pure_sso_account_gets_no_local_sign_in_method()
+    {
+        await using var app = await TestApp.StartAsync(WithProvider(passkeys: true));
+        var owner = await SocialOnlyUserAsync(app);   // fresh sign-in
+
+        var passkey = await owner.PostJsonAsync("/auth/passkeys/register/options", new { }, HttpStatusCode.Forbidden);
+        Assert.Equal("password_required", passkey.Str("code"));
+        var change = await owner.PostJsonAsync("/auth/change-password",
+            new { currentPassword = "anything", newPassword = "First-Password-123" }, HttpStatusCode.Conflict);
+        Assert.Equal("password_not_set", change.Str("code"));
+
+        await app.CreateClient().PostAsync("/auth/forgot-password", new { email = SocialEmail });
+        await app.WaitForQueuedMailAsync();
+        Assert.DoesNotContain(app.Mail.Mails, m => m.Kind == "password-reset" && m.To == SocialEmail);
+
+        var user = app.Users.Get(SocialEmail);
+        Assert.True(string.IsNullOrEmpty(user.PasswordHash));
+        Assert.Empty(await app.App.Services.GetRequiredService<ISlimPasskeyStore>().GetPasskeysAsync(user.Id, default));
+
+        SlimPasswordReset byAdministrator;
+        await using (var scope = app.App.Services.CreateAsyncScope())
+            byAdministrator = await scope.ServiceProvider.GetRequiredService<ISlimAuthManager>().CreatePasswordResetAsync(user);
+        await app.CreateClient().ResetPasswordJsonAsync(byAdministrator.Token, "Set-By-Admin-123");
+        await app.CreateClient().PostJsonAsync("/auth/login", new { email = SocialEmail, password = "Set-By-Admin-123" });
+    }
+
+    [Fact]
+    public async Task A_local_account_with_a_linked_provider_keeps_its_local_sign_in_methods()
+    {
+        await using var app = await TestApp.StartAsync(WithProvider(passkeys: true));
+        var me = await PasswordUserAsync(app);
+        await Links(app).LinkExternalLoginAsync(app.Users.Get(TestApp.UserEmail).Id, "Fake", "linked-1", default);
+
+        using var key = new SoftwarePasskey();
+        var start = await me.PostJsonAsync("/auth/passkeys/register/options", new { password = TestApp.UserPassword });
+        await me.PostJsonAsync("/auth/passkeys/register", new { state = start.Str("state"), credential = key.Create(start.GetProperty("options"), Origin), name = "phone" });
+        await me.PostJsonAsync("/auth/change-password", new { currentPassword = TestApp.UserPassword, newPassword = "Changed-Pass-456" });
+
+        await app.CreateClient().PostAsync("/auth/forgot-password", new { email = TestApp.UserEmail });
+        await app.Mail.WaitForAsync("password-reset", TestApp.UserEmail);
     }
 }

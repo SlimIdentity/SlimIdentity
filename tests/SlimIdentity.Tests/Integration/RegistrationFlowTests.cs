@@ -156,4 +156,43 @@ public sealed class RegistrationFlowTests
         await foreign.PostJsonAsync("/auth/register/password", new { flowToken = verified.Str("flowToken"), password = "Another123!" }, HttpStatusCode.Unauthorized);
         Assert.DoesNotContain(app.Users.All, u => u.Email == Email);
     }
+
+    [Fact]
+    public async Task Unicode_normalization_forms_of_one_address_are_one_account()
+    {
+        // "josé@…" can arrive precomposed (NFC, U+00E9) or decomposed (NFD, e + U+0301) – both look identical
+        var nfc = "josé@test.local";
+        var nfd = "josé@test.local";
+        await using var app = await TestApp.StartAsync();
+
+        await app.PreRegisterUnconfirmedAsync(nfd, "Owner-Pass-123");
+        await app.CreateClient().PostJsonAsync("/auth/register", new { email = nfc });
+
+        Assert.Single(app.Users.All, u => u.Email.Normalize() == nfc);           // no second account
+        await app.LoginConfirmingAsync(nfc, "Owner-Pass-123");                      // one identity, either form
+        await app.LoginBearerAsync(nfd, "Owner-Pass-123");
+        await app.Mail.WaitForAsync("account-exists", nfc);
+    }
+
+    [Theory]
+    [InlineData("user+tag@test.local")]   // sub-addressing: a different mailbox for SlimIdentity, by design
+    [InlineData("usеr@test.local")]       // Cyrillic "е" (U+0435): a homoglyph is a different address
+    public async Task Look_alike_addresses_are_different_accounts(string lookAlike)
+    {
+        await using var app = await TestApp.StartAsync();
+        Assert.Equal(HttpStatusCode.OK, (await app.RegisterAsync(lookAlike, "Other-Pass-456")).StatusCode);
+        await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword);   // the original is untouched
+        await app.CreateClient().PostJsonAsync("/auth/login", new { email = lookAlike, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized);
+    }
+
+    [Theory]
+    [InlineData("victim@test.local <attacker@evil.example>")]
+    [InlineData("\"victim@test.local\" <attacker@evil.example>")]
+    [InlineData("attacker@evil.example (victim@test.local)")]
+    public async Task A_display_name_form_is_not_accepted_as_an_address(string address)
+    {
+        await using var app = await TestApp.StartAsync();
+        var response = await app.CreateClient().PostAsync("/auth/register", new { email = address });
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
 }

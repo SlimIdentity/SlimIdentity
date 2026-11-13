@@ -5,7 +5,7 @@ using SlimIdentity.Tests.Infrastructure;
 namespace SlimIdentity.Tests.Integration;
 
 /// <summary>
-/// The first administrator, created by code at start-up – outside any request – exactly as docs/guides/seeding.md shows.
+/// The first administrator, created by code at start-up – outside any request.
 /// </summary>
 public sealed class SeedingTests
 {

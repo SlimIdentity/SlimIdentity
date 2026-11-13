@@ -1,5 +1,7 @@
 using System.Net;
 using System.Text.Json;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using SlimIdentity.Tests.Infrastructure;
 
 namespace SlimIdentity.Tests.Integration;
@@ -80,6 +82,11 @@ public sealed class RememberDeviceTests
         await SignInWithSecondFactorAsync(app, browser, TestApp.UserEmail, TestApp.UserPassword, rememberDevice: true, "?useCookies=true");
         Assert.True(browser.Cookies.ContainsKey("SlimAuth.2fa"));
         await browser.PostAsync("/auth/logout");
+
+        // the cookie remembers the browser's cookie sessions, not token clients in the same browser
+        browser.SendCsrfHeader = false;
+        await AssertSecondFactorAsync(browser.PostJsonAsync("/auth/login?useCookies=false", new { email = TestApp.UserEmail, password = TestApp.UserPassword }));
+        browser.SendCsrfHeader = true;
 
         var again = await browser.PostAsync("/auth/login?useCookies=true", new { email = TestApp.UserEmail, password = TestApp.UserPassword });
         Assert.Equal(HttpStatusCode.OK, again.StatusCode);
@@ -180,5 +187,19 @@ public sealed class RememberDeviceTests
         var session = await client.PostJsonAsync("/auth/login/2fa", new { flowToken = preAuth, recoveryCode = codes[0].GetString(), rememberDevice = true });
 
         Assert.False(session.TryGetProperty("twoFactorRememberToken", out var token) && token.ValueKind == JsonValueKind.String);
+    }
+
+    [Fact]
+    public async Task The_remember_device_cookie_includes_the_path_base()
+    {
+        await using var app = await TestApp.StartAsync(Enabled());
+        using var scope = app.App.Services.CreateScope();
+        var http = new DefaultHttpContext { RequestServices = scope.ServiceProvider };
+        http.Request.PathBase = "/api";
+
+        scope.ServiceProvider.GetRequiredService<SlimIdentity.Services.SlimTwoFactorService>()
+            .RememberDevice(app.Users.Get(TestApp.UserEmail), http, cookieMode: true);
+
+        Assert.Contains("path=/api/auth", http.Response.Headers.SetCookie.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 }

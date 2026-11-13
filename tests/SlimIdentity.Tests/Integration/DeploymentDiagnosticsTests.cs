@@ -81,4 +81,25 @@ public sealed class DeploymentDiagnosticsTests
         var with = await StartInProductionAsync(_ => { }, b => b.AddSharedState<TestSharedState>(ServiceLifetime.Singleton));
         Assert.DoesNotContain(8004, with.EventIds);
     }
+
+    [Fact]
+    public async Task Without_UseRateLimiter_the_brute_force_limit_is_not_silently_off()
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Testing" });
+        builder.WebHost.UseTestServer();
+        builder.Services.AddSlimIdentity(o => o.RateLimit.PermitLimit = 2)
+            .AddUserStore<TestUserStore>(ServiceLifetime.Singleton)
+            .AddNullEmailSender();
+        await using var app = builder.Build();
+        app.UseAuthentication();
+        app.UseAuthorization();
+        app.MapSlimIdentityApi();   // no app.UseRateLimiter()
+        await app.StartAsync();
+        var client = new ApiClient(app.GetTestClient());
+
+        var error = await Assert.ThrowsAnyAsync<InvalidOperationException>(() =>
+            client.PostAsync("/auth/login", new { email = "nobody@test.local", password = "Whatever-123" }));
+        Assert.Contains("UseRateLimiter", error.Message);
+        await app.StopAsync();
+    }
 }

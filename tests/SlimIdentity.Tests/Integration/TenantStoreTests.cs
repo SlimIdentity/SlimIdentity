@@ -107,4 +107,87 @@ public sealed class TenantStoreTests
 
         Assert.Equal(HttpStatusCode.Unauthorized, foreign.StatusCode);
     }
+
+    // With UseTenantKey every cookie and token is bound to its tenant, whatever the ids and the per-request validation.
+
+    private sealed class KeyedTenantStores
+    {
+        public readonly TestUserStore A = new(), B = new();
+    }
+
+    private sealed class KeyedTenantUserStore(IHttpContextAccessor http, KeyedTenantStores stores) : ISlimUserStore
+    {
+        private TestUserStore Current => http.HttpContext?.Request.Host.Host == "a.api.test" ? stores.A : stores.B;
+        public Task<SlimUser?> FindByEmailAsync(string email, CancellationToken ct) => Current.FindByEmailAsync(email, ct);
+        public Task<SlimUser?> FindByIdAsync(string userId, CancellationToken ct) => Current.FindByIdAsync(userId, ct);
+        public Task<SlimUser?> CreateAsync(SlimNewUser newUser, CancellationToken ct) => Current.CreateAsync(newUser, ct);
+        public Task<bool> UpdateSecurityStateAsync(SlimUser user, string expectedStamp, CancellationToken ct) => Current.UpdateSecurityStateAsync(user, expectedStamp, ct);
+        public Task<bool> UpdateSecurityStampAsync(SlimUser user, string expectedStamp, string newStamp, CancellationToken ct) => Current.UpdateSecurityStampAsync(user, expectedStamp, newStamp, ct);
+        public Task<SlimAttemptReservation?> TryBeginAttemptAsync(SlimUser user, SlimAttemptRequest attempt, CancellationToken ct) => Current.TryBeginAttemptAsync(user, attempt, ct);
+        public Task ResetFailedAttemptsAsync(SlimUser user, SlimAttemptFactor factor, CancellationToken ct) => Current.ResetFailedAttemptsAsync(user, factor, ct);
+        public Task UpdatePasswordHashAsync(SlimUser user, string currentHash, string newHash, CancellationToken ct) => Current.UpdatePasswordHashAsync(user, currentHash, newHash, ct);
+        public Task<SlimEmailUpdateResult> UpdateEmailAsync(SlimUser user, string newEmail, string expectedStamp, string newStamp, CancellationToken ct) => Current.UpdateEmailAsync(user, newEmail, expectedStamp, newStamp, ct);
+        public Task<IReadOnlyCollection<Claim>> GetClaimsAsync(SlimUser user, CancellationToken ct) => Current.GetClaimsAsync(user, ct);
+    }
+
+    private static async Task<TestApp> StartWithTenantKeyAsync(string attackerId, bool sessions, bool stampOnEachRequest = true)
+    {
+        var stores = new KeyedTenantStores();
+        stores.A.SeedWithId(attackerId, "mallory@a.test", PasswordA, "Admin");   // administrator of the own tenant
+        stores.B.SeedWithId("1", UserB, PasswordB);
+        return await TestApp.StartAsync(new TestAppOptions
+        {
+            Sessions = sessions,
+            Configure = o =>
+            {
+                o.Cookies.SecurityStampValidationInterval = new SlimCookieOptions().SecurityStampValidationInterval;   // the default (1 min)
+                o.Tokens.ValidateSecurityStampOnEachRequest = stampOnEachRequest;
+            },
+            Builder = b =>
+            {
+                b.Services.AddSingleton(stores);
+                b.AddUserStore<KeyedTenantUserStore>(ServiceLifetime.Scoped);
+                b.UseTenantKey(h => h.Request.Host.Host);
+            },
+            Map = a => a.MapGet("/api/admin", (ClaimsPrincipal user) => new { sub = user.GetSlimUserId() }).RequireAuthorization(p => p.RequireRole("Admin")),
+        });
+    }
+
+    [Theory]
+    [InlineData("1", false)]                                      // colliding ids, no session store
+    [InlineData("1", true)]                                       // colliding ids, session store
+    [InlineData("11111111-1111-1111-1111-111111111111", false)]   // ids unique across tenants
+    public async Task A_cookie_of_one_tenant_is_not_accepted_by_another(string attackerId, bool sessions)
+    {
+        await using var app = await StartWithTenantKeyAsync(attackerId, sessions);
+
+        var home = Tenant(app, "a.api.test");
+        home.SendCsrfHeader = true;
+        await home.PostJsonAsync("/auth/login?useCookies=true", new { email = "mallory@a.test", password = PasswordA });
+        Assert.Equal(HttpStatusCode.OK, (await home.GetAsync("/api/admin")).StatusCode);
+
+        var foreign = Tenant(app, "b.api.test");
+        foreign.SendCsrfHeader = true;
+        foreign.SetCookies(home.Cookies);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await foreign.GetAsync("/auth/me")).StatusCode);
+        foreign.SetCookies(home.Cookies);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await foreign.GetAsync("/api/admin")).StatusCode);
+        foreign.SetCookies(home.Cookies);
+        app.Time.Advance(TimeSpan.FromMinutes(5));
+        Assert.Equal(HttpStatusCode.Unauthorized, (await foreign.GetAsync("/auth/me")).StatusCode);
+    }
+
+    [Fact]
+    public async Task With_a_tenant_key_a_bearer_token_of_one_tenant_is_refused_by_another_even_without_per_request_validation()
+    {
+        await using var app = await StartWithTenantKeyAsync("1", sessions: false, stampOnEachRequest: false);
+
+        var home = Tenant(app, "a.api.test");
+        home.BearerToken = (await home.PostJsonAsync("/auth/login", new { email = "mallory@a.test", password = PasswordA })).Str("accessToken");
+        Assert.Equal(HttpStatusCode.OK, (await home.GetAsync("/api/admin")).StatusCode);
+
+        var foreign = Tenant(app, "b.api.test");
+        foreign.BearerToken = home.BearerToken;
+        Assert.Equal(HttpStatusCode.Unauthorized, (await foreign.GetAsync("/api/admin")).StatusCode);
+    }
 }

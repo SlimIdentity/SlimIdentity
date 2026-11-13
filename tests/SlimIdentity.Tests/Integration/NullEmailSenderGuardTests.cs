@@ -5,7 +5,7 @@ using Microsoft.Extensions.Hosting;
 
 namespace SlimIdentity.Tests.Integration;
 
-/// <summary>Attack scenario H5: the development mail sender must not leak live links and codes into production logs.</summary>
+/// <summary>The development mail sender must not leak live links and codes into production logs.</summary>
 public sealed class NullEmailSenderGuardTests
 {
     private static WebApplication Build(string environment, Action<SlimIdentityBuilder> configure)

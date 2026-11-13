@@ -103,14 +103,18 @@ public sealed class EmailChangeTests
     }
 
     [Fact]
-    public async Task Wrong_password_is_rejected_and_counted()
+    public async Task Wrong_passwords_are_counted_and_a_correct_one_resets_the_count()
     {
         await using var app = await TestApp.StartAsync();
         var client = await SignedInAsync(app);
 
-        await client.PostJsonAsync("/auth/change-email", new { newEmail = "new@test.local", password = "wrong" }, HttpStatusCode.BadRequest);
+        for (var i = 0; i < 4; i++)   // threshold is 5
+            await client.PostJsonAsync("/auth/change-email", new { newEmail = "new@test.local", password = "wrong" }, HttpStatusCode.BadRequest);
+        Assert.Equal(4, app.Users.Get(TestApp.UserEmail).FailedLoginAttempts);
 
-        Assert.Equal(1, app.Users.Get(TestApp.UserEmail).FailedLoginAttempts);
+        await client.PostJsonAsync("/auth/change-email", new { newEmail = "new@test.local", password = TestApp.UserPassword });
+
+        Assert.Equal(0, app.Users.Get(TestApp.UserEmail).FailedLoginAttempts);
     }
 
     [Fact]

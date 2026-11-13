@@ -105,7 +105,7 @@ public sealed class VerifyEmailStepTests
         var lastDelivered = await LatestCodeAsync(app);
 
         var throttled = await StartLoginAsync(app);
-        await Task.Delay(100);
+        await app.WaitForQueuedMailAsync();
 
         Assert.Equal(5, app.Mail.Mails.Count(m => m.Kind == "verification-code"));
         await VerifyAsync(app, throttled, lastDelivered, HttpStatusCode.Unauthorized);
@@ -125,7 +125,7 @@ public sealed class VerifyEmailStepTests
             app.Time.Advance(TimeSpan.FromSeconds(1));
             start = await app.CreateClient().PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = TestApp.UserPassword });
         }
-        await Task.Delay(100);
+        await app.WaitForQueuedMailAsync();
 
         Assert.Equal(5, app.Mail.Mails.Count(m => m.Kind == "two-factor"));
         var lastDelivered = app.Mail.Mails.Last(m => m.Kind == "two-factor").Payload;

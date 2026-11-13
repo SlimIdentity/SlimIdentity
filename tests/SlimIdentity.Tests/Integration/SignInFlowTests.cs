@@ -31,7 +31,7 @@ public sealed class SignInFlowTests
         var read = await app.CreateClient().PostJsonAsync("/auth/flow", new { flowToken = start.Str("flowToken") });
         Assert.Equal(["second_factor"], Actions(read));
         Assert.Equal("email", read.GetProperty("details").GetProperty("secondFactor").GetProperty("methods")[0].GetString());
-        await Task.Delay(100);
+        await app.WaitForQueuedMailAsync();
         Assert.Single(app.Mail.Mails, m => m.Kind == "two-factor");   // reading sends no further code
 
         var session = await app.CreateClient().PostJsonAsync("/auth/login/2fa", new { flowToken = start.Str("flowToken"), code });

@@ -103,7 +103,7 @@ public sealed class WithoutEmailTests
     [InlineData(false)]   // mail available, TwoFactor.AllowEmailCodes = false
     public async Task The_2fa_status_reports_recovery_when_codes_cannot_be_sent(bool withoutEmail)
     {
-        // review finding F-07: GET /2fa said "email" while the sign-in already asked for a recovery code
+        // GET /2fa must not say "email" while the sign-in asks for a recovery code
         await using var app = await TestApp.StartAsync(withoutEmail
             ? Mailless()
             : new TestAppOptions { Configure = o => o.TwoFactor.AllowEmailCodes = false });

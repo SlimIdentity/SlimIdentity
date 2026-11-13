@@ -30,6 +30,9 @@ public sealed class AccountTests
         await using var app = await TestApp.StartAsync();
         var response = await app.RegisterAsync("new@test.local", "short");
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var body = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement;
+        Assert.Equal("validation_failed", body.Str("code"));
+        Assert.True(body.GetProperty("errors").TryGetProperty("password", out _));
         Assert.DoesNotContain(app.Users.All, u => u.Email == "new@test.local");
     }
 
@@ -79,6 +82,43 @@ public sealed class AccountTests
         old.BearerToken = session.AccessToken;
         Assert.Equal(HttpStatusCode.Unauthorized, (await old.GetAsync("/api/hello")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await client.PostAsync("/auth/login", new { email = TestApp.UserEmail, password = "Reset1234!" })).StatusCode);
+    }
+
+    [Fact]
+    public async Task A_reset_link_dies_when_the_password_is_changed_elsewhere()
+    {
+        await using var app = await TestApp.StartAsync();
+        await app.CreateClient().PostAsync("/auth/forgot-password", new { email = TestApp.UserEmail });
+        var link = (await app.Mail.WaitForAsync("password-reset", TestApp.UserEmail)).Payload;
+
+        var me = app.CreateClient();
+        me.BearerToken = (await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword)).AccessToken;
+        await me.PostJsonAsync("/auth/change-password", new { currentPassword = TestApp.UserPassword, newPassword = "Changed-Pass-123" });
+
+        await app.CreateClient().ResetPasswordJsonAsync(link, "Attacker-Pass-123", HttpStatusCode.Unauthorized);
+        await app.LoginBearerAsync(TestApp.UserEmail, "Changed-Pass-123");
+    }
+
+    [Fact]
+    public async Task One_inbox_cannot_be_flooded_with_mails()
+    {
+        await using var app = await TestApp.StartAsync();
+        var client = app.CreateClient();
+
+        var answers = new List<string>();
+        for (var i = 0; i < 6; i++)
+            answers.Add(await (await client.PostAsync("/auth/forgot-password", new { email = TestApp.UserEmail })).Content.ReadAsStringAsync());
+        await client.PostAsync("/auth/forgot-password", new { email = TestApp.AdminEmail });   // another inbox is not affected
+
+        await app.Mail.WaitForAsync("password-reset", TestApp.AdminEmail);
+        await app.WaitForQueuedMailAsync();
+        Assert.Equal(3, app.Mail.Mails.Count(m => m.Kind == "password-reset" && m.To == TestApp.UserEmail));
+        Assert.Single(answers.Distinct());   // throttled requests get the same answer – nothing to learn
+
+        app.Time.Advance(TimeSpan.FromMinutes(16));
+        await client.PostAsync("/auth/forgot-password", new { email = TestApp.UserEmail });
+        await app.WaitForQueuedMailAsync();
+        Assert.Equal(4, app.Mail.Mails.Count(m => m.Kind == "password-reset" && m.To == TestApp.UserEmail));
     }
 
     [Fact]

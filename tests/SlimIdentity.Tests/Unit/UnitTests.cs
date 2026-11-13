@@ -178,3 +178,26 @@ public sealed class OptionsValidatorTests
     public void Link_templates_need_the_token_placeholder() =>
         Assert.Contains(Validate(o => o.Links.InvitationUrl = "https://app/accept"), f => f.Contains("InvitationUrl"));
 }
+
+public sealed class ResultAndContractTests
+{
+    [Fact]
+    public void A_failed_result_cannot_be_turned_into_a_success_response() =>
+        Assert.Throws<InvalidOperationException>(() => new SlimAuthResult { Succeeded = false, Error = "account_disabled" }.ToResponse());
+
+    [Fact]
+    public void Records_with_secrets_do_not_print_them()
+    {
+        var printed = string.Join("\n",
+            new SlimIdentity.Contracts.SlimLoginRequest("a@test.local", "Secret-Password-1", TwoFactorRememberToken: "remember-token-1").ToString(),
+            new SlimIdentity.Contracts.SlimRefreshRequest("refresh-token-1").ToString(),
+            new SlimIdentity.Contracts.SlimChangePasswordRequest("Secret-Password-1", "Secret-Password-2").ToString(),
+            new SlimIdentity.Contracts.SlimTwoFactorSetupResponse("SHAREDKEY", "otpauth://totp/x?secret=SHAREDKEY", "setup-token-1").ToString(),
+            new SlimPasswordReset("reset-token-1", "https://x/reset?token=reset-token-1", DateTimeOffset.UnixEpoch).ToString(),
+            new SlimAuthResult { Succeeded = true, AccessToken = "access-token-1", RefreshToken = "refresh-token-1" }.ToString());
+
+        foreach (var secret in new[] { "Secret-Password", "remember-token", "refresh-token", "SHAREDKEY", "setup-token", "reset-token", "access-token" })
+            Assert.DoesNotContain(secret, printed);
+        Assert.Contains("a@test.local", printed);   // the rest still helps debugging
+    }
+}

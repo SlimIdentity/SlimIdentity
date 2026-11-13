@@ -28,7 +28,7 @@ public sealed class ExternalLinkTests
     /// <summary>Starts the link flow like the TypeScript client and returns the link code from the fragment.</summary>
     private static async Task<(string Code, string Verifier)> LinkCodeAsync(TestApp app, string provider = "Fake")
     {
-        var (verifier, challenge) = ReviewRound1Tests.Pkce();
+        var (verifier, challenge) = Pkce.Create();
         var browser = app.CreateClient();
         var start = await browser.GetAsync($"/auth/login/{provider}?link=true&returnUrl=/settings&code_challenge={challenge}&code_challenge_method=S256");
         var callback = await browser.GetAsync(start.Headers.Location!.OriginalString);
@@ -74,7 +74,7 @@ public sealed class ExternalLinkTests
 
         var (code, verifier) = await LinkCodeAsync(app);
         await app.CreateClient().PostJsonAsync("/auth/link/external", new { code, codeVerifier = verifier, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized);
-        await me.PostJsonAsync("/auth/link/external", new { code, codeVerifier = ReviewRound1Tests.Pkce().Verifier, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized);
+        await me.PostJsonAsync("/auth/link/external", new { code, codeVerifier = Pkce.Create().Verifier, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized);
         await me.PostJsonAsync("/auth/link/external", new { code, codeVerifier = verifier, password = "wrong" }, HttpStatusCode.BadRequest);
         await me.PostJsonAsync("/auth/link/external", new { code, codeVerifier = verifier, password = TestApp.UserPassword });
         await me.PostJsonAsync("/auth/link/external", new { code, codeVerifier = verifier, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized);   // single use
@@ -88,7 +88,7 @@ public sealed class ExternalLinkTests
         await using var app = await TestApp.StartAsync(WithProviders());
         var (attackersCode, _) = await LinkCodeAsync(app, "Other");
         var victim = await SignedInAsync(app);
-        var victimsVerifier = ReviewRound1Tests.Pkce().Verifier;
+        var victimsVerifier = Pkce.Create().Verifier;
 
         await victim.PostJsonAsync("/auth/link/external", new { code = attackersCode, codeVerifier = victimsVerifier, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized);
         var links = app.App.Services.GetRequiredService<ISlimExternalLoginStore>();
@@ -124,7 +124,7 @@ public sealed class ExternalLinkTests
         await using var app = await TestApp.StartAsync(WithProviders());
         // created by the "Other" provider: no password
         var browser = app.CreateClient();
-        var (exchangeVerifier, exchangeChallenge) = ReviewRound1Tests.Pkce();
+        var (exchangeVerifier, exchangeChallenge) = Pkce.Create();
         var login = await browser.GetAsync($"/auth/login/Other?useCookies=false&returnUrl=/done&code_challenge={exchangeChallenge}&code_challenge_method=S256");
         var callback = await browser.GetAsync(login.Headers.Location!.OriginalString);
         var exchangeCode = QueryHelpers.ParseQuery(new Uri(new Uri("https://localhost"), callback.Headers.Location!).Fragment.TrimStart('#'))["code"].ToString();
@@ -137,5 +137,29 @@ public sealed class ExternalLinkTests
 
         var links = app.App.Services.GetRequiredService<ISlimExternalLoginStore>();
         Assert.Equal(app.Users.Get("elsewhere@test.local").Id, (await links.FindByExternalLoginAsync("Fake", "google-user", default))!.Id);
+    }
+
+    [Fact]
+    public async Task The_registrant_cannot_link_an_external_login_to_an_unconfirmed_account()
+    {
+        const string victim = "victim-ext@test.local";
+        await using var app = await TestApp.StartAsync(WithProviders());
+        await app.PreRegisterUnconfirmedAsync(victim, "Attacker-Pass-123");
+        var pending = await app.CreateClient().PostJsonAsync("/auth/login", new { email = victim, password = "Attacker-Pass-123" });
+        Assert.Equal("verify_email", pending.GetProperty("actions")[0].GetString());   // no session without the mailbox
+
+        // a session whose address is unconfirmed again (changed by the host, imported data) cannot link either
+        var attacker = app.CreateClient();
+        attacker.BearerToken = (await app.LoginConfirmingAsync(victim, "Attacker-Pass-123")).AccessToken;
+        await app.SetEmailConfirmedAsync(victim, false);
+
+        // the attacker links an own provider account through the built-in link flow
+        var (code, verifier) = await LinkCodeAsync(app, "Other");
+        var refused = await attacker.PostJsonAsync("/auth/link/external",
+            new { code, codeVerifier = verifier, password = "Attacker-Pass-123" }, HttpStatusCode.Forbidden);
+
+        Assert.Equal("email_not_confirmed", refused.Str("code"));
+        var links = app.App.Services.GetRequiredService<ISlimExternalLoginStore>();
+        Assert.Null(await links.FindByExternalLoginAsync("Other", "other-user", default));
     }
 }

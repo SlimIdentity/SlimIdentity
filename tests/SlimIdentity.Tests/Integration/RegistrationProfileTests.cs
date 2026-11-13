@@ -110,7 +110,7 @@ public sealed class RegistrationProfileTests
 
         Assert.Equal(HttpStatusCode.BadRequest, withProfile.StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, withPassword.StatusCode);
-        await Task.Delay(100);
+        await app.WaitForQueuedMailAsync();
         Assert.Empty(app.Mail.Mails);                                                       // no mail – not even "account exists"
         Assert.False(app.Users.Profiles.ContainsKey(app.Users.Get(TestApp.UserEmail).Id));
     }
@@ -221,7 +221,7 @@ public sealed class RegistrationProfileTests
         Assert.Equal(new SignUpProfile("ACME"), app.Users.Profiles[user.Id]);
         Assert.False(await auth.HasSignInMethodAsync(user));
         Assert.True(await auth.HasSignInMethodAsync(app.Users.Get(TestApp.UserEmail)));
-        await Task.Delay(100);
+        await app.WaitForQueuedMailAsync();
         Assert.Empty(app.Mail.Mails);
     }
 

@@ -219,6 +219,23 @@ public sealed class TestApp : IAsyncDisposable
         return verified.Str("flowToken");
     }
 
+    /// <summary>
+    /// Waits until every mail queued so far has been handed to the sender – the background queue is processed in order.
+    /// For assertions that a mail was <em>not</em> sent.
+    /// </summary>
+    public Task WaitForQueuedMailAsync() => WaitForQueuedMailAsync(App.Services);
+
+    /// <inheritdoc cref="WaitForQueuedMailAsync()"/>
+    public static async Task WaitForQueuedMailAsync(IServiceProvider services)
+    {
+        var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var marker = new SlimIdentity.Services.SlimEmailJob("test-marker",
+            new SlimEmailContext { Kind = "test-marker", Culture = System.Globalization.CultureInfo.InvariantCulture },
+            (_, _, _) => { done.TrySetResult(); return Task.CompletedTask; });
+        Assert.True(services.GetRequiredService<SlimIdentity.Services.SlimEmailQueue>().TryEnqueue(marker));
+        await done.Task.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
     /// <summary>The token of a mailed link (the link itself without a link template).</summary>
     public static string LinkToken(string link) =>
         link.IndexOf("token=", StringComparison.Ordinal) is var i and >= 0 ? Uri.UnescapeDataString(link[(i + 6)..]) : link;

@@ -5,7 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace SlimIdentity.EntityFrameworkCore.Tests;
 
 /// <summary>
-/// Review finding R4: a host endpoint and SlimIdentity run in the same request scope – the stores must neither detach
+/// A host endpoint and SlimIdentity run in the same request scope – the stores must neither detach
 /// the host's tracked entities nor save its pending changes along with their own.
 /// </summary>
 public sealed class SharedContextTests

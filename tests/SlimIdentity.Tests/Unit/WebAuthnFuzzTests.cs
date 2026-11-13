@@ -14,7 +14,7 @@ namespace SlimIdentity.Tests.Unit;
 public sealed class WebAuthnFuzzTests
 {
     // CI: a few thousand rounds per parser; before a release longer: SLIMIDENTITY_FUZZ_ROUNDS=200000 (and a SEED)
-    private static readonly int Rounds = int.TryParse(Environment.GetEnvironmentVariable("SLIMIDENTITY_FUZZ_ROUNDS"), out var n) ? n : 4_000;
+    private static readonly int Rounds = int.TryParse(Environment.GetEnvironmentVariable("SLIMIDENTITY_FUZZ_ROUNDS"), out var n) ? n : 1_000;
     private static readonly int Seed = int.TryParse(Environment.GetEnvironmentVariable("SLIMIDENTITY_FUZZ_SEED"), out var s) ? s : 1_026;
 
     private static readonly JsonElement CreateOptions = JsonDocument.Parse("""

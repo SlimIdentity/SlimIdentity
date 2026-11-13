@@ -5,7 +5,7 @@ using Xunit.Abstractions;
 namespace SlimIdentity.Tests.Integration;
 
 /// <summary>
-/// Attack scenario A3: unknown, known, inactive and locked accounts must not be distinguishable by response time.
+/// Unknown, known, inactive and locked accounts must not be distinguishable by response time.
 /// A statistical measurement (Mann-Whitney U, interleaved requests), too slow and noisy for every CI run – run it before
 /// a release: <c>SLIMIDENTITY_TIMING=1 dotnet test --filter TimingTests</c>.
 /// </summary>
@@ -14,7 +14,7 @@ public sealed class TimingTests(ITestOutputHelper output)
     private const int SamplesPerGroup = 150;
 
     [SkippableFact]
-    public async Task A3_login_timing_does_not_reveal_whether_an_account_exists_or_its_state()
+    public async Task Login_timing_does_not_reveal_whether_an_account_exists_or_its_state()
     {
         Skip.IfNot(Environment.GetEnvironmentVariable("SLIMIDENTITY_TIMING") == "1", "Set SLIMIDENTITY_TIMING=1 to run timing measurements.");
 

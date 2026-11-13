@@ -268,7 +268,8 @@ public sealed class MultiInstanceTests
         foreach (var node in new[] { cluster.A, cluster.B, cluster.A, cluster.B, cluster.A, cluster.B })
             await cluster.On(node).PostAsync("/auth/forgot-password", new { email = TestApp.UserEmail });
 
-        await Task.Delay(200);   // let queued mails go out
+        await TestApp.WaitForQueuedMailAsync(cluster.A.Services);
+        await TestApp.WaitForQueuedMailAsync(cluster.B.Services);
         Assert.Equal(SlimIdentity.Services.SlimMailThrottle.PerKindAndRecipient,
             cluster.Mail.Mails.Count(m => m.Kind == "password-reset" && m.To == TestApp.UserEmail));
     }

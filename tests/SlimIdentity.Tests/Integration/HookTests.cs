@@ -299,4 +299,19 @@ public sealed class HookTests
 
         Assert.Contains(Hook<Recorder>(app).Events, e => e.Type == SlimEventTypes.SignedIn);
     }
+
+    [Fact]
+    public async Task Without_a_session_store_a_refresh_is_not_reported_as_a_new_sign_in()
+    {
+        await using var app = await TestApp.StartAsync(new TestAppOptions
+        {
+            Sessions = false,
+            Builder = b => b.AddEventObserver<Recorder>(ServiceLifetime.Singleton),
+        });
+        var refreshToken = (await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword)).RefreshToken!;
+        for (var i = 0; i < 3; i++)
+            refreshToken = (await app.CreateClient().PostJsonAsync("/auth/refresh", new { refreshToken })).Str("refreshToken");
+
+        Assert.Single(Hook<Recorder>(app).Events, e => e.Type == SlimEventTypes.SignedIn);
+    }
 }

@@ -70,7 +70,7 @@ public sealed class HashAndKeyRotationTests
         var current = (await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword)).AccessToken;
 
         var client = app.CreateClient();
-        // exactly as the old instance signed it – including its key id (review round 5: one shared id broke this)
+        // exactly as the old instance signed it – including its key id
         client.BearerToken = ResignWith(current!, SlimIdentity.Services.SlimJwtTokenFactory.CreateSigningKey(OldSecret));
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/auth/me")).StatusCode);
 

@@ -1,4 +1,5 @@
 using System.Net;
+using Microsoft.Extensions.DependencyInjection;
 using SlimIdentity.Security;
 using SlimIdentity.Tests.Infrastructure;
 
@@ -94,19 +95,83 @@ public sealed class ConcurrencyTests
         Assert.False(string.IsNullOrEmpty(session.Str("accessToken")));
     }
 
-    [Fact]
-    public async Task Parallel_failed_logins_are_all_counted()
+    /// <summary>Counts the real password verifications of non-dummy users (per test via the user's e-mail).</summary>
+    private sealed class CountingHasher : Microsoft.AspNetCore.Identity.IPasswordHasher<SlimUser>
     {
-        await using var app = await TestApp.StartAsync();
+        public static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> Verified = new();
+        private readonly Microsoft.AspNetCore.Identity.PasswordHasher<SlimUser> _inner = new();
+        public string HashPassword(SlimUser user, string password) => _inner.HashPassword(user, password);
+        public Microsoft.AspNetCore.Identity.PasswordVerificationResult VerifyHashedPassword(SlimUser user, string hashedPassword, string providedPassword)
+        {
+            if (user.Id != "slim-dummy") Verified.AddOrUpdate(user.Email, 1, (_, n) => n + 1);
+            return _inner.VerifyHashedPassword(user, hashedPassword, providedPassword);
+        }
+    }
 
-        await Task.WhenAll(Enumerable.Range(0, 5).Select(_ =>
-            app.CreateClient().PostAsync("/auth/login", new { email = TestApp.UserEmail, password = "wrong-password" })));
+    private static string CaseVariant(string email, int i) =>
+        new([.. email.Select((c, n) => n < 10 && ((i >> n) & 1) == 1 ? char.ToUpperInvariant(c) : c)]);
 
+    [Fact]
+    public async Task Parallel_password_guesses_beyond_the_threshold_are_counted_but_not_evaluated()
+    {
+        await using var app = await TestApp.StartAsync(new TestAppOptions   // MaxFailedAttempts = 5 (default)
+        {
+            Builder = b => b.Services.AddScoped<Microsoft.AspNetCore.Identity.IPasswordHasher<SlimUser>, CountingHasher>(),
+        });
+        CountingHasher.Verified.TryRemove(TestApp.UserEmail, out _);
+
+        // the store looks addresses up case-insensitively – every spelling hits the same account and the same gate
+        await Task.WhenAll(Enumerable.Range(0, 40).Select(i => Task.Run(() =>
+            app.CreateClient().PostAsync("/auth/login", new { email = CaseVariant(TestApp.UserEmail, i), password = $"guess-{i:D3}-wrong" }))));
+
+        Assert.Equal(5, CountingHasher.Verified.GetValueOrDefault(TestApp.UserEmail));
         var user = app.Users.Get(TestApp.UserEmail);
         Assert.Equal(5, user.FailedLoginAttempts);
         Assert.True(user.IsLockedOut(app.Time.GetUtcNow()));
         await app.Mail.WaitForAsync("lockout", TestApp.UserEmail);
         Assert.Single(app.Mail.Mails, m => m.Kind == "lockout");
+    }
+
+    [Fact]
+    public async Task Parallel_second_factor_guesses_beyond_the_threshold_are_not_evaluated()
+    {
+        await using var app = await TestApp.StartAsync();
+        var (sharedKey, _) = await EnableTotpAsync(app);
+
+        // the attacker knows the password and races 40 guesses of the 6-digit code
+        var preAuth = (await app.CreateClient().PostJsonAsync("/auth/login?useCookies=false",
+            new { email = TestApp.UserEmail, password = TestApp.UserPassword })).Str("flowToken");
+        var valid = Code(app, sharedKey);
+        var guesses = Enumerable.Range(0, 1_000_000).Select(n => n.ToString("D6", System.Globalization.CultureInfo.InvariantCulture))
+            .Where(g => g != valid).Take(40).ToArray();
+        await Task.WhenAll(guesses.Select(g => Task.Run(() =>
+            app.CreateClient().PostAsync("/auth/login/2fa", new { flowToken = preAuth, code = g }))));
+
+        // every evaluated wrong guess is counted – more than five means guesses slipped past the lockout
+        Assert.Equal(5, app.Users.Get(TestApp.UserEmail).FailedSecondFactorAttempts);
+    }
+
+    [Fact]
+    public async Task Refreshing_claims_or_signing_out_everywhere_with_a_stale_user_keeps_a_concurrent_password_change()
+    {
+        await using var app = await TestApp.StartAsync();
+        using var scope = app.App.Services.CreateScope();
+        var store = scope.ServiceProvider.GetRequiredService<ISlimUserStore>();
+        var auth = scope.ServiceProvider.GetRequiredService<ISlimAuthManager>();
+        var stale = (await store.FindByEmailAsync(TestApp.UserEmail, default))!;
+
+        // another request changes the password after "stale" was read (e.g. a loop over group members)
+        var fresh = (await store.FindByIdAsync(stale.Id, default))!;
+        await auth.SetPasswordAsync(fresh, "Concurrent-Password-456");
+        var changedHash = (await store.FindByIdAsync(stale.Id, default))!.PasswordHash;
+
+        await auth.RefreshClaimsAsync(stale);
+        Assert.Equal(changedHash, (await store.FindByIdAsync(stale.Id, default))!.PasswordHash);
+
+        await auth.SignOutEverywhereAsync(stale);
+        var saved = (await store.FindByIdAsync(stale.Id, default))!;
+        Assert.Equal(changedHash, saved.PasswordHash);
+        Assert.Equal(saved.SecurityStamp, stale.SecurityStamp);   // the caller's instance carries the rotated stamp
     }
 
     [Fact]

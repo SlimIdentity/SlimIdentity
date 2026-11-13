@@ -8,7 +8,7 @@ using SlimIdentity.Tests.Infrastructure;
 namespace SlimIdentity.Tests.Integration;
 
 /// <summary>
-/// Attack scenario H6: logs end up in log aggregators, tickets and screenshots. Run every flow that handles a secret
+/// Logs end up in log aggregators, tickets and screenshots. Run every flow that handles a secret
 /// with all log levels on, then check that no password, token, link, recovery code, 2FA secret or e-mail address
 /// appears anywhere – neither in messages nor in structured state nor in logged exceptions.
 /// </summary>
@@ -66,7 +66,7 @@ public sealed class LogSecrecyTests
         await client.PostAsync("/auth/login/2fa", new { flowToken = challenge.Str("flowToken"), code = "000000" });
         Collect(await client.PostJsonAsync("/auth/login/2fa", new { flowToken = challenge.Str("flowToken"), recoveryCode = recovery[0] }));
 
-        await Task.Delay(200);   // background mail queue
+        await app.WaitForQueuedMailAsync();
         var all = string.Join("\n", logs.Entries);
         // the capture really sees SlimIdentity's own events (reuse detection, recovery code) – the test is not vacuous
         Assert.Contains(logs.Entries, e => e.Contains("refresh token reuse", StringComparison.Ordinal));
