@@ -132,7 +132,7 @@ public sealed class StoreConformanceTests
             var (email, passwordHash) = (newUser.Email, newUser.PasswordHash);
             if (await FindByEmailAsync(email, ct) is not null) return null;
             await Task.Delay(5, ct);   // the gap between "check" and "insert"
-            var user = new SlimUser { Id = Guid.NewGuid().ToString(), Email = email, PasswordHash = passwordHash };
+            var user = new SlimUser { Id = Guid.NewGuid().ToString(), Email = email, PasswordHash = passwordHash, EmailConfirmed = newUser.EmailConfirmed };
             _users[user.Id] = user;
             return Copy(user);
         }

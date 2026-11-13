@@ -7,8 +7,8 @@ using SlimIdentity.Tests.Infrastructure;
 namespace SlimIdentity.Tests.Integration;
 
 /// <summary>
-/// Registration with business data: the host validates the <c>profile</c> before anything is looked up, and the store
-/// receives it with the account – both are created together or not at all. Hosts with their own endpoint use
+/// Registration with business data: the <c>profile</c> comes with the credential after the mailbox is proven, the host
+/// validates it, and the store receives it with the account – both are created together or not at all. Hosts with their own endpoint use
 /// <see cref="ISlimAuthManager.RegisterAsync"/> and keep every rule of <c>/register</c>.
 /// </summary>
 public sealed class RegistrationProfileTests
@@ -47,62 +47,54 @@ public sealed class RegistrationProfileTests
     {
         await using var app = await WithProfileAsync();
 
-        var response = await app.CreateClient().PostAsync("/auth/register",
-            new { email = "new@test.local", password = "Another123!", profile = new { company = "  ACME  " } });
+        var response = await app.RegisterAsync("new@test.local", "Another123!", new { company = "  ACME  " });
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var user = app.Users.Get("new@test.local");
         Assert.Equal(new SignUpProfile("ACME"), app.Users.Profiles[user.Id]);   // what the hook returned, not the raw JSON
-        await app.Mail.WaitForAsync("verification", "new@test.local");
+        Assert.True(user.EmailConfirmed);
     }
 
     [Fact]
-    public async Task An_invalid_profile_answers_400_before_anything_is_looked_up()
+    public async Task An_invalid_profile_answers_400_and_creates_nothing()
+    {
+        await using var app = await WithProfileAsync();
+
+        var invalid = await app.RegisterAsync("new@test.local", "Another123!", new { company = "" });
+        var missing = await app.RegisterAsync("other@test.local", "Another123!");
+
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, missing.StatusCode);                       // the hook decides about "no profile" too
+        Assert.True((await ErrorsOf(invalid)).TryGetProperty("profile.company", out _));
+        Assert.DoesNotContain(app.Users.All, u => u.Email is "new@test.local" or "other@test.local");
+    }
+
+    [Fact]
+    public async Task The_first_step_takes_neither_a_password_nor_a_profile()
     {
         await using var app = await WithProfileAsync();
         var client = app.CreateClient();
 
-        var fresh = await client.PostAsync("/auth/register", new { email = "new@test.local", password = "Another123!", profile = new { company = "" } });
-        var existing = await client.PostAsync("/auth/register", new { email = TestApp.UserEmail, password = "Another123!", profile = new { company = "" } });
-        var missing = await client.PostAsync("/auth/register", new { email = "other@test.local", password = "Another123!" });
+        var withProfile = await client.PostAsync("/auth/register", new { email = "new@test.local", profile = new { company = "ACME" } });
+        var withPassword = await client.PostAsync("/auth/register", new { email = TestApp.UserEmail, password = "Another123!" });
 
-        Assert.Equal(HttpStatusCode.BadRequest, fresh.StatusCode);
-        Assert.Equal(HttpStatusCode.BadRequest, missing.StatusCode);                       // the hook decides about "no profile" too
-        Assert.True((await ErrorsOf(fresh)).TryGetProperty("profile.company", out _));
-        Assert.Equal(await fresh.Content.ReadAsStringAsync(), await existing.Content.ReadAsStringAsync());   // nothing revealed
-        Assert.Throws<InvalidOperationException>(() => app.Users.Get("new@test.local"));
+        Assert.Equal(HttpStatusCode.BadRequest, withProfile.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, withPassword.StatusCode);
         await Task.Delay(100);
         Assert.Empty(app.Mail.Mails);                                                       // no mail – not even "account exists"
-    }
-
-    [Fact]
-    public async Task An_existing_address_gets_the_uniform_answer_and_its_profile_is_dropped()
-    {
-        await using var app = await WithProfileAsync();
-        var client = app.CreateClient();
-        var owner = app.Users.Get(TestApp.UserEmail);
-
-        var existing = await client.PostAsync("/auth/register", new { email = TestApp.UserEmail, password = "Another123!", profile = new { company = "Evil" } });
-        var fresh = await client.PostAsync("/auth/register", new { email = "new@test.local", password = "Another123!", profile = new { company = "ACME" } });
-
-        Assert.Equal(await fresh.Content.ReadAsStringAsync(), await existing.Content.ReadAsStringAsync());
-        await app.Mail.WaitForAsync("account-exists", TestApp.UserEmail);
-        Assert.False(app.Users.Profiles.ContainsKey(owner.Id));                             // the owner's data is untouched
+        Assert.False(app.Users.Profiles.ContainsKey(app.Users.Get(TestApp.UserEmail).Id));
     }
 
     [Fact]
     public async Task Without_a_profile_hook_a_profile_is_refused()
     {
         await using var app = await TestApp.StartAsync();
-        var client = app.CreateClient();
 
-        var refused = await client.PostAsync("/auth/register", new { email = "new@test.local", password = "Another123!", profile = new { isAdmin = true } });
-        var explicitNull = await client.PostAsync("/auth/register", new { email = "null@test.local", password = "Another123!", profile = (object?)null });
-        var none = await client.PostAsync("/auth/register", new { email = "none@test.local", password = "Another123!" });
+        var refused = await app.RegisterAsync("new@test.local", "Another123!", new { isAdmin = true });
+        var none = await app.RegisterAsync("none@test.local", "Another123!");
 
         Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
         Assert.True((await ErrorsOf(refused)).TryGetProperty("profile", out _));
-        Assert.Equal(HttpStatusCode.OK, explicitNull.StatusCode);
         Assert.Equal(HttpStatusCode.OK, none.StatusCode);
         Assert.Null(app.Users.Profiles[app.Users.Get("none@test.local").Id]);
     }
@@ -112,7 +104,7 @@ public sealed class RegistrationProfileTests
     {
         await using var app = await WithProfileAsync();
 
-        var response = await app.CreateClient().PostAsync("/auth/register", new { email = "new@test.local", password = "short", profile = new { company = "" } });
+        var response = await app.RegisterAsync("new@test.local", "short", new { company = "" });
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.True((await ErrorsOf(response)).TryGetProperty("password", out _));
@@ -143,9 +135,8 @@ public sealed class RegistrationProfileTests
         Assert.Equal(await fresh.Content.ReadAsStringAsync(), await existing.Content.ReadAsStringAsync());   // no enumeration
         var user = app.Users.Get("new@test.local");
         Assert.Equal(new SignUpProfile("ACME"), app.Users.Profiles[user.Id]);
-        await app.Mail.WaitForAsync("verification", "new@test.local");
         await app.Mail.WaitForAsync("account-exists", TestApp.UserEmail);
-        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync("/auth/register", new { email = "x@test.local", password = "Another123!" })).StatusCode);
+        Assert.Equal(HttpStatusCode.NotFound, (await client.PostAsync("/auth/register", new { email = "x@test.local" })).StatusCode);
     }
 
     [Fact]

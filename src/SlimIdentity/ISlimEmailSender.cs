@@ -9,8 +9,11 @@ namespace SlimIdentity;
 /// </summary>
 public interface ISlimEmailSender
 {
-    /// <summary>E-mail verification after registration or on <c>/resend-verification</c>.</summary>
-    Task SendVerificationEmailAsync(SlimEmailContext context, string email, string verificationTokenOrLink, CancellationToken ct);
+    /// <summary>
+    /// The mail of a registration (<c>POST /register</c>): a 6-digit <paramref name="code"/> for
+    /// <c>POST /auth/register/verify</c> and a link whose token <c>POST /auth/flow</c> redeems – both prove the mailbox.
+    /// </summary>
+    Task SendVerificationEmailAsync(SlimEmailContext context, string email, string code, string verificationTokenOrLink, CancellationToken ct);
 
     /// <summary>Password reset link (<c>/forgot-password</c>).</summary>
     Task SendPasswordResetEmailAsync(SlimEmailContext context, string email, string resetTokenOrLink, CancellationToken ct);

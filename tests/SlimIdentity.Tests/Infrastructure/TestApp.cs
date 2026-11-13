@@ -182,6 +182,50 @@ public sealed class TestApp : IAsyncDisposable
         return tokens;
     }
 
+    /// <summary>
+    /// <c>POST /register</c> → the mailed code at <c>/register/verify</c> → <c>/register/password</c>. Returns the last answer
+    /// (the session, or open steps).
+    /// </summary>
+    public async Task<HttpResponseMessage> RegisterAsync(string email, string password, object? profile = null, ApiClient? client = null)
+    {
+        client ??= CreateClient();
+        var flowToken = await VerifyRegistrationAsync(email, client);
+        return await client.PostAsync("/auth/register/password", new { flowToken, password, profile });
+    }
+
+    /// <summary><c>POST /register</c> and <c>/register/verify</c> with the mailed code; returns the flow token of step <c>set_credential</c>.</summary>
+    public async Task<string> VerifyRegistrationAsync(string email, ApiClient? client = null)
+    {
+        client ??= CreateClient();
+        var before = Mail.Mails.Count(m => m.Kind == "verification" && string.Equals(m.To, email, StringComparison.OrdinalIgnoreCase));
+        var started = await client.PostJsonAsync("/auth/register", new { email });
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (Mail.Mails.Count(m => m.Kind == "verification" && string.Equals(m.To, email, StringComparison.OrdinalIgnoreCase)) == before)
+        {
+            if (DateTime.UtcNow > deadline) throw new TimeoutException($"No new verification mail to {email} was sent.");
+            await Task.Delay(20);
+        }
+        var code = (await Mail.WaitForAsync("verification", email)).Payload;
+        var verified = await client.PostJsonAsync("/auth/register/verify", new { flowToken = started.Str("flowToken"), code });
+        return verified.Str("flowToken");
+    }
+
+    /// <summary>The token of a mailed link (the link itself without a link template).</summary>
+    public static string LinkToken(string link) =>
+        link.IndexOf("token=", StringComparison.Ordinal) is var i and >= 0 ? Uri.UnescapeDataString(link[(i + 6)..]) : link;
+
+    /// <summary>
+    /// An account whose address nobody proved – created through <see cref="ISlimAuthManager.RegisterAsync"/>, which
+    /// leaves the address unconfirmed.
+    /// </summary>
+    public async Task PreRegisterUnconfirmedAsync(string email, string password)
+    {
+        await using var scope = App.Services.CreateAsyncScope();
+        var result = await scope.ServiceProvider.GetRequiredService<ISlimAuthManager>().RegisterAsync(email, password);
+        Assert.NotNull(result.User);
+        Assert.False(result.User.EmailConfirmed);
+    }
+
     public async ValueTask DisposeAsync()
     {
         await App.StopAsync();

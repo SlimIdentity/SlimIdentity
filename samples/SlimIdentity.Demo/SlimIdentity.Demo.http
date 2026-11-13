@@ -74,16 +74,32 @@ GET {{auth}}/password-policy
 
 ###
 
+# registration: the address only – answers { status: "action_required", actions: ["verify_email", "set_credential"], flowToken }
+# and mails a 6-digit code plus a link (printed to the console)
 POST {{auth}}/register
 Content-Type: application/json
 
-{ "email": "new@demo.local", "password": "NewUser123!" }
+{ "email": "new@demo.local" }
 
 ###
-POST {{auth}}/verify-email
+POST {{auth}}/register/verify
+Content-Type: application/json
+
+{ "flowToken": "<flowToken>", "code": "123456" }
+
+###
+# or the token of the link instead of the code
+POST {{auth}}/flow
 Content-Type: application/json
 
 { "token": "<token from console>" }
+
+###
+# step set_credential: creates the account (address confirmed) and signs in
+POST {{auth}}/register/password
+Content-Type: application/json
+
+{ "flowToken": "<flowToken>", "password": "NewUser123!" }
 
 ###
 # or at sign-in: login of the unconfirmed account answers 200 { status: "action_required", actions: ["verify_email"], flowToken }

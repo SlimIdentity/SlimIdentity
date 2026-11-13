@@ -129,18 +129,18 @@ public sealed class ConcurrencyTests
     }
 
     [Fact]
-    public async Task A_registration_race_gets_the_uniform_answer()
+    public async Task A_registration_race_creates_one_account()
     {
         await using var app = await TestApp.StartAsync();
-        var client = app.CreateClient();
-        var normal = await (await client.PostAsync("/auth/register", new { email = "first@test.local", password = "Another123!" })).Content.ReadAsStringAsync();
+        var flowToken = await app.VerifyRegistrationAsync("race@test.local");
 
-        // another request registers the same address between the lookup and the insert
+        // another registration of the address completes between the lookup and the insert
         app.Users.BeforeCreate = email => { app.Users.BeforeCreate = null; app.Users.Seed(email, "Other123!"); };
-        var raced = await client.PostAsync("/auth/register", new { email = "race@test.local", password = "Another123!" });
+        var raced = await app.CreateClient().PostJsonAsync("/auth/register/password",
+            new { flowToken, password = "Another123!" }, HttpStatusCode.Conflict);
 
-        Assert.Equal(HttpStatusCode.OK, raced.StatusCode);
-        Assert.Equal(normal, await raced.Content.ReadAsStringAsync());
-        await app.Mail.WaitForAsync("account-exists", "race@test.local");
+        Assert.Equal("email_taken", raced.Str("code"));
+        Assert.Single(app.Users.All, u => u.Email == "race@test.local");
+        await app.LoginBearerAsync("race@test.local", "Other123!");
     }
 }

@@ -107,13 +107,26 @@ has secure defaults ([configuration reference](configuration.md)). The options a
 POST /auth/register
 Content-Type: application/json
 
-{ "email": "me@example.com", "password": "Secret123!" }
+{ "email": "me@example.com" }
 ```
 
-The null sender logs a verification link to `Links.BaseUrl` + `/verify-email` – a page of your front end that does not
-exist yet. Until it does, take the `token` from the link and confirm with `POST /auth/verify-email` and
-`{ "token": "…" }`. Signing in before that answers `action_required` with `verify_email`: the logged code completes
-it at `POST /auth/login/verify-email`.
+The answer is `action_required` with the steps `verify_email` and `set_credential` and a `flowToken`. The null sender
+logs a 6-digit code and a link to `Links.BaseUrl` + `/verify-email` (a page of your front end that does not exist yet).
+Send the code, then the password – the account is created with its address confirmed, and you are signed in:
+
+```http
+POST /auth/register/verify
+Content-Type: application/json
+
+{ "flowToken": "…", "code": "123456" }
+
+POST /auth/register/password
+Content-Type: application/json
+
+{ "flowToken": "…", "password": "Secret123!" }
+```
+
+The link does the same as the code: its `token` goes to `POST /auth/flow` ([registration](endpoints.md#registration)).
 
 ```http
 POST /auth/login

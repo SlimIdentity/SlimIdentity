@@ -34,7 +34,7 @@ All defaults are the secure choice. The options are listed in three tiers – mo
 
 | Option | Default | Description |
 | :--- | :--- | :--- |
-| `Endpoints.EnableRegistration` | `true` | `/register`. Disable for invite-only apps or custom registration. |
+| `Endpoints.EnableRegistration` | `true` | `/register`, `/register/verify`, `/register/password`, the registration link at `/flow`. Disable for invite-only apps or custom registration. |
 | `Endpoints.DefaultUseCookies` | `false` | Mode when the request has no `?useCookies=` (only relevant if both modes are available). |
 | `Password.MinimumLength` | `8` | At least 6; 12 or more is recommended without 2FA. |
 | `Tokens.AccessTokenLifetime` | `00:15:00` | Access token lifetime. |
@@ -52,7 +52,6 @@ All defaults are the secure choice. The options are listed in three tiers – mo
 | Option | Default | Description |
 | :--- | :--- | :--- |
 | `RoutePrefix` | `/auth` | Prefix of all endpoints. |
-| `Endpoints.EnableEmailVerification` | `true` | `/verify-email`, `/resend-verification`, verification mail after registration. |
 | `Endpoints.EnablePasswordReset` | `true` | `/forgot-password`, `/reset-password`. |
 | `Endpoints.EnableChangePassword` | `true` | `/change-password`. Disable for LDAP-only setups. |
 | `Endpoints.EnableChangeEmail` | `true` | `/change-email`, `/confirm-email-change`. Disable if the login identifier is managed elsewhere (LDAP, SSO). |
@@ -156,7 +155,7 @@ If the old secret leaked, do not list it in `PreviousJwtSecrets` – every token
 | `AddPasswordRule<T>()` | Additional rule for new passwords (can be called several times). |
 | `AddSignInGuard<T>()` / `AddRegistrationGuard<T>()` | Vetoes for sessions and new accounts – [hooks](guides/hooks.md). |
 | `AddEventObserver<T>()` | Security events for audit trails and alerts. |
-| `AddRegistrationProfile<T>()` | Business data at `/register`, written with the account – [guide](guides/registration-profile.md). |
+| `AddRegistrationProfile<T>()` | Business data of a registration, written with the account – [guide](guides/registration-profile.md). |
 | `UseRateLimitPartitionKey(Func<HttpContext, string?>)` | Custom rate-limit client key. |
 | `UseTenantKey(Func<HttpContext, string?>)` | Binds cookies and access tokens to the request's tenant ([multi-tenancy](guides/multi-tenancy.md#2-sessions-usetenantkey)). |
 | `.Authentication` | The `AuthenticationBuilder` – add OAuth/OIDC handlers here. |

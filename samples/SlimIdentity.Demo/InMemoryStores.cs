@@ -46,7 +46,7 @@ public sealed class InMemoryUserStore : ISlimUserStore
             // "unique index": null if the address is taken (e.g. by a concurrent registration)
             if (_users.Values.Any(u => string.Equals(u.Email, email, StringComparison.OrdinalIgnoreCase)))
                 return Task.FromResult<SlimUser?>(null);
-            var user = new SlimUser { Id = Guid.NewGuid().ToString(), Email = email, PasswordHash = passwordHash };
+            var user = new SlimUser { Id = Guid.NewGuid().ToString(), Email = email, PasswordHash = passwordHash, EmailConfirmed = newUser.EmailConfirmed };
             _users[user.Id] = user;
             _roles[user.Id] = [];
             return Task.FromResult<SlimUser?>(Clone(user));
@@ -353,8 +353,8 @@ public sealed class InMemoryApiKeyStore : ISlimApiKeyStore
 /// <summary>Prints mails to the console and drops them into the playground's fake mailbox.</summary>
 public sealed class ConsoleEmailSender(DemoMailbox mailbox) : ISlimEmailSender
 {
-    public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string verificationTokenOrLink, CancellationToken ct) =>
-        Write("Verify your e-mail", email, verificationTokenOrLink);
+    public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string code, string verificationTokenOrLink, CancellationToken ct) =>
+        Write("Verify your e-mail", email, $"Code: {code} – or open {verificationTokenOrLink}");
 
     public Task SendPasswordResetEmailAsync(SlimEmailContext context, string email, string resetTokenOrLink, CancellationToken ct) =>
         Write("Reset your password", email, resetTokenOrLink);

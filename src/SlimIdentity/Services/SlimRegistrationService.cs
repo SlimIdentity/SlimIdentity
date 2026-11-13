@@ -13,9 +13,7 @@ internal sealed class SlimRegistrationService(
     SlimEmailDispatcher mail,
     SlimCredentialService credentials,
     SlimPasswordPolicy passwordPolicy,
-    SlimWorkflowTokens workflow,
     SlimHookRunner hooks,
-    SlimLinks links,
     SlimMetrics metrics,
     IOptions<SlimIdentityOptions> options,
     ILogger<SlimRegistrationService> logger)
@@ -24,7 +22,7 @@ internal sealed class SlimRegistrationService(
 
     /// <summary>The uniform answer – identical whether the address was free or already had an account.</summary>
     internal static IResult Accepted => SlimResults.Status("registration_accepted",
-        "If the address can be used, a confirmation e-mail has been sent.");
+        "If the address can be used, the account has been created.");
 
     /// <summary>
     /// A plain address only: <see cref="MailAddress"/> also accepts <c>Name &lt;addr&gt;</c> and <c>addr (comment)</c>, and a mail
@@ -41,12 +39,32 @@ internal sealed class SlimRegistrationService(
         SlimResults.Validation(new Dictionary<string, string[]> { [field] = ["A valid e-mail address is required."] });
 
     /// <summary>
+    /// Without mail the field carries a sign-in name (with LDAP the user name): not empty, at most
+    /// <see cref="MaxEmailLength"/> characters, no control characters.
+    /// </summary>
+    internal static bool IsValidIdentifier([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? identifier) =>
+        !string.IsNullOrEmpty(identifier) && identifier.Length <= MaxEmailLength && !identifier.Any(char.IsControl);
+
+    /// <summary>The address (with mail) or sign-in name (without) of a new account, from the request alone.</summary>
+    internal bool IsValidAccountName([System.Diagnostics.CodeAnalysis.NotNullWhen(true)] string? name) =>
+        options.Value.Email.Enabled ? IsValidEmail(name) : IsValidIdentifier(name);
+
+    /// <summary>The profile through the host's <see cref="ISlimRegistrationProfile"/>; errors as a <c>400</c> under <c>profile</c>.</summary>
+    public async Task<(object? Profile, IResult? Failure)> ValidateProfileAsync(string email, JsonElement? profile, CancellationToken ct)
+    {
+        var result = await hooks.ValidateProfileAsync(email, profile, ct);
+        return result.Errors is { } errors
+            ? (null, SlimResults.Validation(errors.ToDictionary(e => e.Key.Length == 0 ? "profile" : "profile." + e.Key, e => e.Value, StringComparer.Ordinal)))
+            : (result.Profile, null);
+    }
+
+    /// <summary>
     /// Step 1, from the request alone: address and password rules. Returns the normalized address, or the <c>400</c>.
     /// </summary>
     public async Task<(string? Email, IResult? Failure)> ValidateAsync(string? email, string? password, CancellationToken ct)
     {
         var normalized = SlimEmailAddress.Normalize(email);
-        if (!IsValidEmail(normalized)) return (null, InvalidEmail("email"));
+        if (!IsValidAccountName(normalized)) return (null, InvalidEmail("email"));
         if (await passwordPolicy.ValidateAsync(password, normalized!, ct) is { } errors)
             return (null, SlimResults.Validation(errors));
         return (normalized, null);
@@ -86,9 +104,7 @@ internal sealed class SlimRegistrationService(
         metrics.Registration("created");
         await hooks.RaiseAsync(SlimEventTypes.UserCreated, user.Id, reason: "registration", ct: ct);
 
-        if (options.Value.Endpoints.EnableEmailVerification && !user.EmailConfirmed)
-            await SendVerificationAsync(user, ct);
-
+        // with mail the address is confirmed at the first sign-in (step verify_email)
         return new SlimRegistrationResult(user, null, Accepted);
 
         async Task<SlimRegistrationResult> AccountExistsAsync(string existingEmail, string? existingUserId)
@@ -97,14 +113,5 @@ internal sealed class SlimRegistrationService(
             await mail.SendAsync(SlimEmailKinds.AccountExists, existingEmail, existingUserId, (s, x, c) => s.SendAccountExistsEmailAsync(x, existingEmail, c), ct);
             return new SlimRegistrationResult(null, null, Accepted);
         }
-    }
-
-    public async Task SendVerificationAsync(SlimUser user, CancellationToken ct)
-    {
-        var token = workflow.Protect(SlimWorkflowTokens.EmailVerificationPurpose,
-            new SlimEmailTokenPayload(user.Id, user.Email, user.SecurityStamp), options.Value.Tokens.EmailVerificationTokenLifetime);
-        var email = user.Email;
-        var link = links.Build(SlimLinkKind.EmailVerification, token);
-        await mail.SendAsync(SlimEmailKinds.Verification, email, user.Id, (s, x, c) => s.SendVerificationEmailAsync(x, email, link, c), ct);
     }
 }

@@ -134,7 +134,7 @@ public sealed class EfCoreTemplateExtrasTests : IAsyncLifetime
         {
             var sender = new OutboxEmailSender(db, _time);
             var context = new SlimEmailContext { Kind = SlimEmailKinds.Verification, Culture = CultureInfo.InvariantCulture };
-            await sender.SendVerificationEmailAsync(context, "user@example.com", link, default);
+            await sender.SendVerificationEmailAsync(context, "user@example.com", "123456", link, default);
         }
     }
 
@@ -149,7 +149,7 @@ public sealed class EfCoreTemplateExtrasTests : IAsyncLifetime
         public bool Fail { get; set; }
         public List<string> Sent { get; } = [];
 
-        public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string link, CancellationToken ct) => Send(link);
+        public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string code, string link, CancellationToken ct) => Send(link);
         public Task SendPasswordResetEmailAsync(SlimEmailContext context, string email, string link, CancellationToken ct) => Send(link);
         public Task SendTwoFactorCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) => Send(code);
         public Task SendEmailVerificationCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) => Send(code);

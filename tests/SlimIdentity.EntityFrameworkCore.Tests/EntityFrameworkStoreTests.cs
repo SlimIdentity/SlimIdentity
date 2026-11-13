@@ -317,7 +317,7 @@ public sealed class EntityFrameworkStoreTests
         // no Links.BaseUrl / relying party: passkeys are opt-in, the default setup must start without them
         builder.Services.AddSlimIdentity(o => o.Tokens.JwtSecret = new string('x', 32))
             .AddEntityFrameworkStores<GuidContext, GuidUser, Guid>()
-            .AddNullEmailSender();
+            .AddEmailSender<CodeSender>(ServiceLifetime.Singleton);
 
         await using var app = builder.Build();
         app.UseRateLimiter();
@@ -330,9 +330,12 @@ public sealed class EntityFrameworkStoreTests
         await app.StartAsync();
         var http = app.GetTestClient();
 
-        Assert.Equal(HttpStatusCode.OK, (await http.PostAsJsonAsync("/auth/register", new { email = "ef@test.local", password = "EfCore-Pass-123" })).StatusCode);
-        await using (var scope = app.Services.CreateAsyncScope())   // the null sender delivers no link
-            await scope.ServiceProvider.GetRequiredService<GuidContext>().Users.ExecuteUpdateAsync(s => s.SetProperty(u => u.EmailConfirmed, true));
+        var started = await http.PostAsJsonAsync("/auth/register", new { email = "ef@test.local" });
+        var flowToken = JsonDocument.Parse(await started.Content.ReadAsStringAsync()).RootElement.GetProperty("flowToken").GetString();
+        var code = await ((CodeSender)app.Services.GetRequiredService<ISlimEmailSender>()).Code.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        var verified = await http.PostAsJsonAsync("/auth/register/verify", new { flowToken, code });
+        flowToken = JsonDocument.Parse(await verified.Content.ReadAsStringAsync()).RootElement.GetProperty("flowToken").GetString();
+        Assert.Equal(HttpStatusCode.OK, (await http.PostAsJsonAsync("/auth/register/password", new { flowToken, password = "EfCore-Pass-123" })).StatusCode);
         var login = await http.PostAsJsonAsync("/auth/login", new { email = "EF@test.local", password = "EfCore-Pass-123" });
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
         var tokens = JsonDocument.Parse(await login.Content.ReadAsStringAsync()).RootElement;
@@ -353,4 +356,14 @@ public sealed class EntityFrameworkStoreTests
         Assert.Equal("new member", stored.DisplayName);   // user factory
         Assert.Equal("EF@TEST.LOCAL", stored.NormalizedEmail);
     }
-}
+
+    /// <summary>Captures the registration code; every other mail is dropped.</summary>
+    private sealed class CodeSender : ISlimEmailSender
+    {
+        public TaskCompletionSource<string> Code { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string code, string verificationTokenOrLink, CancellationToken ct) { Code.TrySetResult(code); return Task.CompletedTask; }
+        public Task SendPasswordResetEmailAsync(SlimEmailContext context, string email, string resetTokenOrLink, CancellationToken ct) => Task.CompletedTask;
+        public Task SendTwoFactorCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) => Task.CompletedTask;
+        public Task SendEmailVerificationCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) => Task.CompletedTask;
+        public Task SendEmailChangeConfirmationAsync(SlimEmailContext context, string newEmail, string confirmationTokenOrLink, CancellationToken ct) => Task.CompletedTask;
+    }}

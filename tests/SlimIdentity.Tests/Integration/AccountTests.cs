@@ -11,22 +11,26 @@ public sealed class AccountTests
         await using var app = await TestApp.StartAsync();
         var client = app.CreateClient();
 
-        var existing = await client.PostAsync("/auth/register", new { email = TestApp.UserEmail, password = "Another123!" });
-        var fresh = await client.PostAsync("/auth/register", new { email = "new@test.local", password = "Another123!" });
+        var existing = await client.PostJsonAsync("/auth/register", new { email = TestApp.UserEmail });
+        var fresh = await client.PostJsonAsync("/auth/register", new { email = "new@test.local" });
 
-        Assert.Equal(HttpStatusCode.OK, existing.StatusCode);
-        Assert.Equal(await existing.Content.ReadAsStringAsync(), await fresh.Content.ReadAsStringAsync());
+        Assert.Equal(Shape(existing), Shape(fresh));
+        Assert.Equal("""["verify_email","set_credential"]""", fresh.GetProperty("actions").GetRawText());
 
         await app.Mail.WaitForAsync("account-exists", TestApp.UserEmail);
         await app.Mail.WaitForAsync("verification", "new@test.local");
+
+        static string Shape(System.Text.Json.JsonElement e) =>
+            string.Join(",", e.EnumerateObject().Select(p => p.Name + "=" + (p.Name == "flowToken" ? "" : p.Value.GetRawText())));
     }
 
     [Fact]
     public async Task Register_validates_the_password_policy()
     {
         await using var app = await TestApp.StartAsync();
-        var response = await app.CreateClient().PostAsync("/auth/register", new { email = "new@test.local", password = "short" });
+        var response = await app.RegisterAsync("new@test.local", "short");
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.DoesNotContain(app.Users.All, u => u.Email == "new@test.local");
     }
 
     [Fact]
@@ -34,10 +38,13 @@ public sealed class AccountTests
     {
         await using var app = await TestApp.StartAsync();
         var client = app.CreateClient();
-        await client.PostAsync("/auth/register", new { email = "new@test.local", password = "Another123!" });
-        var mail = await app.Mail.WaitForAsync("verification", "new@test.local");
+        await client.PostJsonAsync("/auth/register", new { email = "new@test.local" });
+        var token = TestApp.LinkToken((await app.Mail.WaitForAsync("verification", "new@test.local")).Link!);
 
-        await client.PostJsonAsync("/auth/verify-email", new { token = mail.Payload });
+        var other = app.CreateClient();
+        var steps = await other.PostJsonAsync("/auth/flow", new { token });
+        Assert.Equal("""["set_credential"]""", steps.GetProperty("actions").GetRawText());
+        await other.PostJsonAsync("/auth/register/password", new { flowToken = steps.Str("flowToken"), password = "Another123!" });
 
         Assert.True(app.Users.Get("new@test.local").EmailConfirmed);
     }

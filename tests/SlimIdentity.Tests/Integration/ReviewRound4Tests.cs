@@ -257,7 +257,7 @@ public sealed class ReviewRound4AddressTests
     public async Task Q_a_display_name_form_is_not_accepted_as_an_address(string address)
     {
         await using var app = await TestApp.StartAsync();
-        var response = await app.CreateClient().PostAsync("/auth/register", new { email = address, password = "Long-Enough-Pass-1" });
+        var response = await app.CreateClient().PostAsync("/auth/register", new { email = address });
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
     }
 
@@ -271,7 +271,7 @@ public sealed class ReviewRound4AddressTests
     {
         await using var app = await TestApp.StartAsync();
         for (var i = 0; i < 10; i++)
-            await app.CreateClient().PostAsync("/auth/register", new { email = $"n{i} <victim@test.local>", password = "Long-Enough-Pass-1" });
+            await app.CreateClient().PostAsync("/auth/register", new { email = $"n{i} <victim@test.local>" });
         await Task.Delay(300);   // background queue
 
         var toVictim = app.Mail.Mails.Count(m => m.Kind == "verification"

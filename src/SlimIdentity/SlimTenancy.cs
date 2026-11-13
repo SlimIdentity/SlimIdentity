@@ -21,7 +21,7 @@ public interface ISlimOriginPolicy
 /// <summary>The links SlimIdentity creates.</summary>
 public enum SlimLinkKind
 {
-    /// <summary>Confirms the address after registration (<c>POST /auth/verify-email</c>).</summary>
+    /// <summary>Proves the mailbox of a registration (<c>POST /auth/flow</c> with its token).</summary>
     EmailVerification,
     /// <summary>Sets a new password (<c>POST /auth/reset-password</c>) – mailed or created by an administrator.</summary>
     PasswordReset,

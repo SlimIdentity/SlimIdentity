@@ -32,9 +32,10 @@ public sealed class SmtpSettings
 /// </summary>
 public sealed class MailKitEmailSender(IOptions<SmtpSettings> settings) : ISlimEmailSender
 {
-    public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string link, CancellationToken ct) =>
-        SendAsync(email, "Please confirm your e-mail address",
-            $"<p>Welcome! Please confirm your address:</p><p><a href=\"{link}\">Confirm e-mail</a></p>", ct);
+    public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string code, string link, CancellationToken ct) =>
+        SendAsync(email, $"Confirm your e-mail address: {code}",
+            $"<p>Welcome! Enter <b>{code}</b> to confirm your address, or open this link:</p><p><a href=\"{link}\">Confirm e-mail</a></p>" +
+            "<p>If you did not register, you can ignore this e-mail.</p>", ct);
 
     public Task SendPasswordResetEmailAsync(SlimEmailContext context, string email, string link, CancellationToken ct) =>
         SendAsync(email, "Reset your password",
@@ -94,8 +95,8 @@ public sealed class SendGridEmailSender(ISendGridClient client, ILogger<SendGrid
 {
     private static readonly EmailAddress From = new("no-reply@example.com", "MyApp");
 
-    public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string link, CancellationToken ct) =>
-        SendAsync(email, "Please confirm your e-mail address", $"<a href=\"{link}\">Confirm e-mail</a>", ct);
+    public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string code, string link, CancellationToken ct) =>
+        SendAsync(email, $"Confirm your e-mail address: {code}", $"Your code is <b>{code}</b>, or <a href=\"{link}\">confirm e-mail</a>.", ct);
 
     public Task SendPasswordResetEmailAsync(SlimEmailContext context, string email, string link, CancellationToken ct) =>
         SendAsync(email, "Reset your password", $"<a href=\"{link}\">Reset password</a>", ct);
@@ -121,7 +122,7 @@ public sealed class SendGridEmailSender(ISendGridClient client, ILogger<SendGrid
 /// <summary>Development: records that a mail would have been sent without logging its contents or recipient.</summary>
 public sealed class LoggingEmailSender(ILogger<LoggingEmailSender> logger) : ISlimEmailSender
 {
-    public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string link, CancellationToken ct)
+    public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string code, string link, CancellationToken ct)
     { logger.LogInformation("Development mail sink: verification email."); return Task.CompletedTask; }
 
     public Task SendPasswordResetEmailAsync(SlimEmailContext context, string email, string link, CancellationToken ct)

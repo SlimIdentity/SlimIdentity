@@ -31,9 +31,9 @@ metadata (tag `SlimIdentity`), so typed clients can be generated from `/openapi/
 | :--- | :--- | :--- | :--- |
 | `POST /login` ⏱ | `email`, `password`, `rememberMe`, `twoFactorRememberToken` (bearer, optional) | `200` session, or `200 action_required` (see below) | `400 invalid_request`; `401 invalid_credentials`; `403 <veto>` of a sign-in guard; with `RevealAccountState`: `403 account_disabled`, `423 locked_out` |
 | `POST /login/2fa` ⏱ | `flowToken` + `code` or `recoveryCode`, `rememberDevice` | `200` session (+ `twoFactorRememberToken` in bearer mode / cookie `SlimAuth.2fa` in cookie mode when remembered), or `200 action_required` with the remaining steps | `401 invalid_token`, `401 invalid_two_factor_code`, `423 locked_out` |
-| `POST /login/verify-email` ⏱ | `flowToken`, `code` (from the mail of kind `verification-code`) | `200` session, or `200 action_required` with the remaining steps; the address is confirmed | `401 invalid_token`, `401 invalid_verification_code`, `429 too_many_attempts` (5 wrong codes per flow, 10 per address in 24 hours – the link from `/resend-verification` still works) |
+| `POST /login/verify-email` ⏱ | `flowToken`, `code` (from the mail of kind `verification-code`) | `200` session, or `200 action_required` with the remaining steps; the address is confirmed | `401 invalid_token`, `401 invalid_verification_code`, `429 too_many_attempts` (5 wrong codes per flow, 10 per address in 24 hours) |
 | `POST /login/password-change` ⏱ | `flowToken`, `newPassword` | `200` session, or `200 action_required` with the remaining steps | `400 password_unchanged`, `400` validation, `401 invalid_token`, `423 locked_out` |
-| `POST /flow` ⏱ | `flowToken` | `200 action_required` with the open steps of the token – read only, nothing is sent or consumed | `401 invalid_token` (also for a completed, expired or outdated flow) |
+| `POST /flow?useCookies=…` ⏱ | `flowToken`, or `token` of a registration link | `flowToken`: `200 action_required` with the open steps of the token – read only, nothing is sent or consumed. `token`: proves the mailbox of a [registration](#registration) and continues it in the mode of this request (the link may open on another device) | `401 invalid_token` (also for a completed, expired or outdated flow, and for an address that has an account by now) |
 | `POST /refresh` | `refreshToken` | `200` new token pair | `400 invalid_request`, `401 invalid_token`, `401 session_expired` |
 | `POST /logout` | `refreshToken` (optional) | `200 logged_out` – ends the caller's session; a refresh token ends its session only while it is valid (unused, current security stamp) | – |
 | `POST /logout-all` 🔒 | – | `200 logged_out_everywhere` | `401`, `403 not_allowed_while_impersonating` |
@@ -52,7 +52,8 @@ accepted). `second_factor` is completed at `/login/2fa`
 (`methods[0]` is the one asked for; `recovery` alone means no code can be sent – only a recovery code helps),
 `change_password` at `/login/password-change` (a password set by an administrator with `mustChange`,
 [running without e-mail](guides/without-email.md#the-forced-password-change)). Every step answers with the session or
-with the remaining steps and a new `flowToken`; a flow lasts 15 minutes from the first factor and completes once. The
+with the remaining steps and a new `flowToken`; a flow lasts 15 minutes from the first factor and completes once. A
+[registration](#registration) answers the same way with the steps `verify_email` and `set_credential`. The
 same answer comes from `/login/external/exchange`, `/passkeys/login`, `/invitation/accept` and
 `ISlimAuthManager.SignInAsync`. `/login/verify-email`, `/login/2fa` and `/login/password-change` use the mode chosen at the start. `/refresh` only exists with `ISlimRefreshTokenStore`; `/login/2fa` only
 with `ISlimTwoFactorStore`; `/login/verify-email` not with `WithoutEmail()`.
@@ -82,9 +83,9 @@ matched).
 
 | Endpoint | Body | Success | Errors |
 | :--- | :--- | :--- | :--- |
-| `POST /register` ⏱ | `email`, `password`, `profile` (optional object – [business data](guides/registration-profile.md)) | `200 registration_accepted` (always, also for existing addresses) | `400` validation (`profile.<field>` from your profile hook; `profile` if none is registered), `403 <veto>` of a registration guard |
-| `POST /verify-email` ⏱ | `token` | `200 email_confirmed` | `400 invalid_token` |
-| `POST /resend-verification` ⏱ | `email` | `200 verification_sent` (always) | – |
+| `POST /register?useCookies=…` ⏱ | `email`, `rememberMe` | `200 action_required` `["verify_email", "set_credential"]` (always – also for existing and throttled addresses) – see [registration](#registration) | `400` validation (also for a `password` or `profile`: they come with `/register/password`), `403 <veto>` of a registration guard |
+| `POST /register/verify` ⏱ | `flowToken`, `code` (from the verification mail) | `200 action_required` `["set_credential"]` | `401 invalid_token`, `401 invalid_verification_code`, `429 too_many_attempts` (5 wrong codes per flow, 10 per address in 24 hours – the link of the mail still works) |
+| `POST /register/password` ⏱ | `flowToken`, `password`, `profile` (optional object – [business data](guides/registration-profile.md)) | `200` session – the account is created with its address confirmed | `400` validation (`profile.<field>` from your profile hook; `profile` if none is registered), `401 invalid_token`, `409 email_taken` (completed already, or the address got an account meanwhile) |
 | `POST /forgot-password` ⏱ | `email` | `200 reset_requested` (always; no link for a pure SSO account) | – |
 | `POST /reset-password` ⏱ | `token`, `newPassword` | `200 password_reset` – all sessions end | `400 invalid_token`, `400` validation, `409 external_sign_in_only` |
 | `POST /change-password` ⏱ 🔒 | `currentPassword`, `newPassword` | `200` new session for this device – others end | `400 invalid_password`, `400` validation, `403 not_allowed_while_impersonating`, `409 password_not_set`, `423 locked_out` |
@@ -93,9 +94,28 @@ matched).
 | `GET /password-policy` | – | `200` `minimumLength`, `maximumLength`, `hasAdditionalRules` – for hints and live validation in the front end (no composition rules, NIST SP 800-63B) | – |
 | `GET /me` 🔒 | – | `200` `id`, `email`, `isImpersonating`, `impersonatorId`, `authenticationMethod`, `sudoUntil`, `claims` | `401` |
 
-With `WithoutEmail()` the mail-based routes are not mapped: `/forgot-password`, `/verify-email`, `/resend-verification`,
+With `WithoutEmail()` the mail-based routes are not mapped: `/forgot-password`, `/register/verify`, `/register/password`,
 `/change-email`, `/confirm-email-change`, `/2fa/enable-email` and – unless `allowSelfRegistration` – `/register`.
-`/reset-password` stays for links an administrator hands over.
+`/reset-password` stays for links an administrator hands over. Without mail, `/register` takes `email` (any identifier),
+`password` and `profile` and answers `200 registration_accepted`; the address stays unconfirmed.
+
+### Registration
+
+With mail, the mailbox is proven before the account exists, and the account is created with its first way to sign in:
+
+```
+POST /register           { "email" }                                → action_required ["verify_email", "set_credential"], flowToken
+POST /register/verify    { "flowToken", "code" }                    → action_required ["set_credential"], flowToken
+  or POST /flow          { "token" }  (the link of the mail)         → action_required ["set_credential"], flowToken
+POST /register/password  { "flowToken", "password", "profile"? }    → session
+```
+
+`/register` answers every address the same way; the mail decides: a free address gets a 6-digit code and a link
+(`Links.EmailVerificationTemplate`, default `/verify-email?token=…`), a taken one the "account exists" mail, and beyond the
+mail limit per recipient nothing is sent. Nothing is stored before the last step. The flow lasts 15 minutes – from the
+proof of the mailbox on, the link itself is valid for `Tokens.EmailVerificationTokenLifetime`. In cookie mode
+`/register/verify` and `/register/password` need `X-CSRF` like every cookie request. A flow token of a registration is
+accepted by no sign-in step, and a sign-in flow token by no registration step.
 
 ## Invitations
 

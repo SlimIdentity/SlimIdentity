@@ -14,7 +14,7 @@ namespace SlimIdentity.Contracts;
 [JsonSerializable(typeof(SlimRefreshRequest))]
 [JsonSerializable(typeof(SlimLogoutRequest))]
 [JsonSerializable(typeof(SlimRegisterRequest))]
-[JsonSerializable(typeof(SlimVerifyEmailRequest))]
+[JsonSerializable(typeof(SlimRegisterPasswordRequest))]
 [JsonSerializable(typeof(SlimEmailRequest))]
 [JsonSerializable(typeof(SlimResetPasswordRequest))]
 [JsonSerializable(typeof(SlimChangePasswordRequest))]
@@ -50,7 +50,7 @@ namespace SlimIdentity.Contracts;
 [JsonSerializable(typeof(Microsoft.AspNetCore.Mvc.ProblemDetails))]
 [JsonSerializable(typeof(HttpValidationProblemDetails))]
 // stateless token payloads and the actor claim
-[JsonSerializable(typeof(SlimEmailTokenPayload))]
+[JsonSerializable(typeof(SlimLinkPayload))]
 [JsonSerializable(typeof(SlimResetTokenPayload))]
 [JsonSerializable(typeof(SlimFlowPayload))]
 [JsonSerializable(typeof(SlimTwoFactorSetupPayload))]

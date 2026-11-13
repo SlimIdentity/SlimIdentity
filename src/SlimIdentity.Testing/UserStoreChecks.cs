@@ -107,7 +107,7 @@ internal static class UserStoreChecks
             });
 
         await run.CheckAsync(Store, "a new user starts unconfirmed, unlocked and without 2FA",
-            "Insert the given PasswordHash and a fresh SecurityStamp; EmailConfirmed = false, both attempt counters 0, both lockout ends null, TwoFactorEnabled = false, PasswordChangeRequired = false – no column defaults that grant more.",
+            "Insert the given PasswordHash and a fresh SecurityStamp; EmailConfirmed as given (false here), both attempt counters 0, both lockout ends null, TwoFactorEnabled = false, PasswordChangeRequired = false – no column defaults that grant more.",
             async () =>
             {
                 var hash = ConformanceRun.NewHash();
@@ -126,6 +126,15 @@ internal static class UserStoreChecks
                 var other = await run.NewUserAsync();
                 Expect.True(other.SecurityStamp != created.SecurityStamp && (await run.ReloadAsync(other)).SecurityStamp != saved.SecurityStamp,
                     "Two new users got the same SecurityStamp – store the value of the SlimUser, not a constant default.");
+            });
+
+        await run.CheckAsync(Store, "CreateAsync stores a given EmailConfirmed",
+            "A registration that proved the mailbox creates the account with SlimNewUser.EmailConfirmed = true – insert that value instead of a constant false.",
+            async () =>
+            {
+                var created = await stores.UseAsync<ISlimUserStore, SlimUser?>(s => s.CreateAsync(new SlimNewUser { Email = run.NewEmail(), PasswordHash = ConformanceRun.NewHash(), EmailConfirmed = true }, ct))
+                    ?? throw new ConformanceFailure("CreateAsync returned null for a new address.");
+                Expect.Equal(true, (await run.ReloadAsync(created)).EmailConfirmed, "EmailConfirmed");
             });
 
         await run.CheckAsync(Store, "UpdateSecurityStateAsync persists all security fields",

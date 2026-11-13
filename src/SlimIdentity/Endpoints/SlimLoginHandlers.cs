@@ -125,7 +125,7 @@ internal sealed class SlimLoginHandlers(
 
     // ------------------------------------------------------------------ POST /flow
 
-    public Task<IResult> ReadFlowAsync(SlimFlowRequest? request, CancellationToken ct) => flow.ReadAsync(request, ct);
+    public Task<IResult> ReadFlowAsync(SlimFlowRequest? request, bool? useCookies, CancellationToken ct) => flow.ReadAsync(request, useCookies, ct);
 
     // ------------------------------------------------------------------ POST /login/verify-email
 
@@ -152,7 +152,7 @@ internal sealed class SlimLoginHandlers(
         {
             metrics.Login(SlimErrorCodes.TooManyAttempts, state.UseCookies);
             return SlimResults.Status(SlimErrorCodes.TooManyAttempts,
-                "Too many attempts. Confirm the address with the link of a verification mail.", StatusCodes.Status429TooManyRequests);
+                "Too many attempts. Try again later.", StatusCodes.Status429TooManyRequests);
         }
 
         var code = SlimTotp.NormalizeCode(request.Code);

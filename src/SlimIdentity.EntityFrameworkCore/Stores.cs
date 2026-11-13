@@ -124,6 +124,7 @@ public class SlimEfUserStore<TContext, TUser, TKey>(SlimEfContext<TContext> cont
         user.Email = newUser.Email;
         user.NormalizedEmail = Normalize(newUser.Email);
         user.PasswordHash = newUser.PasswordHash ?? string.Empty;
+        user.EmailConfirmed = newUser.EmailConfirmed;
         user.SecurityStamp = SlimUser.NewSecurityStamp();
         user.IsActive = true;
         context.BeforeWrite();

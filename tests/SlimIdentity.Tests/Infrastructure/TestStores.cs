@@ -64,7 +64,7 @@ public sealed class TestUserStore : ISlimUserStore
             // unique index on the e-mail address
             if (_users.Values.Any(u => string.Equals(u.Email, email, StringComparison.OrdinalIgnoreCase)))
                 return Task.FromResult<SlimUser?>(null);
-            var user = new SlimUser { Id = Guid.NewGuid().ToString(), Email = email, PasswordHash = passwordHash };
+            var user = new SlimUser { Id = Guid.NewGuid().ToString(), Email = email, PasswordHash = passwordHash, EmailConfirmed = newUser.EmailConfirmed };
             _users[user.Id] = user;
             _roles[user.Id] = [];
             Profiles[user.Id] = newUser.Profile;
@@ -292,6 +292,8 @@ public sealed class TestTwoFactorStore : ISlimTwoFactorStore
 public sealed record SentMail(string Kind, string To, string Payload)
 {
     public SlimEmailContext? Context { get; init; }
+    /// <summary>The link of a mail that carries a code and a link (registration).</summary>
+    public string? Link { get; init; }
 }
 
 /// <summary>Records all mails; tests wait for them because most are sent by the background queue.</summary>
@@ -301,7 +303,11 @@ public sealed class CapturingEmailSender : ISlimEmailSender
 
     public IReadOnlyCollection<SentMail> Mails => _mails.ToArray();
 
-    public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string link, CancellationToken ct) => Add(context, "verification", email, link);
+    public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string code, string link, CancellationToken ct)
+    {
+        _mails.Enqueue(new SentMail("verification", email, code) { Context = context, Link = link });
+        return Task.CompletedTask;
+    }
     public Task SendPasswordResetEmailAsync(SlimEmailContext context, string email, string link, CancellationToken ct) => Add(context, "password-reset", email, link);
     public Task SendTwoFactorCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) => Add(context, "two-factor", email, code);
     public Task SendEmailVerificationCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) => Add(context, "verification-code", email, code);

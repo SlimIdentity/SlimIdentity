@@ -25,7 +25,7 @@ Without OpenTelemetry you can watch the counters live: `dotnet-counters monitor 
 | `slimidentity.lockouts` | – | Account lockouts |
 | `slimidentity.token_refreshes` | `result` (`success`, `invalid`, `reuse_detected`, `session_expired`) | Refresh-token rotations |
 | `slimidentity.sign_outs` | `scope` (`session`, `everywhere`) | Logouts and session revocations |
-| `slimidentity.registrations` | `result` (`created`, `existing_account`) | `/register` calls |
+| `slimidentity.registrations` | `result` (`started`, `existing_account`, `invalid_verification_code`, `too_many_attempts`, `created`) | registration steps: `/register` (`started` for a free address), `/register/verify`, the created account |
 | `slimidentity.password_resets` | `stage` (`requested`, `completed`) | Password resets |
 | `slimidentity.email_changes` | `stage` (`requested`, `completed`) | E-mail changes |
 | `slimidentity.invitations` | `stage` (`created`, `accepted`) | Invitations |

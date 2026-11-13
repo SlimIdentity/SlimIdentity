@@ -45,6 +45,7 @@ public sealed class EfCoreUserStore(IdentityDb identity) : ISlimUserStore
             Email = newUser.Email,
             NormalizedEmail = newUser.Email.ToUpperInvariant(),
             PasswordHash = newUser.PasswordHash,
+            EmailConfirmed = newUser.EmailConfirmed,
             SecurityStamp = SlimUser.NewSecurityStamp(),
         };
         // registration profile (ISlimRegistrationProfile / ISlimAuthManager.RegisterAsync): copy it into the entity or

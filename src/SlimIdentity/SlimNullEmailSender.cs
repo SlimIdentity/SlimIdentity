@@ -7,9 +7,9 @@ namespace SlimIdentity;
 public sealed class SlimNullEmailSender(ILogger<SlimNullEmailSender> logger) : ISlimEmailSender
 {
     /// <inheritdoc />
-    public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string verificationTokenOrLink, CancellationToken ct)
+    public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string code, string verificationTokenOrLink, CancellationToken ct)
     {
-        Log.NullMailVerification(logger, email, verificationTokenOrLink);
+        Log.NullMailVerification(logger, email, code, verificationTokenOrLink);
         return Task.CompletedTask;
     }
 

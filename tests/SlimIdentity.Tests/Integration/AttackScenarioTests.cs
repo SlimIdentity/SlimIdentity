@@ -36,7 +36,7 @@ public sealed class AttackScenarioTests
         // the victim does not have. The victim later proves the mailbox via password reset.
         const string victim = "victim@test.local";
         await using var app = await TestApp.StartAsync();
-        await app.CreateClient().PostJsonAsync("/auth/register", new { email = victim, password = "Attacker-Pass-123" });
+        await app.PreRegisterUnconfirmedAsync(victim, "Attacker-Pass-123");
 
         // without the mailbox the registrant gets no session, so no second factor can be set up through the API
         var pending = await app.CreateClient().PostJsonAsync("/auth/login", new { email = victim, password = "Attacker-Pass-123" });
@@ -64,8 +64,8 @@ public sealed class AttackScenarioTests
         var nfd = "josé@test.local";
         await using var app = await TestApp.StartAsync();
 
-        await app.CreateClient().PostJsonAsync("/auth/register", new { email = nfd, password = "Owner-Pass-123" });
-        await app.CreateClient().PostJsonAsync("/auth/register", new { email = nfc, password = "Other-Pass-456" });
+        await app.PreRegisterUnconfirmedAsync(nfd, "Owner-Pass-123");
+        await app.CreateClient().PostJsonAsync("/auth/register", new { email = nfc });
 
         Assert.Single(app.Users.All, u => u.Email.Normalize() == nfc);           // no second account
         await app.LoginConfirmingAsync(nfc, "Owner-Pass-123");                      // one identity, either form
@@ -79,7 +79,7 @@ public sealed class AttackScenarioTests
     public async Task A4_look_alike_addresses_are_different_accounts(string lookAlike)
     {
         await using var app = await TestApp.StartAsync();
-        await app.CreateClient().PostJsonAsync("/auth/register", new { email = lookAlike, password = "Other-Pass-456" });
+        Assert.Equal(HttpStatusCode.OK, (await app.RegisterAsync(lookAlike, "Other-Pass-456")).StatusCode);
         await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword);   // the original is untouched
         await app.CreateClient().PostJsonAsync("/auth/login", new { email = lookAlike, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized);
     }

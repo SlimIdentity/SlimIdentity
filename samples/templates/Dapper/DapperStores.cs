@@ -52,18 +52,18 @@ public sealed class DapperUserStore(NpgsqlDataSource db) : ISlimUserStore
 
     public async Task<SlimUser?> CreateAsync(SlimNewUser newUser, CancellationToken ct)
     {
-        var (email, passwordHash) = (newUser.Email, newUser.PasswordHash);
+        var (email, passwordHash, confirmed) = (newUser.Email, newUser.PasswordHash, newUser.EmailConfirmed);
         await using var c = await db.OpenConnectionAsync(ct);
         // ON CONFLICT: a concurrent registration with the same address yields no row → null (UNIQUE on normalized_email).
         // With a registration profile (newUser.Profile): open a transaction, insert the profile with the returned id in it
         // only if a row came back, then commit – account and profile together or not at all.
         return await c.QuerySingleOrDefaultAsync<SlimUser>(new CommandDefinition($"""
-            INSERT INTO users (email, normalized_email, password_hash, security_stamp)
-            VALUES (@email, @normalized, @hash, @stamp)
+            INSERT INTO users (email, normalized_email, password_hash, email_confirmed, security_stamp)
+            VALUES (@email, @normalized, @hash, @confirmed, @stamp)
             ON CONFLICT (normalized_email) DO NOTHING
             RETURNING {Columns}
             """,
-            new { email, normalized = email.ToUpperInvariant(), hash = passwordHash, stamp = SlimUser.NewSecurityStamp() },
+            new { email, normalized = email.ToUpperInvariant(), hash = passwordHash, confirmed, stamp = SlimUser.NewSecurityStamp() },
             cancellationToken: ct));
     }
 

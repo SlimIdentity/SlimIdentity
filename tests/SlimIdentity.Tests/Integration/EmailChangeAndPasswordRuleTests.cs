@@ -95,12 +95,11 @@ public sealed class PasswordRuleTests
     public async Task Custom_rules_apply_to_all_new_passwords()
     {
         await using var app = await TestApp.StartAsync(new TestAppOptions { Builder = b => b.AddPasswordRule<NoProductNameRule>() });
-        var client = app.CreateClient();
 
-        var rejected = await client.PostAsync("/auth/register", new { email = "new@test.local", password = "SlimSecret123" });
+        var rejected = await app.RegisterAsync("new@test.local", "SlimSecret123");
         Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
         Assert.Contains("product name", await rejected.Content.ReadAsStringAsync());
 
-        Assert.Equal(HttpStatusCode.OK, (await client.PostAsync("/auth/register", new { email = "new@test.local", password = "Secret123!" })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await app.RegisterAsync("new@test.local", "Secret123!")).StatusCode);
     }
 }

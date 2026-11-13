@@ -58,7 +58,7 @@ public sealed class SlimIdentityBuilder
 
     /// <summary>
     /// Runs without a mail server (internal services where an administrator creates accounts): no mail is ever sent and
-    /// no sender is required. Not mapped: <c>/forgot-password</c>, <c>/verify-email</c>, <c>/resend-verification</c>,
+    /// no sender is required. Not mapped: <c>/forgot-password</c>, <c>/register/verify</c>, <c>/register/password</c>,
     /// <c>/change-email</c>, <c>/confirm-email-change</c>, <c>/2fa/enable-email</c> and – unless
     /// <paramref name="allowSelfRegistration"/> – <c>/register</c>. Lockout and "account exists" notices are dropped.
     /// Passwords are changed with <c>/change-password</c>; forgotten passwords are reset by an administrator
@@ -70,7 +70,6 @@ public sealed class SlimIdentityBuilder
         Services.PostConfigure<SlimIdentityOptions>(o =>
         {
             o.Email.Enabled = false;
-            o.Endpoints.EnableEmailVerification = false;
             o.Endpoints.EnableChangeEmail = false;
             if (!allowSelfRegistration) o.Endpoints.EnableRegistration = false;
         });

@@ -133,9 +133,9 @@ public sealed class LoginTests
         Assert.Equal((401, "invalid_credentials"), (wrong.GetProperty("status").GetInt32(), wrong.Str("code")));
         Assert.False(wrong.TryGetProperty("type", out _));
 
-        var invalid = await ProblemAsync(await client.PostAsync("/auth/register", new { email = "new@test.local", password = "x" }));
+        var invalid = await ProblemAsync(await client.PostAsync("/auth/register", new { email = "not-an-address" }));
         Assert.Equal("validation_failed", invalid.Str("code"));
-        Assert.True(invalid.GetProperty("errors").TryGetProperty("password", out _));
+        Assert.True(invalid.GetProperty("errors").TryGetProperty("email", out _));
 
         Assert.Equal("unauthenticated", (await ProblemAsync(await client.GetAsync("/auth/me"))).Str("code"));
 

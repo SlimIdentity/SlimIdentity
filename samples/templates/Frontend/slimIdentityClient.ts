@@ -22,13 +22,15 @@ export interface AuthResponse {
  * The password (passkey, external login) was right, but steps follow before the session: "verify_email" (code from
  * the mail) at verifyEmail, "second_factor" at loginTwoFactor / loginRecoveryCode, "change_password" (set by an administrator) at completePasswordChange. Each step
  * answers with the remaining ones and a new flowToken – or with the session.
+ * A registration answers the same way: "verify_email" at verifyRegistration (or the mailed link at openRegistrationLink),
+ * then "set_credential" at completeRegistration.
  */
 export interface ActionRequired {
   status: "action_required";
   actions: string[];
   flowToken: string;
   expiresIn: number;
-  details?: { secondFactor?: { methods: ("totp" | "email" | "recovery")[] } };
+  details?: { secondFactor?: { methods: ("totp" | "email" | "recovery")[] }; setCredential?: { kinds: "password"[] } };
 }
 
 export interface SignInMethods {
@@ -152,23 +154,6 @@ function anonymousPost(path: string, body: object): Promise<FormResult> {
 // =====================================================================================
 
 export const account = {
-  /**
-   * Registration. `profile` is your business data (company, name, …) – the server validates it with its
-   * ISlimRegistrationProfile; field errors come back as `errors["profile.<field>"]`.
-   */
-  register(email: string, password: string, profile?: object): Promise<FormResult> {
-    return anonymousPost("/register", profile === undefined ? { email, password } : { email, password, profile });
-  },
-
-  /** Page behind the verification link: /verify-email?token=… */
-  verifyEmail(token: string): Promise<FormResult> {
-    return anonymousPost("/verify-email", { token });
-  },
-
-  resendVerification(email: string): Promise<FormResult> {
-    return anonymousPost("/resend-verification", { email });
-  },
-
   forgotPassword(email: string): Promise<FormResult> {
     return anonymousPost("/forgot-password", { email });
   },
@@ -268,6 +253,33 @@ export const cookieAuth = {
   /** Step "verify_email": the 6-digit code from the mail confirms the address. */
   async verifyEmail(flowToken: string, code: string): Promise<LoginResult> {
     return toLoginResult(await cookieFetch("/auth/login/verify-email", { method: "POST", body: JSON.stringify({ flowToken, code }) }));
+  },
+
+  /**
+   * Registration: only the address. The answer is the same whether it has an account or not – the mail decides
+   * (a code and a link, or "you already have an account"). Continue with verifyRegistration.
+   */
+  async register(email: string, rememberMe = false): Promise<LoginResult> {
+    return toLoginResult(await cookieFetch("/auth/register?useCookies=true", { method: "POST", body: JSON.stringify({ email, rememberMe }) }));
+  },
+
+  /** Registration step "verify_email": the 6-digit code from the mail. Next is "set_credential". */
+  async verifyRegistration(flowToken: string, code: string): Promise<LoginResult> {
+    return toLoginResult(await cookieFetch("/auth/register/verify", { method: "POST", body: JSON.stringify({ flowToken, code }) }));
+  },
+
+  /** Page behind the verification link (/verify-email?token=…) – also on another device. Next is "set_credential". */
+  async openRegistrationLink(token: string): Promise<LoginResult> {
+    return toLoginResult(await cookieFetch("/auth/flow?useCookies=true", { method: "POST", body: JSON.stringify({ token }) }));
+  },
+
+  /**
+   * Registration step "set_credential": creates the account and signs in. `profile` is your business data (company,
+   * name, …) – the server validates it with its ISlimRegistrationProfile; field errors come back as
+   * `errors["profile.<field>"]`.
+   */
+  async completeRegistration(flowToken: string, password: string, profile?: object): Promise<LoginResult> {
+    return toLoginResult(await cookieFetch("/auth/register/password", { method: "POST", body: JSON.stringify({ flowToken, password, profile }) }));
   },
 
   /** "Remember this device" sets a cookie (if TwoFactor.RememberDeviceLifetime is configured on the server). */
@@ -639,6 +651,26 @@ export const bearerAuth = {
   /** Step "verify_email": the 6-digit code from the mail confirms the address. */
   async verifyEmail(flowToken: string, code: string): Promise<LoginResult> {
     return flowStep("/login/verify-email", { flowToken, code });
+  },
+
+  /** Registration: only the address; the same answer for every address – the mail decides. */
+  async register(email: string): Promise<LoginResult> {
+    return toLoginResult(await fetch(`${AUTH}/register?useCookies=false`, { method: "POST", headers: jsonHeaders, body: JSON.stringify({ email }) }));
+  },
+
+  /** Registration step "verify_email": the 6-digit code from the mail. */
+  async verifyRegistration(flowToken: string, code: string): Promise<LoginResult> {
+    return flowStep("/register/verify", { flowToken, code });
+  },
+
+  /** Page behind the verification link (/verify-email?token=…) – also on another device. */
+  async openRegistrationLink(token: string): Promise<LoginResult> {
+    return toLoginResult(await fetch(`${AUTH}/flow?useCookies=false`, { method: "POST", headers: jsonHeaders, body: JSON.stringify({ token }) }));
+  },
+
+  /** Registration step "set_credential": creates the account and signs in (profile: see cookieAuth.completeRegistration). */
+  async completeRegistration(flowToken: string, password: string, profile?: object): Promise<LoginResult> {
+    return flowStep("/register/password", { flowToken, password, profile });
   },
 
   async loginTwoFactor(flowToken: string, code: string, rememberDevice = false): Promise<LoginResult> {

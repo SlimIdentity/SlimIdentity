@@ -77,10 +77,9 @@ public sealed class SlimIdentityOptions
 /// </remarks>
 public sealed class SlimEndpointOptions
 {
-    /// <summary><c>/register</c>. Disable for invite-only applications or custom registration endpoints.</summary>
+    /// <summary><c>/register</c> (with mail also <c>/register/verify</c> and <c>/register/password</c>). Disable for invite-only applications or custom registration endpoints.</summary>
     public bool EnableRegistration { get; set; } = true;
-    /// <summary><c>/verify-email</c> and <c>/resend-verification</c>; verification mail after registration.</summary>
-    public bool EnableEmailVerification { get; set; } = true;
+
     /// <summary><c>/forgot-password</c> and <c>/reset-password</c>.</summary>
     public bool EnablePasswordReset { get; set; } = true;
     /// <summary><c>/change-password</c>. Disable for LDAP-only setups – the password then lives in the directory.</summary>

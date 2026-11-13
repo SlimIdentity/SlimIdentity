@@ -12,6 +12,8 @@ internal static class SlimSignInActions
     public const string SecondFactor = "second_factor";
     /// <summary>A start password set by an administrator is replaced by an own one.</summary>
     public const string ChangePassword = "change_password";
+    /// <summary>A registration whose mailbox is proven gets its first way to sign in (password or passkey).</summary>
+    public const string SetCredential = "set_credential";
 }
 
 /// <summary>What the current sign-in has proven.</summary>
@@ -26,6 +28,8 @@ internal enum SlimSignInProofs
     SecondFactor = 1,
     /// <summary>The first factor was the password: its lockout holds for the rest of the sign-in.</summary>
     Password = 2,
+    /// <summary>The mailbox: a mailed code or the link of the same mail.</summary>
+    Mailbox = 4,
 }
 
 /// <summary>The outcome of <see cref="SlimSignInChain.Evaluate"/>.</summary>
@@ -67,6 +71,15 @@ internal static class SlimSignInChain
     }
 
     /// <summary>
+    /// The steps of a registration before its account exists: the mailbox first, then the way to sign in. The account is
+    /// created with the last step and continues with <see cref="Evaluate"/>.
+    /// </summary>
+    public static SlimSignInDecision EvaluateRegistration(SlimSignInProofs proofs) =>
+        new(null, proofs.HasFlag(SlimSignInProofs.Mailbox)
+            ? [SlimSignInActions.SetCredential]
+            : [SlimSignInActions.VerifyEmail, SlimSignInActions.SetCredential]);
+
+    /// <summary>
     /// The code of a step's rule – the reason in metrics and events, and the answer of an entry point that cannot continue it.
     /// </summary>
     public static string ErrorCode(string action) => action switch
@@ -74,6 +87,7 @@ internal static class SlimSignInChain
         SlimSignInActions.VerifyEmail => SlimErrorCodes.EmailNotConfirmed,
         SlimSignInActions.ChangePassword => SlimErrorCodes.PasswordChangeRequired,
         SlimSignInActions.SecondFactor => SlimErrorCodes.RequiresTwoFactor,
+        SlimSignInActions.SetCredential => SlimErrorCodes.PasswordNotSet,
         _ => throw new ArgumentOutOfRangeException(nameof(action), action, null),
     };
 }

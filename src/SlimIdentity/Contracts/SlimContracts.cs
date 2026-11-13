@@ -70,32 +70,46 @@ public sealed record SlimLogoutRequest(string? RefreshToken = null)
 }
 
 /// <summary>Body of <c>POST /auth/register</c>.</summary>
-/// <param name="Email">E-mail address of the new account.</param>
-/// <param name="Password">Password according to the password policy.</param>
-/// <param name="Profile">Optional business data, validated by the host's <see cref="ISlimRegistrationProfile"/>.</param>
-public sealed record SlimRegisterRequest(string Email, string Password, JsonElement? Profile = null)
+/// <param name="Email">
+/// E-mail address of the new account. Without mail (<c>WithoutEmail(allowSelfRegistration: true)</c>) the sign-in name.
+/// </param>
+/// <param name="Password">
+/// Without mail only: the password according to the password policy. With mail it follows at
+/// <c>POST /auth/register/password</c>, once the mailbox is proven.
+/// </param>
+/// <param name="Profile">
+/// Without mail only: business data, validated by the host's <see cref="ISlimRegistrationProfile"/>. With mail it is sent
+/// with the password.
+/// </param>
+/// <param name="RememberMe">With mail: persistent session once the registration completes.</param>
+public sealed record SlimRegisterRequest(string Email, string? Password = null, JsonElement? Profile = null, bool RememberMe = false)
 {
     private bool PrintMembers(System.Text.StringBuilder builder)
     {
         builder.Append("Email = ").Append(Email);
         builder.Append(", Password = ").Append(SlimRedaction.Mask(Password));
         builder.Append(", Profile = ").Append(Profile);
+        builder.Append(", RememberMe = ").Append(RememberMe);
         return true;
     }
 }
 
-/// <summary>Body of <c>POST /auth/verify-email</c>.</summary>
-/// <param name="Token">Token from the verification mail.</param>
-public sealed record SlimVerifyEmailRequest(string Token)
+/// <summary>Body of <c>POST /auth/register/password</c>: step <c>set_credential</c> with a password – creates the account.</summary>
+/// <param name="FlowToken"><c>flowToken</c> of a registration whose mailbox is proven.</param>
+/// <param name="Password">Password according to the password policy.</param>
+/// <param name="Profile">Optional business data, validated by the host's <see cref="ISlimRegistrationProfile"/>.</param>
+public sealed record SlimRegisterPasswordRequest(string FlowToken, string Password, JsonElement? Profile = null)
 {
     private bool PrintMembers(System.Text.StringBuilder builder)
     {
-        builder.Append("Token = ").Append(SlimRedaction.Mask(Token));
+        builder.Append("FlowToken = ").Append(SlimRedaction.Mask(FlowToken));
+        builder.Append(", Password = ").Append(SlimRedaction.Mask(Password));
+        builder.Append(", Profile = ").Append(Profile);
         return true;
     }
 }
 
-/// <summary>Body of <c>POST /auth/forgot-password</c> and <c>POST /auth/resend-verification</c>.</summary>
+/// <summary>Body of <c>POST /auth/forgot-password</c>.</summary>
 /// <param name="Email">E-mail address of the account.</param>
 public sealed record SlimEmailRequest(string Email);
 
@@ -112,7 +126,9 @@ public sealed record SlimResetPasswordRequest(string Token, string NewPassword)
     }
 }
 
-/// <summary>Body of <c>POST /auth/login/verify-email</c>: confirms the address during a sign-in.</summary>
+/// <summary>
+/// Body of <c>POST /auth/login/verify-email</c> and <c>POST /auth/register/verify</c>: the mailed code proves the mailbox.
+/// </summary>
 /// <param name="FlowToken"><c>flowToken</c> of an <c>action_required</c> answer with <c>verify_email</c> as first step.</param>
 /// <param name="Code">The 6-digit code from the mail sent with that answer.</param>
 public sealed record SlimVerifyEmailLoginRequest(string FlowToken, string? Code)
@@ -138,13 +154,18 @@ public sealed record SlimPasswordChangeLoginRequest(string FlowToken, string New
     }
 }
 
-/// <summary>Body of <c>POST /auth/flow</c>: reads the open steps of a sign-in again.</summary>
+/// <summary>
+/// Body of <c>POST /auth/flow</c>: reads the open steps of a flow again (<paramref name="FlowToken"/>), or redeems the
+/// link of a mail into a flow (<paramref name="Token"/>).
+/// </summary>
 /// <param name="FlowToken"><c>flowToken</c> of an <c>action_required</c> answer.</param>
-public sealed record SlimFlowRequest(string FlowToken)
+/// <param name="Token">The token of a mailed link (registration); the answer carries the flow it continues.</param>
+public sealed record SlimFlowRequest(string? FlowToken = null, string? Token = null)
 {
     private bool PrintMembers(System.Text.StringBuilder builder)
     {
         builder.Append("FlowToken = ").Append(SlimRedaction.Mask(FlowToken));
+        builder.Append(", Token = ").Append(SlimRedaction.Mask(Token));
         return true;
     }
 }
@@ -348,7 +369,8 @@ public sealed class SlimActionRequiredResponse
     /// <summary>Always <c>action_required</c>.</summary>
     public string Status { get; init; } = SlimErrorCodes.ActionRequired;
     /// <summary>
-    /// The open steps in order; the first one is taken now: <c>verify_email</c> (<c>POST /auth/login/verify-email</c>),
+    /// The open steps in order; the first one is taken now: <c>verify_email</c> (<c>POST /auth/login/verify-email</c>, in a
+    /// registration <c>POST /auth/register/verify</c>), <c>set_credential</c> (<c>POST /auth/register/password</c>),
     /// <c>second_factor</c> (<c>POST /auth/login/2fa</c>) or <c>change_password</c> (<c>POST /auth/login/password-change</c>).
     /// Clients ignore steps they do not know.
     /// </summary>
@@ -368,6 +390,17 @@ public sealed class SlimActionDetails
     /// <summary>Set for <c>second_factor</c>.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public SlimSecondFactorDetails? SecondFactor { get; init; }
+
+    /// <summary>Set for <c>set_credential</c>.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SlimSetCredentialDetails? SetCredential { get; init; }
+}
+
+/// <summary>The ways to sign in a registration can choose as its first one.</summary>
+public sealed class SlimSetCredentialDetails
+{
+    /// <summary><c>password</c> (<c>POST /auth/register/password</c>). Clients ignore kinds they do not know.</summary>
+    public required IReadOnlyList<string> Kinds { get; init; }
 }
 
 /// <summary>How the open second factor can be proven.</summary>

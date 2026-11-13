@@ -27,9 +27,12 @@ public sealed class LogSecrecyTests
         secrets.AddRange([email, password, newPassword]);
 
         // registration, verification, login with wrong passwords (lockout path) and correct password
-        await client.PostJsonAsync("/auth/register", new { email, password });
-        var verify = (await app.Mail.WaitForAsync("verification", email)).Payload;
-        await client.PostJsonAsync("/auth/verify-email", new { token = verify });
+        var started = await client.PostJsonAsync("/auth/register", new { email });
+        var mail = await app.Mail.WaitForAsync("verification", email);
+        var verify = TestApp.LinkToken(mail.Link!);
+        var verified = await client.PostJsonAsync("/auth/register/verify", new { flowToken = started.Str("flowToken"), code = mail.Payload });
+        await client.PostJsonAsync("/auth/register/password", new { flowToken = verified.Str("flowToken"), password });
+        secrets.AddRange([mail.Payload, started.Str("flowToken"), verified.Str("flowToken")]);
         for (var i = 0; i < 3; i++)
             await client.PostAsync("/auth/login", new { email, password = "wrong-" + password });
         var tokens = await client.PostJsonAsync("/auth/login", new { email, password });
@@ -39,7 +42,7 @@ public sealed class LogSecrecyTests
         var refreshed = await client.PostJsonAsync("/auth/refresh", new { refreshToken = tokens.Str("refreshToken") });
         Collect(refreshed);
         await client.PostAsync("/auth/refresh", new { refreshToken = tokens.Str("refreshToken") });
-        await client.PostAsync("/auth/verify-email", new { token = "tampered" + verify });
+        await client.PostAsync("/auth/flow", new { token = "tampered" + verify });
 
         // password reset
         await client.PostAsync("/auth/forgot-password", new { email });

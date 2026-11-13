@@ -5,7 +5,7 @@ using SlimIdentity.Services;
 
 namespace SlimIdentity.Endpoints;
 
-/// <summary>Registration, e-mail verification and change, password flows, invitations, sessions and <c>/me</c>.</summary>
+/// <summary>Registration, e-mail change, password flows, invitations, sessions and <c>/me</c>.</summary>
 internal sealed class SlimAccountHandlers(
     ISlimUserStore store,
     SlimEmailDispatcher mail,
@@ -28,53 +28,20 @@ internal sealed class SlimAccountHandlers(
 
     // ------------------------------------------------------------------ POST /register
 
-    public async Task<IResult> RegisterAsync(SlimRegisterRequest? request, CancellationToken ct)
+    public async Task<IResult> RegisterAsync(SlimRegisterRequest? request, bool? useCookies, CancellationToken ct)
     {
+        // with mail the mailbox is proven before the account exists
+        if (O.Email.Enabled) return await services.GetRequiredService<SlimRegistrationFlow>().BeginAsync(request, useCookies, ct);
+
         var (email, invalid) = await registration.ValidateAsync(request?.Email, request?.Password, ct);
         if (invalid is not null) return invalid;
 
         // business data – validated from the request alone, before anything is looked up (no enumeration)
-        var profile = await hooks.ValidateProfileAsync(email!, request!.Profile, ct);
-        if (profile.Errors is { } errors)
-            return SlimResults.Validation(errors.ToDictionary(e => e.Key.Length == 0 ? "profile" : "profile." + e.Key, e => e.Value, StringComparer.Ordinal));
+        var (profile, invalidProfile) = await registration.ValidateProfileAsync(email!, request!.Profile, ct);
+        if (invalidProfile is not null) return invalidProfile;
 
-        return (await registration.CreateAsync(email!, request.Password, profile.Profile, ct)).Response;
+        return (await registration.CreateAsync(email!, request.Password!, profile, ct)).Response;
     }
-
-    // ------------------------------------------------------------------ POST /verify-email & /resend-verification
-
-    public async Task<IResult> VerifyEmailAsync(SlimVerifyEmailRequest? request, CancellationToken ct)
-    {
-        if (!workflow.TryUnprotect<SlimEmailTokenPayload>(SlimWorkflowTokens.EmailVerificationPurpose, request?.Token, out var payload))
-            return SlimResults.InvalidToken();
-
-        var user = await store.FindByIdAsync(payload.Uid, ct);
-        if (user is null
-            || !string.Equals(user.Email, payload.Email, StringComparison.OrdinalIgnoreCase)
-            || !SlimUser.IsSameSecurityState(user.SecurityStamp, payload.Stamp))
-            return SlimResults.InvalidToken();
-
-        if (!user.EmailConfirmed)
-        {
-            if (!await store.TryWriteSecurityStateAsync(user, u => u.EmailConfirmed = true, ct)) return SlimResults.InvalidToken();
-            await hooks.RaiseAsync(SlimEventTypes.EmailConfirmed, user.Id, ct: ct);
-        }
-        return SlimResults.Status("email_confirmed");
-    }
-
-    public async Task<IResult> ResendVerificationAsync(SlimEmailRequest? request, CancellationToken ct)
-    {
-        var email = SlimEmailAddress.Normalize(request?.Email);
-        if (!string.IsNullOrEmpty(email))
-        {
-            var user = await store.FindByEmailAsync(email, ct);
-            if (user is { IsActive: true, EmailConfirmed: false })
-                await SendVerificationAsync(user, ct);
-        }
-        return SlimResults.Status("verification_sent", "If the account exists and is unconfirmed, an e-mail has been sent.");
-    }
-
-    internal Task SendVerificationAsync(SlimUser user, CancellationToken ct) => registration.SendVerificationAsync(user, ct);
 
     // ------------------------------------------------------------------ POST /forgot-password & /reset-password
 

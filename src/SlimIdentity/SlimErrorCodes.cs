@@ -54,8 +54,8 @@ public static class SlimErrorCodes
     /// <summary>The code of step <c>verify_email</c> is wrong (401).</summary>
     public const string InvalidVerificationCode = "invalid_verification_code";
     /// <summary>
-    /// The attempts for a code are used up (429): per sign-in and per address and day. The address is then confirmed
-    /// with the link of a verification mail (<c>/auth/resend-verification</c>).
+    /// The attempts for a code are used up (429): per flow and per address and day. A registration can still be
+    /// completed with the link of its mail.
     /// </summary>
     public const string TooManyAttempts = "too_many_attempts";
     /// <summary>An administrator set the password; the user chooses an own one first (action <c>change_password</c>).</summary>

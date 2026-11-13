@@ -191,8 +191,8 @@ internal static partial class Log
     public static partial void SharedStateFailed(ILogger logger, Exception exception, string purpose);
 
     // SlimNullEmailSender (development only – these log live links and codes)
-    [LoggerMessage(7101, LogLevel.Warning, "[SlimIdentity:NullEmailSender] Verification for {Email}: {Link}")]
-    public static partial void NullMailVerification(ILogger logger, string email, string link);
+    [LoggerMessage(7101, LogLevel.Warning, "[SlimIdentity:NullEmailSender] Verification for {Email}: code {Code}, link {Link}")]
+    public static partial void NullMailVerification(ILogger logger, string email, string code, string link);
 
     [LoggerMessage(7102, LogLevel.Warning, "[SlimIdentity:NullEmailSender] Password reset for {Email}: {Link}")]
     public static partial void NullMailPasswordReset(ILogger logger, string email, string link);

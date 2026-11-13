@@ -71,7 +71,7 @@ public sealed class PreReleaseApiTests
     {
         await using var app = await TestApp.StartAsync();
 
-        var response = await app.CreateClient().PostAsync("/auth/register", new { email = "new@test.local", password = "short" });
+        var response = await app.RegisterAsync("new@test.local", "short");
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         var body = await response.Content.ReadFromJsonAsync<JsonElement>();

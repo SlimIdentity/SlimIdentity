@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using SlimIdentity.Contracts;
 using SlimIdentity.Endpoints;
 using SlimIdentity.Http;
+using SlimIdentity.Services;
 
 namespace SlimIdentity;
 
@@ -156,10 +157,10 @@ public static class SlimIdentityEndpointExtensions
             .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
             .AllowAnonymous();
 
-        group.MapPost("/flow", static ([FromBody] SlimFlowRequest request,
-                [FromServices] SlimLoginHandlers h, CancellationToken ct) => h.ReadFlowAsync(request, ct))
+        group.MapPost("/flow", static ([FromBody] SlimFlowRequest request, [FromQuery] bool? useCookies,
+                [FromServices] SlimLoginHandlers h, CancellationToken ct) => h.ReadFlowAsync(request, useCookies, ct))
             .WithName("SlimIdentity_Flow")
-            .WithSummary("The open steps of a sign-in (flowToken), e.g. after an external sign-in; changes nothing.")
+            .WithSummary("The open steps of a flow (flowToken), e.g. after an external sign-in; or the flow a mailed link (token) continues.")
             .Produces<SlimActionRequiredResponse>()
             .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
             .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
@@ -202,35 +203,46 @@ public static class SlimIdentityEndpointExtensions
 
         if (e.EnableRegistration)
         {
-            group.MapPost("/register", static ([FromBody] SlimRegisterRequest request,
-                    [FromServices] SlimAccountHandlers h, CancellationToken ct) => h.RegisterAsync(request, ct))
+            group.MapPost("/register", static ([FromBody] SlimRegisterRequest request, [FromQuery] bool? useCookies,
+                    [FromServices] SlimAccountHandlers h, CancellationToken ct) => h.RegisterAsync(request, useCookies, ct))
                 .WithName("SlimIdentity_Register")
-                .WithSummary("Register with e-mail and password only. Always 200 (enumeration prevention).")
+                .WithSummary(o.Email.Enabled
+                    ? "Start a registration with an e-mail address: action_required with verify_email (code and link by mail). The same answer for every address."
+                    : "Register with sign-in name and password. Always 200 (enumeration prevention).")
                 .Produces<SlimStatusResponse>()
+                .Produces<SlimActionRequiredResponse>()
                 .ProducesSlimProblem(StatusCodes.Status400BadRequest)
+                .ProducesSlimProblem(StatusCodes.Status403Forbidden)
                 .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
                 .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
                 .AllowAnonymous();
-        }
 
-        if (e.EnableEmailVerification)
-        {
-            group.MapPost("/verify-email", static ([FromBody] SlimVerifyEmailRequest request,
-                    [FromServices] SlimAccountHandlers h, CancellationToken ct) => h.VerifyEmailAsync(request, ct))
-                .WithName("SlimIdentity_VerifyEmail")
-                .WithSummary("Confirm the e-mail address with the token from the verification mail.")
-                .Produces<SlimStatusResponse>()
-                .ProducesSlimProblem(StatusCodes.Status400BadRequest)
-                .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
-                .AllowAnonymous();
+            if (o.Email.Enabled)
+            {
+                group.MapPost("/register/verify", static ([FromBody] SlimVerifyEmailLoginRequest request,
+                        [FromServices] SlimRegistrationFlow h, CancellationToken ct) => h.VerifyAsync(request, ct))
+                    .WithName("SlimIdentity_RegisterVerify")
+                    .WithSummary("Step verify_email of a registration: flowToken + the mailed code; next is set_credential.")
+                    .Produces<SlimActionRequiredResponse>()
+                    .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
+                    .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
+                    .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
+                    .AllowAnonymous();
 
-            group.MapPost("/resend-verification", static ([FromBody] SlimEmailRequest request,
-                    [FromServices] SlimAccountHandlers h, CancellationToken ct) => h.ResendVerificationAsync(request, ct))
-                .WithName("SlimIdentity_ResendVerification")
-                .WithSummary("Send the verification mail again. Always 200.")
-                .Produces<SlimStatusResponse>()
-                .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
-                .AllowAnonymous();
+                group.MapPost("/register/password", static ([FromBody] SlimRegisterPasswordRequest request,
+                        [FromServices] SlimRegistrationFlow h, CancellationToken ct) => h.CompleteWithPasswordAsync(request, ct))
+                    .WithName("SlimIdentity_RegisterPassword")
+                    .WithSummary("Step set_credential with a password: creates the account; the session or the next step.")
+                    .Produces<SlimAuthResponse>()
+                    .Produces<SlimActionRequiredResponse>()
+                    .ProducesSlimProblem(StatusCodes.Status400BadRequest)
+                    .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
+                    .ProducesSlimProblem(StatusCodes.Status403Forbidden)
+                    .ProducesSlimProblem(StatusCodes.Status409Conflict)
+                    .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
+                    .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
+                    .AllowAnonymous();
+            }
         }
 
         if (e.EnablePasswordReset && o.Email.Enabled)

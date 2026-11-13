@@ -339,6 +339,20 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
   24 hours `429 too_many_attempts`. Code mails share the limit of second-factor codes (5 per recipient in 15 minutes,
   `SlimMailThrottle.CodesPerRecipient`); a flow whose mail was held back accepts no code. The TypeScript client gets
   `verifyEmail`.
+- **Breaking** (wire format, `ISlimEmailSender`): with mail, registration proves the mailbox before the account
+  exists. `POST /auth/register { email, rememberMe }` takes only the address and answers every address alike with
+  `action_required` `["verify_email", "set_credential"]`; the verification mail carries a 6-digit code and a link
+  (`SendVerificationEmailAsync(context, email, code, link, ct)`). `POST /auth/register/verify { flowToken, code }` or
+  `POST /auth/flow { token }` with the link (also on another device, in the mode of that request) proves the mailbox;
+  `POST /auth/register/password { flowToken, password, profile? }` creates the account with its address confirmed and
+  signs in (`409 email_taken` if the address got an account meanwhile). Nothing is stored before the last step; a
+  `password` or `profile` at `/register` is refused. Without mail, `/register` keeps the one-step form.
+- **Breaking**: `/verify-email`, `/resend-verification` and `Endpoints.EnableEmailVerification` are removed.
+  `/auth/flow` takes `useCookies`.
+- `SlimNewUser.EmailConfirmed`: stores insert it instead of a constant `false` (conformance check). The metric
+  `slimidentity.registrations` reports the steps (`started`, `invalid_verification_code`, `too_many_attempts`, `created`).
+- TypeScript client: `register`, `verifyRegistration`, `openRegistrationLink` and `completeRegistration` on
+  `cookieAuth` and `bearerAuth` replace `account.register`, `account.verifyEmail` and `account.resendVerification`.
 - **Breaking** with `UseTenantKey`: the tenant of the request is part of the Data Protection purpose of every token
   (mail links, invitations, sign-in flows, refresh tokens, remembered devices, exchange and link codes, passkey
   ceremonies). A token of one tenant no longer decrypts in another; tokens issued before the update, or outside a

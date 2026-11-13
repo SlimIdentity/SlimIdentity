@@ -15,7 +15,7 @@ public sealed class VerifyEmailStepTests
     private static async Task<TestApp> StartWithUnconfirmedAsync(TestAppOptions? options = null)
     {
         var app = await TestApp.StartAsync(options);
-        await app.CreateClient().PostJsonAsync("/auth/register", new { email = Email, password = Password });
+        await app.PreRegisterUnconfirmedAsync(Email, Password);
         return app;
     }
 

@@ -53,7 +53,7 @@ public sealed class ReviewRound2Tests
         await using var app = await TestApp.StartAsync();
         const string email = "legit-unconfirmed@test.local";
         const string pass = "Legit-Pass-123!";
-        await app.CreateClient().PostJsonAsync("/auth/register", new { email, password = pass });
+        await app.PreRegisterUnconfirmedAsync(email, pass);
         var me = app.CreateClient();
         me.BearerToken = (await app.LoginConfirmingAsync(email, pass)).AccessToken;
         await app.SetEmailConfirmedAsync(email, false);
@@ -101,7 +101,7 @@ public sealed class ReviewRound2Tests
     {
         const string victim = "victim-ext@test.local";
         await using var app = await TestApp.StartAsync(SocialProvider("attacker-sub", "attacker@test.local"));
-        await app.CreateClient().PostJsonAsync("/auth/register", new { email = victim, password = "Attacker-Pass-123" });
+        await app.PreRegisterUnconfirmedAsync(victim, "Attacker-Pass-123");
         var pending = await app.CreateClient().PostJsonAsync("/auth/login", new { email = victim, password = "Attacker-Pass-123" });
         Assert.Equal("verify_email", pending.GetProperty("actions")[0].GetString());   // no session without the mailbox
 
@@ -128,11 +128,10 @@ public sealed class ReviewRound2Tests
         const string victim = "victim-social@test.local";
         await using var app = await TestApp.StartAsync(SocialProvider("victim-google", victim));
         // the attacker registers the victim's address with an own password
-        await app.CreateClient().PostJsonAsync("/auth/register", new { email = victim, password = "Attacker-Pass-123" });
-        var verifyToken = (await app.Mail.WaitForAsync("verification", victim)).Payload;
+        await app.PreRegisterUnconfirmedAsync(victim, "Attacker-Pass-123");
 
-        // the victim confirms "their" address, then signs in with their verified Google account
-        await app.CreateClient().PostJsonAsync("/auth/verify-email", new { token = verifyToken });
+        // the address becomes confirmed (here directly in the store), then the victim signs in with their verified Google account
+        await app.SetEmailConfirmedAsync(victim, true);
         var browser = app.CreateClient();
         var target = await SignInWithProviderAsync(browser);
 

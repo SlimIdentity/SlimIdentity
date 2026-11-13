@@ -129,6 +129,6 @@ public sealed class SlimRegistrationResult
     /// <summary><c>400</c> (address, password rules) or <c>403</c> (a registration guard's veto); <c>null</c> otherwise.</summary>
     public IResult? Failure { get; }
 
-    /// <summary>The answer of <c>POST /register</c>: <see cref="Failure"/>, or the uniform <c>registration_accepted</c>.</summary>
+    /// <summary>The answer of a one-step registration: <see cref="Failure"/>, or the uniform <c>registration_accepted</c>.</summary>
     public IResult Response { get; }
 }

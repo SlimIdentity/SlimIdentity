@@ -13,7 +13,7 @@ function mode() { return $("mode").value; }
 async function call(method, path, body) {
   const headers = { "Content-Type": "application/json", "X-CSRF": "1" };   // CSRF header: required in cookie mode
   if (mode() === "bearer" && state.accessToken) headers.Authorization = `Bearer ${state.accessToken}`;
-  const url = path.startsWith("/auth/") && ["/auth/login", "/auth/invitation/accept"].includes(path) ? `${path}?useCookies=${mode() === "cookie"}` : path;
+  const url = path.startsWith("/auth/") && ["/auth/login", "/auth/register", "/auth/flow", "/auth/invitation/accept"].includes(path) ? `${path}?useCookies=${mode() === "cookie"}` : path;
   const response = await fetch(url, { method, headers, credentials: "same-origin", body: body === undefined ? undefined : JSON.stringify(body) });
   const text = await response.text();
   let json = null;
@@ -65,12 +65,16 @@ const password = () => $("password").value;
 // ------------------------------------------------------------------ actions
 
 const actions = {
+  // registration: the address first, the password once the mailbox is proven (code or link)
   async register() {
-    await call("POST", "/auth/register", { email: email(), password: password() });
+    state.registration = true;
+    const r = await call("POST", "/auth/register", { email: email(), rememberMe: $("rememberMe").checked });
+    showSteps(r.json);
     $("mailboxAddress").value = email();
   },
 
   async login() {
+    state.registration = false;
     const r = await call("POST", "/auth/login", {
       email: email(), password: password(), rememberMe: $("rememberMe").checked,
       twoFactorRememberToken: mode() === "bearer" ? state.rememberToken : null,
@@ -87,8 +91,10 @@ const actions = {
   },
 
   async secondFactor() {
-    const r = state.step === "verify_email"
-      ? await call("POST", "/auth/login/verify-email", { flowToken: state.flowToken, code: $("code").value || null })
+    const r = state.step === "set_credential"
+      ? await call("POST", "/auth/register/password", { flowToken: state.flowToken, password: password() })
+      : state.step === "verify_email"
+      ? await call("POST", state.registration ? "/auth/register/verify" : "/auth/login/verify-email", { flowToken: state.flowToken, code: $("code").value || null })
       : await call("POST", "/auth/login/2fa", {
         flowToken: state.flowToken, code: $("code").value || null, recoveryCode: $("recoveryCode").value || null,
         rememberDevice: $("rememberDevice").checked,
@@ -118,7 +124,6 @@ const actions = {
     await updateWho();
   },
 
-  async resendVerification() { await call("POST", "/auth/resend-verification", { email: email() }); },
 
   async setup2fa() {
     const r = await call("POST", "/auth/2fa/setup", {});
@@ -393,6 +398,11 @@ function showSteps(json) {
     $("challengeMethod").textContent = method === "totp" ? "authenticator app" : method === "email" ? "code sent by e-mail" : "recovery code";
     $("challenge").hidden = false;
   }
+  else if (state.step === "set_credential") {
+    $("challengeTitle").textContent = "Address confirmed – enter a password above, then Continue";
+    $("challengeMethod").textContent = "registration";
+    $("challenge").hidden = false;
+  }
   return true;
 }
 
@@ -424,7 +434,7 @@ async function handleLinkPage() {
   const kind = location.pathname.slice(1);
   const token = new URLSearchParams(location.search).get("token");
   if (!token) return;
-  if (kind === "verify-email") { await call("POST", "/auth/verify-email", { token }); history.replaceState(null, "", "/"); }
+  if (kind === "verify-email") { state.registration = true; showSteps((await call("POST", "/auth/flow", { token })).json); history.replaceState(null, "", "/"); }
   else if (kind === "confirm-email-change") { await call("POST", "/auth/confirm-email-change", { token }); history.replaceState(null, "", "/"); }
   else if (kind === "reset-password" || kind === "accept-invitation") {
     state.link = { kind, token };

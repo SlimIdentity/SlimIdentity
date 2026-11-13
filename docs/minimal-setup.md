@@ -5,7 +5,7 @@ three small additions, a few lines in `Program.cs`. This is the recommended firs
 For bearer/JWT clients or a closer look at implementing `ISlimUserStore`, use
 [Getting started](getting-started.md) instead; it is an alternate path, not another step in this one.
 
-**What you get:** `/auth/register`, `/auth/login`, `/auth/logout`, `/auth/me`, e-mail verification, password reset and
+**What you get:** `/auth/register` (with proof of the mailbox), `/auth/login`, `/auth/logout`, `/auth/me`, password reset and
 change, e-mail change, invitations, server-side sessions, 2FA and external login (once you add a provider) – with rate
 limiting, account lockout, CSRF protection and enumeration resistance already active.
 
@@ -143,12 +143,12 @@ POST https://localhost:5001/auth/register
 Content-Type: application/json
 X-CSRF: 1
 
-{ "email": "me@example.com", "password": "correct horse battery staple" }
+{ "email": "me@example.com" }
 ```
 
-The verification link appears in the log (null sender). It points to `/verify-email` of your front end; until that page
-exists, send its `token` to `POST /auth/verify-email` yourself. Then sign in – the response sets the `HttpOnly` cookie (an
-unconfirmed address is asked for first: `action_required` with `verify_email`, the code is in the log):
+A 6-digit code appears in the log (null sender). Send it with the `flowToken` of the answer to `POST /auth/register/verify`,
+then the password to `POST /auth/register/password` ([registration](endpoints.md#registration)) – the account is created
+and the response sets the `HttpOnly` cookie. Signing in later:
 
 ```http
 POST https://localhost:5001/auth/login

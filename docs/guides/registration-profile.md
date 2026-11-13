@@ -2,13 +2,17 @@
 
 Many applications need more than an address and a password to create an account: a company, a name, accepted terms,
 a customer number. SlimIdentity takes this data with the registration and hands it to your store, so **the account and
-its profile are created together – or not at all**. No account without a profile, no half-finished sign-up, no second
-round trip.
+its profile are created together – or not at all**. No account without a profile, no half-finished sign-up.
+
+The profile comes with the last step of the [registration](../endpoints.md#registration), together with the password,
+once the mailbox is proven:
 
 ```http
-POST /auth/register
-{ "email": "ada@acme.example", "password": "…", "profile": { "company": "ACME", "name": "Ada" } }
+POST /auth/register/password
+{ "flowToken": "…", "password": "…", "profile": { "company": "ACME", "name": "Ada" } }
 ```
+
+Without mail (`WithoutEmail(allowSelfRegistration: true)`) it comes with `/register` itself.
 
 ## 1. Validate the profile
 
@@ -39,16 +43,16 @@ builder.Services.AddSlimIdentity(…)
 ```
 
 - **Errors answer `400`** with the keys prefixed: `profile.company`, `profile.name` (`""` → `profile`).
-- **Asked before anything is looked up** – after the address and password rules, before the registration guards and
-  before SlimIdentity checks whether the address already has an account. Decide from the request only (you may check a
-  customer number or an invitation code, never the address against your users), otherwise the answer reveals which
-  addresses are registered.
+- **Asked before the account is written** – after the password rules. Decide from the request (a customer number, an
+  invitation code); the address is proven by then, but without mail it is not – never check it against your users,
+  otherwise the answer reveals which addresses are registered.
 - **Also asked without a profile** (`context.Profile` is `null`): you decide whether one is required.
 - **Only what you return reaches the store** – never the raw JSON. Copy field by field into your own type; a client
   that sends `"isAdmin": true` changes nothing (no mass assignment).
 - **Without this hook a `profile` is refused** (`400 profile`), so nothing unvalidated is ever passed on.
-- If the address already has an account, the profile is discarded: the owner gets the "account exists" mail, the
-  caller the same `registration_accepted` as everyone else, and the existing account is not touched.
+- If the address already has an account, nothing is written and the existing account is not touched: with mail the
+  owner gets the "account exists" mail at `/register` and the flow never reaches this step; without mail the caller
+  gets the same `registration_accepted` as everyone else and the profile is discarded.
 
 ## 2. Write it with the account
 

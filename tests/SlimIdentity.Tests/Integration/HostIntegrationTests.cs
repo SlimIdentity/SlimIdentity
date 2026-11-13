@@ -128,7 +128,7 @@ public sealed class ExternalLoginTests
         await using var app = await TestApp.StartAsync(WithProvider(
             new Claim(ClaimTypes.NameIdentifier, "google-victim"), new Claim(ClaimTypes.Email, victim), new Claim("email_verified", "true")));
 
-        await app.CreateClient().PostJsonAsync("/auth/register", new { email = victim, password = "Attacker-Pass-123" });
+        await app.PreRegisterUnconfirmedAsync(victim, "Attacker-Pass-123");
         var pending = await app.CreateClient().PostJsonAsync("/auth/login", new { email = victim, password = "Attacker-Pass-123" });
         Assert.Equal("verify_email", pending.GetProperty("actions")[0].GetString());   // no session without the mailbox
 

@@ -84,17 +84,28 @@ internal sealed class SlimSignInFlow(
     public bool TryRead(string? token, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out SlimFlowPayload? state, out DateTimeOffset expiresAt) =>
         workflow.TryUnprotect(SlimWorkflowTokens.SignInFlowPurpose, token, out state, out expiresAt);
 
-    /// <summary>The account of a flow – <c>null</c> if it is gone, inactive or its security state changed since.</summary>
+    /// <summary>
+    /// The account of a flow – <c>null</c> if it is gone, inactive or its security state changed since, or for a
+    /// registration that has no account yet.
+    /// </summary>
     public async Task<SlimUser?> FindUserAsync(SlimFlowPayload state, CancellationToken ct)
     {
+        if (state.IsRegistration) return null;
         var user = await store.FindByIdAsync(state.Uid, ct);
         return user is not null && user.IsActive && SlimUser.IsSameSecurityState(user.SecurityStamp, state.Stamp) ? user : null;
     }
 
-    /// <summary><c>POST /flow</c>: the open steps of a sign-in again, with the same token. Changes nothing.</summary>
-    public async Task<IResult> ReadAsync(SlimFlowRequest? request, CancellationToken ct)
+    /// <summary>
+    /// <c>POST /flow</c>: the open steps of a flow again, with the same token – or the flow a mailed link continues.
+    /// Reading changes nothing.
+    /// </summary>
+    public async Task<IResult> ReadAsync(SlimFlowRequest? request, bool? useCookies, CancellationToken ct)
     {
+        if (request is { Token: { } link, FlowToken: null })
+            return await services.GetRequiredService<SlimRegistrationFlow>().ExchangeAsync(link, useCookies, ct);
         if (request is null || !TryRead(request.FlowToken, out var state, out var expiresAt)) return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
+        if (state.IsRegistration)
+            return await services.GetRequiredService<SlimRegistrationFlow>().ReadAsync(state, request.FlowToken!, expiresAt, ct);
         var user = await FindUserAsync(state, ct);
         var decision = user is null ? default : SlimSignInChain.Evaluate(user, state.Proofs, O);
         if (user is null || decision.Refusal is not null || decision.Complete) return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
@@ -102,7 +113,7 @@ internal sealed class SlimSignInFlow(
         return SlimResults.ActionRequired(new SlimActionRequiredResponse
         {
             Actions = decision.Pending,
-            FlowToken = request.FlowToken,
+            FlowToken = request.FlowToken!,
             ExpiresIn = (int)Math.Max(0, (expiresAt - time.GetUtcNow()).TotalSeconds),
             Details = Details(decision, state),
         });

@@ -126,6 +126,12 @@ public sealed class SlimNewUser
     public string PasswordHash { get; init; } = string.Empty;
 
     /// <summary>
+    /// <c>true</c> if the address is already proven (a registration that started with a mailed code or link) – store it
+    /// as given. <c>false</c> for every other account.
+    /// </summary>
+    public bool EmailConfirmed { get; init; }
+
+    /// <summary>
     /// Your business data for the new account: what <see cref="ISlimRegistrationProfile"/> returned for the
     /// <c>profile</c> of <c>/register</c>, what your endpoint passed to <see cref="ISlimAuthManager.RegisterAsync"/>, or
     /// what you set yourself. <c>null</c> without a profile (always for an external login). Write it in the same

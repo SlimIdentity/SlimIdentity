@@ -151,11 +151,11 @@ public sealed class HookTests
         await using var app = await TestApp.StartAsync(With(b => b.AddRegistrationGuard<CompanyDomainGuard>()));
 
         var refused = await app.CreateClient().PostJsonAsync("/auth/register",
-            new { email = "someone@gmail.test", password = "Some-Long-Pass-1" }, HttpStatusCode.Forbidden);
+            new { email = "someone@gmail.test" }, HttpStatusCode.Forbidden);
         Assert.Equal("registration_not_allowed", refused.Str("code"));
         Assert.Null(await app.Users.FindByEmailAsync("someone@gmail.test", default));
 
-        await app.CreateClient().PostJsonAsync("/auth/register", new { email = "colleague@firma.test", password = "Some-Long-Pass-1" });
+        Assert.Equal(HttpStatusCode.OK, (await app.RegisterAsync("colleague@firma.test", "Some-Long-Pass-1")).StatusCode);
         Assert.NotNull(await app.Users.FindByEmailAsync("colleague@firma.test", default));
     }
 
@@ -194,7 +194,7 @@ public sealed class HookTests
 
         var imported = await job.ServiceProvider.GetRequiredService<ISlimAuthManager>().RegisterAsync("imported@gmail.test", "Some-Long-Pass-1");
         var refused = await app.CreateClient().PostJsonAsync("/auth/register",
-            new { email = "someone@gmail.test", password = "Some-Long-Pass-1" }, HttpStatusCode.Forbidden);
+            new { email = "someone@gmail.test" }, HttpStatusCode.Forbidden);
 
         Assert.NotNull(imported.User);
         Assert.Equal("registration_not_allowed", refused.Str("code"));
@@ -219,7 +219,7 @@ public sealed class HookTests
         var me = app.CreateClient();
         me.BearerToken = (await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword)).AccessToken;
         await me.PostJsonAsync("/auth/change-password", new { currentPassword = TestApp.UserPassword, newPassword = "Changed-Pass-123" });
-        await app.CreateClient().PostJsonAsync("/auth/register", new { email = "new@test.local", password = "New-Member-Pass-1" });
+        Assert.Equal(HttpStatusCode.OK, (await app.RegisterAsync("new@test.local", "New-Member-Pass-1")).StatusCode);
         for (var i = 0; i < 5; i++)
             await app.CreateClient().PostJsonAsync("/auth/login", new { email = TestApp.AdminEmail, password = "wrong-password" }, HttpStatusCode.Unauthorized);
 

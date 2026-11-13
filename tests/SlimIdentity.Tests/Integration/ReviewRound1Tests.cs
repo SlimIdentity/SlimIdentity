@@ -244,7 +244,7 @@ public sealed class ReviewRound1Tests
         // that linked it, a provider wrongly listed as trusted) – the owner's first mailbox proof must cut it off
         await using var app = await TestApp.StartAsync(WithProvider(
             new Claim(ClaimTypes.NameIdentifier, "attacker-idp-account"), new Claim(ClaimTypes.Email, Victim)));
-        await app.CreateClient().PostJsonAsync("/auth/register", new { email = Victim, password = "Attacker-Pass-123" });
+        await app.PreRegisterUnconfirmedAsync(Victim, "Attacker-Pass-123");
         var victimId = app.Users.Get(Victim).Id;
         var links = (TestExternalLoginStore)app.App.Services.GetRequiredService<ISlimExternalLoginStore>();
         await links.LinkExternalLoginAsync(victimId, "Fake", "attacker-idp-account", default);
