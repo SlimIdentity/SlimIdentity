@@ -54,7 +54,7 @@ POST /auth/passkeys/login/options                                   → { "optio
 POST /auth/passkeys/login?useCookies=true|false   { "state", "credential", "rememberMe" }   → session
 ```
 
-The session has `amr: passkey`. Sign-in guards, inactive accounts, `RequireConfirmedEmail` and a forced password
+The session has `amr: passkey`. Sign-in guards, inactive accounts, an unconfirmed address (`verify_email`) and a forced password
 change (`200 action_required` with `change_password` – the passkey proves the account, the new password completes the flow) apply as for every
 sign-in; a running password or second-factor lockout does not block passkeys (there is nothing to guess).
 
@@ -105,7 +105,7 @@ Following Web Authentication Level 2 (§7.1 registration, §7.2 authentication):
 | Public key: ES256 (P-256) or RS256 (modulus of at least 2048 bit – zero padding does not count); credential id unique | ✓ | |
 | Registration state bound to the account and its security stamp | ✓ | |
 | Signature over authenticator data + client data hash with the stored key | | ✓ |
-| Account active and (with `RequireConfirmedEmail`) confirmed – before the use is recorded | | ✓ |
+| Account active, address confirmed (else the `verify_email` step) – before the use is recorded | | ✓ |
 | User handle matches the passkey's owner | | ✓ |
 | Signature counter increases (if the authenticator counts) – else a cloned key is assumed | | ✓ |
 | Each challenge counts once per passkey (atomic in the store) – no replay | | ✓ |

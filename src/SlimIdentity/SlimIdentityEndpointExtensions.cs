@@ -110,6 +110,22 @@ public static class SlimIdentityEndpointExtensions
             .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
             .AllowAnonymous();
 
+        if (o.Email.Enabled)
+        {
+            group.MapPost("/login/verify-email", static ([FromBody] SlimVerifyEmailLoginRequest request,
+                    [FromServices] SlimLoginHandlers h, CancellationToken ct) => h.VerifyEmailAsync(request, ct))
+                .WithName("SlimIdentity_LoginVerifyEmail")
+                .WithSummary("Step verify_email: flowToken + the code mailed with it confirms the address; the session or the next step.")
+                .Produces<SlimAuthResponse>()
+                .Produces<SlimActionRequiredResponse>()
+                .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
+                .ProducesSlimProblem(StatusCodes.Status403Forbidden)
+                .ProducesSlimProblem(StatusCodes.Status423Locked)
+                .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
+                .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
+                .AllowAnonymous();
+        }
+
         if (twoFactor)
         {
             group.MapPost("/login/2fa", static ([FromBody] SlimTwoFactorLoginRequest request,

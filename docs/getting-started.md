@@ -112,7 +112,8 @@ Content-Type: application/json
 
 The null sender logs a verification link to `Links.BaseUrl` + `/verify-email` – a page of your front end that does not
 exist yet. Until it does, take the `token` from the link and confirm with `POST /auth/verify-email` and
-`{ "token": "…" }`; signing in does not wait for it unless you set `SignIn.RequireConfirmedEmail`.
+`{ "token": "…" }`. Signing in before that answers `action_required` with `verify_email`: the logged code completes
+it at `POST /auth/login/verify-email`.
 
 ```http
 POST /auth/login

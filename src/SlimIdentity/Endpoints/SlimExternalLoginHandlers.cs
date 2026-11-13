@@ -206,10 +206,8 @@ internal sealed class SlimExternalLoginHandlers(
         }
 
         // the provider proved the account – a lockout of the password or the second factor does not apply. The steps
-        // that follow (second factor, own password) are taken in the sign-in flow; bearer clients start it at the exchange.
-        var decision = SlimSignInChain.Evaluate(user, SlimSignInProofs.None, O);
-        var rejection = decision.Refusal ?? (decision.Next == SlimSignInActions.VerifyEmail ? SlimErrorCodes.EmailNotConfirmed : null);
-        if (rejection is not null)
+        // that follow (mailbox, second factor, own password) are taken in the sign-in flow; bearer clients start it at the exchange.
+        if (SlimSignInChain.Evaluate(user, SlimSignInProofs.None, O).Refusal is { } rejection)
         {
             metrics.ExternalLogin(provider, "rejected");
             return Redirect(returnUrl, "slim_error", rejection);

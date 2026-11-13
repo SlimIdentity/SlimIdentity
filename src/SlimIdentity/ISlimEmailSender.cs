@@ -19,6 +19,12 @@ public interface ISlimEmailSender
     Task SendTwoFactorCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct);
 
     /// <summary>
+    /// 6-digit code that confirms the address during a sign-in (step <c>verify_email</c>, <c>POST /auth/login/verify-email</c>).
+    /// Sent directly (the user is waiting for it).
+    /// </summary>
+    Task SendEmailVerificationCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct);
+
+    /// <summary>
     /// Confirmation link for a requested e-mail change, sent to the <b>new</b> address
     /// (<c>/change-email</c>, link from <c>Links.BaseUrl</c> or <c>Links.EmailChangeUrl</c>). The address changes only when the link is confirmed.
     /// </summary>

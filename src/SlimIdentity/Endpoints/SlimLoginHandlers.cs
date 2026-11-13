@@ -13,6 +13,7 @@ internal sealed class SlimLoginHandlers(
     SlimCredentialService credentials,
     SlimAuthManager authManager,
     SlimSignInFlow flow,
+    SlimSharedStateAccess sharedState,
     SlimWorkflowTokens workflow,
     SlimMetrics metrics,
     IOptions<SlimIdentityOptions> options,
@@ -24,6 +25,11 @@ internal sealed class SlimLoginHandlers(
     internal const string MethodTotp = "totp";
     internal const string MethodEmail = "email";
     internal const string MethodRecovery = "recovery";
+
+    // attempts at the code of step verify_email: per sign-in, and per address across sign-ins
+    internal const int VerificationAttemptsPerFlow = 5;
+    internal const int VerificationAttemptsPerAddress = 10;
+    internal static readonly TimeSpan VerificationAddressWindow = TimeSpan.FromHours(24);
 
     private SlimIdentityOptions O => options.Value;
     private HttpContext Http => httpContextAccessor.HttpContext!;
@@ -121,6 +127,52 @@ internal sealed class SlimLoginHandlers(
 
     public Task<IResult> ReadFlowAsync(SlimFlowRequest? request, CancellationToken ct) => flow.ReadAsync(request, ct);
 
+    // ------------------------------------------------------------------ POST /login/verify-email
+
+    public async Task<IResult> VerifyEmailAsync(SlimVerifyEmailLoginRequest? request, CancellationToken ct)
+    {
+        if (request is null || !flow.TryRead(request.FlowToken, out var state, out _))
+            return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
+
+        // ends in a cookie sign-in without carrying a cookie – only the signed token knows (as on /login/2fa)
+        if (state.UseCookies && SlimCsrfEndpointFilter.Validate(Http.Request, O, logger) is { } csrfError) return csrfError;
+
+        // once confirmed, the step is no longer open: the token cannot confirm twice
+        var user = await flow.FindUserAsync(state, ct);
+        if (user is null || state.Method != SlimSignInActions.VerifyEmail || SlimSignInChain.Evaluate(user, state.Proofs, O).Next != SlimSignInActions.VerifyEmail)
+            return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
+
+        // a lockout of the password that started after the token was issued holds
+        var now = time.GetUtcNow();
+        if (state.Proofs.HasFlag(SlimSignInProofs.Password) && user.IsLockedOut(now)) return SlimResults.Locked(Http, user.LockoutEndUtc!.Value, now);
+
+        // counted before the check: of parallel guesses, at most the limit is checked
+        if (await sharedState.CountAsync(SlimSharedStateAccess.VerificationCodeFlow, state.FlowId, SlimIdentityDefaults.SignInFlowLifetime, ct) > VerificationAttemptsPerFlow
+            || await sharedState.CountAsync(SlimSharedStateAccess.VerificationCodeAddress, user.Email.Trim().ToUpperInvariant(), VerificationAddressWindow, ct) > VerificationAttemptsPerAddress)
+        {
+            metrics.Login(SlimErrorCodes.TooManyAttempts, state.UseCookies);
+            return SlimResults.Status(SlimErrorCodes.TooManyAttempts,
+                "Too many attempts. Confirm the address with the link of a verification mail.", StatusCodes.Status429TooManyRequests);
+        }
+
+        var code = SlimTotp.NormalizeCode(request.Code);
+        if (code.Length != 6 || state.CodeHash is null
+            || !SlimHashing.FixedTimeEquals(SlimSignInFlow.HashVerificationCode(user.Id, user.Email, code, state.IssuedAt), state.CodeHash))
+        {
+            metrics.Login(SlimErrorCodes.InvalidVerificationCode, state.UseCookies);
+            await hooks.RaiseAsync(SlimEventTypes.SignInFailed, user.Id, state.Amr, SlimErrorCodes.InvalidVerificationCode, ct: ct);
+            return SlimResults.Status(SlimErrorCodes.InvalidVerificationCode, "The code is invalid.", StatusCodes.Status401Unauthorized);
+        }
+
+        if (!await store.TryWriteSecurityStateAsync(user, u => u.EmailConfirmed = true, ct))
+            return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
+        await hooks.RaiseAsync(SlimEventTypes.EmailConfirmed, user.Id, ct: ct);
+
+        var result = await flow.ContinueAsync(user, state with { Stamp = user.SecurityStamp, Method = null, CodeHash = null, IssuedAt = 0 }, ct);
+        metrics.Login(SlimSignInFlow.MetricReason(result), state.UseCookies);
+        return flow.ToHttpResult(result, user);
+    }
+
     // ------------------------------------------------------------------ POST /login/password-change
 
     public async Task<IResult> CompletePasswordChangeAsync(SlimPasswordChangeLoginRequest? request, CancellationToken ct)
@@ -169,7 +221,7 @@ internal sealed class SlimLoginHandlers(
         if (state.UseCookies && SlimCsrfEndpointFilter.Validate(Http.Request, O, logger) is { } csrfError) return csrfError;
 
         var user = await flow.FindUserAsync(state, ct);
-        if (user is null || state.Method is null || SlimSignInChain.Evaluate(user, state.Proofs, O).Next != SlimSignInActions.SecondFactor)
+        if (user is null || state.Method is null or SlimSignInActions.VerifyEmail || SlimSignInChain.Evaluate(user, state.Proofs, O).Next != SlimSignInActions.SecondFactor)
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
 
         // reserved in the store before the check: of parallel guesses, at most the threshold is checked

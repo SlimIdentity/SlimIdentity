@@ -37,14 +37,13 @@ public sealed class AttackScenarioTests
         const string victim = "victim@test.local";
         await using var app = await TestApp.StartAsync();
         await app.CreateClient().PostJsonAsync("/auth/register", new { email = victim, password = "Attacker-Pass-123" });
-        var attacker = app.CreateClient();
-        attacker.BearerToken = (await app.LoginBearerAsync(victim, "Attacker-Pass-123")).AccessToken;
 
-        // since review round 2 an unconfirmed account cannot set up a second factor at all …
-        await attacker.PostJsonAsync("/auth/2fa/setup", null, HttpStatusCode.Forbidden);
-        await attacker.PostJsonAsync("/auth/2fa/enable-email", new { password = "Attacker-Pass-123" }, HttpStatusCode.Forbidden);
+        // without the mailbox the registrant gets no session, so no second factor can be set up through the API
+        var pending = await app.CreateClient().PostJsonAsync("/auth/login", new { email = victim, password = "Attacker-Pass-123" });
+        Assert.Equal("verify_email", pending.GetProperty("actions")[0].GetString());
+        Assert.False(pending.TryGetProperty("accessToken", out _));
 
-        // … and one that got there anyway (imported data, a host that set it) is still removed by the owner's mailbox proof
+        // a second factor that got there anyway (imported data, a host that set it) is removed by the owner's mailbox proof
         var registered = app.Users.Get(victim);
         registered.TwoFactorEnabled = true;
         await app.Users.UpdateSecurityStateAsync(registered, default);
@@ -53,9 +52,8 @@ public sealed class AttackScenarioTests
         var link = (await app.Mail.WaitForAsync("password-reset", victim)).Payload;
         await app.CreateClient().PostJsonAsync("/auth/reset-password", new { token = link, newPassword = "Owner-Pass-456" });
 
-        var owner = await app.CreateClient().PostJsonAsync("/auth/login", new { email = victim, password = "Owner-Pass-456" });
-        Assert.False(string.IsNullOrEmpty(owner.Str("accessToken")));   // no second factor of the attacker in the way
-        Assert.Equal(HttpStatusCode.Unauthorized, (await attacker.GetAsync("/api/hello")).StatusCode);
+        await app.LoginBearerAsync(victim, "Owner-Pass-456");   // no second factor of the attacker in the way
+        await app.CreateClient().PostJsonAsync("/auth/login", new { email = victim, password = "Attacker-Pass-123" }, HttpStatusCode.Unauthorized);
     }
 
     [Fact]
@@ -70,7 +68,7 @@ public sealed class AttackScenarioTests
         await app.CreateClient().PostJsonAsync("/auth/register", new { email = nfc, password = "Other-Pass-456" });
 
         Assert.Single(app.Users.All, u => u.Email.Normalize() == nfc);           // no second account
-        await app.LoginBearerAsync(nfc, "Owner-Pass-123");                          // one identity, either form
+        await app.LoginConfirmingAsync(nfc, "Owner-Pass-123");                      // one identity, either form
         await app.LoginBearerAsync(nfd, "Owner-Pass-123");
         await app.Mail.WaitForAsync("account-exists", nfc);
     }

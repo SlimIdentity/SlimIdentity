@@ -24,8 +24,8 @@ silently losing password resets.
 | 2FA with e-mail codes (`/2fa/enable-email`) | ✓ (unless `TwoFactor.AllowEmailCodes = false`) | off |
 | Lockout notification, "account exists" notice | ✓ | dropped |
 
-Contradictions stop the start: a registered mail sender next to `WithoutEmail()`, or
-`allowSelfRegistration: true` together with `SignIn.RequireConfirmedEmail` (nobody could ever confirm).
+A registered mail sender next to `WithoutEmail()` stops the start. Without mail, addresses are never asked to be
+confirmed at sign-in.
 
 The very first administrator is created by code at start-up – see [seeding](seeding.md).
 

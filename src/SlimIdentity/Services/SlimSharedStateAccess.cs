@@ -14,6 +14,8 @@ internal sealed class SlimSharedStateAccess(ISlimSharedState state, SlimMemorySh
     internal const string BackChannelToken = "backchannel-jti";
     internal const string Mail = "mail";
     internal const string SignInFlow = "sign-in-flow";
+    internal const string VerificationCodeFlow = "verification-code-flow";
+    internal const string VerificationCodeAddress = "verification-code-address";
 
     /// <summary>True exactly once per <paramref name="purpose"/> and <paramref name="value"/> until <paramref name="expiresAt"/>.</summary>
     public async Task<bool> TryConsumeAsync(string purpose, string value, DateTimeOffset expiresAt, CancellationToken ct)

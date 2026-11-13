@@ -152,6 +152,7 @@ public sealed class EfCoreTemplateExtrasTests : IAsyncLifetime
         public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string link, CancellationToken ct) => Send(link);
         public Task SendPasswordResetEmailAsync(SlimEmailContext context, string email, string link, CancellationToken ct) => Send(link);
         public Task SendTwoFactorCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) => Send(code);
+        public Task SendEmailVerificationCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) => Send(code);
         public Task SendEmailChangeConfirmationAsync(SlimEmailContext context, string newEmail, string link, CancellationToken ct) => Send(link);
 
         private Task Send(string payload)

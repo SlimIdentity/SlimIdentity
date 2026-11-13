@@ -147,8 +147,8 @@ X-CSRF: 1
 ```
 
 The verification link appears in the log (null sender). It points to `/verify-email` of your front end; until that page
-exists, send its `token` to `POST /auth/verify-email` yourself – signing in does not wait for it unless
-`SignIn.RequireConfirmedEmail` is set. Then sign in – the response sets the `HttpOnly` cookie:
+exists, send its `token` to `POST /auth/verify-email` yourself. Then sign in – the response sets the `HttpOnly` cookie (an
+unconfirmed address is asked for first: `action_required` with `verify_email`, the code is in the log):
 
 ```http
 POST https://localhost:5001/auth/login

@@ -178,15 +178,16 @@ internal sealed class SlimPasskeyHandlers(
             return Failed("counter");
         }
 
-        // the account before anything is recorded: an inactive or unconfirmed account leaves no trace on its passkey.
-        // Possession and user verification are multi-factor on their own – no second factor follows.
+        // the account before anything is recorded: an inactive or locked account leaves no trace on its passkey.
+        // Possession and user verification are multi-factor on their own – no second factor follows; an unconfirmed
+        // address still has to be proven in the flow that follows.
         var user = await store.FindByIdAsync(passkey.UserId, ct);
         if (user is null) return Failed("account");
         var flow = services.GetRequiredService<SlimSignInFlow>();
         var decision = SlimSignInChain.Evaluate(user, SlimSignInProofs.SecondFactor, O);
-        if (decision.Refusal is not null || decision.Next == SlimSignInActions.VerifyEmail)
+        if (decision.Refusal is not null)
         {
-            var refused = SlimAuthResult.Failed(decision.Refusal ?? SlimErrorCodes.EmailNotConfirmed);
+            var refused = SlimAuthResult.Failed(decision.Refusal);
             metrics.Login(SlimSignInFlow.MetricReason(refused), cookies);
             return flow.ToHttpResult(refused, user);
         }

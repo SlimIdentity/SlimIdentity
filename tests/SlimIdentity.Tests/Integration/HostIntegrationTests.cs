@@ -54,6 +54,28 @@ public sealed class ExternalLoginTests
         Assert.True(app.Users.Get("social@test.local").EmailConfirmed);
     }
 
+    [Fact]
+    public async Task A_linked_account_with_an_unconfirmed_address_proves_the_mailbox_in_the_flow()
+    {
+        await using var app = await TestApp.StartAsync(WithProvider(
+            new Claim(ClaimTypes.NameIdentifier, "ext-123"), new Claim(ClaimTypes.Email, "social@test.local"), new Claim("email_verified", "true")));
+        await NavigateAsync(app.CreateClient(), "useCookies=true&returnUrl=/done");
+        await app.SetEmailConfirmedAsync("social@test.local", false);
+
+        var browser = app.CreateClient();
+        browser.SendCsrfHeader = true;
+        var target = await NavigateAsync(browser, "useCookies=true&returnUrl=/done");
+        var fragment = QueryHelpers.ParseQuery(target.Fragment.TrimStart('#'));
+        Assert.Equal("action_required", fragment["slim_status"].ToString());
+        Assert.Equal(HttpStatusCode.Unauthorized, (await browser.GetAsync("/api/hello")).StatusCode);
+
+        var flowToken = fragment["flowToken"].ToString();
+        Assert.Equal("verify_email", (await browser.PostJsonAsync("/auth/flow", new { flowToken })).GetProperty("actions")[0].GetString());
+        var code = (await app.Mail.WaitForAsync("verification-code", "social@test.local")).Payload;
+        await browser.PostJsonAsync("/auth/login/verify-email", new { flowToken, code });
+        Assert.Equal(HttpStatusCode.OK, (await browser.GetAsync("/api/hello")).StatusCode);
+    }
+
     [Theory]
     [InlineData(true)]    // consumed atomically via ISlimRefreshTokenStore
     [InlineData(false)]   // in-memory fallback
@@ -107,17 +129,15 @@ public sealed class ExternalLoginTests
             new Claim(ClaimTypes.NameIdentifier, "google-victim"), new Claim(ClaimTypes.Email, victim), new Claim("email_verified", "true")));
 
         await app.CreateClient().PostJsonAsync("/auth/register", new { email = victim, password = "Attacker-Pass-123" });
-        var attacker = await app.LoginBearerAsync(victim, "Attacker-Pass-123");   // unconfirmed accounts can sign in by default
+        var pending = await app.CreateClient().PostJsonAsync("/auth/login", new { email = victim, password = "Attacker-Pass-123" });
+        Assert.Equal("verify_email", pending.GetProperty("actions")[0].GetString());   // no session without the mailbox
 
         var browser = app.CreateClient();
         await NavigateAsync(browser, "useCookies=true&returnUrl=/done");
         Assert.Equal(HttpStatusCode.OK, (await browser.GetAsync("/api/hello")).StatusCode);   // the victim is in
-
-        var attackerClient = app.CreateClient();
-        attackerClient.BearerToken = attacker.AccessToken;
-        Assert.Equal(HttpStatusCode.Unauthorized, (await attackerClient.GetAsync("/api/hello")).StatusCode);   // running session ended
         await app.CreateClient().PostJsonAsync("/auth/login", new { email = victim, password = "Attacker-Pass-123" }, HttpStatusCode.Unauthorized);
-        await app.CreateClient().PostJsonAsync("/auth/refresh", new { refreshToken = attacker.RefreshToken }, HttpStatusCode.Unauthorized);
+        await app.CreateClient().PostJsonAsync("/auth/login/verify-email",
+            new { flowToken = pending.Str("flowToken"), code = "000000" }, HttpStatusCode.Unauthorized);   // the pending sign-in ended too
     }
 
     [Fact]

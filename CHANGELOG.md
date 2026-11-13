@@ -331,6 +331,14 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
   password change there is a `change_password` step instead of `403 password_change_required`.
 - TypeScript client: `LoginResult` kind `action_required` (with `steps`) replaces `two_factor`, `password_change` and
   `sign_in_required`; new `readFlow`; `readExternalLoginResult` is async.
+- **Breaking**: with mail, an unconfirmed address is a sign-in step (`verify_email`) on every path – password,
+  passkey, external login, `ISlimAuthManager.SignInAsync` – instead of an optional refusal; `SignIn.RequireConfirmedEmail`
+  is removed. The step mails a code (new mandatory `ISlimEmailSender.SendEmailVerificationCodeAsync`, mail kind
+  `verification-code`, event 7108 with the null sender) that `POST /auth/login/verify-email { flowToken, code }` takes;
+  it confirms the address. Wrong codes answer `401 invalid_verification_code`; after 5 per flow or 10 per address in
+  24 hours `429 too_many_attempts`. Code mails share the limit of second-factor codes (5 per recipient in 15 minutes,
+  `SlimMailThrottle.CodesPerRecipient`); a flow whose mail was held back accepts no code. The TypeScript client gets
+  `verifyEmail`.
 
 - **Breaking** (`ISlimUserStore`, user entity): password and second factor have separate attempt counters
   (`SlimUser.FailedSecondFactorAttempts`, `SecondFactorLockoutEndUtc`; new columns in the EF Core entity and the

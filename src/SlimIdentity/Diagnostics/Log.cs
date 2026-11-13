@@ -200,6 +200,9 @@ internal static partial class Log
     [LoggerMessage(7103, LogLevel.Warning, "[SlimIdentity:NullEmailSender] 2FA code for {Email}: {Code}")]
     public static partial void NullMailTwoFactorCode(ILogger logger, string email, string code);
 
+    [LoggerMessage(7108, LogLevel.Warning, "[SlimIdentity:NullEmailSender] Verification code for {Email}: {Code}")]
+    public static partial void NullMailVerificationCode(ILogger logger, string email, string code);
+
     [LoggerMessage(7104, LogLevel.Warning, "[SlimIdentity:NullEmailSender] E-mail change confirmation for {Email}: {Link}")]
     public static partial void NullMailEmailChange(ILogger logger, string email, string link);
 

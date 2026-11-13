@@ -56,13 +56,14 @@ public sealed class ReviewRound3Tests
     }
 
     [Fact]
-    public async Task S2_SignInAsync_refuses_unconfirmed_accounts()
+    public async Task S2_SignInAsync_asks_unconfirmed_accounts_for_the_mailbox()
     {
-        await using var app = await TestApp.StartAsync(WithHostSignIn(o => o.SignIn.RequireConfirmedEmail = true));
+        await using var app = await TestApp.StartAsync(WithHostSignIn());
         await SaveAsync(app, u => u.EmailConfirmed = false);
 
-        var refused = await app.CreateClient().PostJsonAsync($"/api/cert-login/{TestApp.UserEmail}", expected: HttpStatusCode.Forbidden);
-        Assert.Equal("email_not_confirmed", refused.Str("status"));
+        var steps = await app.CreateClient().PostJsonAsync($"/api/cert-login/{TestApp.UserEmail}");
+        Assert.Equal(["verify_email"], steps.GetProperty("actions").EnumerateArray().Select(a => a.GetString()));
+        Assert.False(steps.TryGetProperty("accessToken", out _));
     }
 
     [Fact]

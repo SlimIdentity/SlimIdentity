@@ -46,8 +46,18 @@ public static class SlimErrorCodes
     public const string AccountDisabled = "account_disabled";
     /// <summary>The account is locked (423 with <c>lockoutEndUtc</c> and <c>Retry-After</c>).</summary>
     public const string LockedOut = "locked_out";
-    /// <summary>The e-mail address has not been confirmed (<c>SignIn.RequireConfirmedEmail</c>, 403).</summary>
+    /// <summary>
+    /// The e-mail address has not been confirmed (403) – for actions that need a proven mailbox; a sign-in names it as
+    /// step <c>verify_email</c> instead.
+    /// </summary>
     public const string EmailNotConfirmed = "email_not_confirmed";
+    /// <summary>The code of step <c>verify_email</c> is wrong (401).</summary>
+    public const string InvalidVerificationCode = "invalid_verification_code";
+    /// <summary>
+    /// The attempts for a code are used up (429): per sign-in and per address and day. The address is then confirmed
+    /// with the link of a verification mail (<c>/auth/resend-verification</c>).
+    /// </summary>
+    public const string TooManyAttempts = "too_many_attempts";
     /// <summary>An administrator set the password; the user chooses an own one first (action <c>change_password</c>).</summary>
     public const string PasswordChangeRequired = "password_change_required";
     /// <summary>

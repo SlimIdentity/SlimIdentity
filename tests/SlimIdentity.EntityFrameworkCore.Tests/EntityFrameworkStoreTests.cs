@@ -331,6 +331,8 @@ public sealed class EntityFrameworkStoreTests
         var http = app.GetTestClient();
 
         Assert.Equal(HttpStatusCode.OK, (await http.PostAsJsonAsync("/auth/register", new { email = "ef@test.local", password = "EfCore-Pass-123" })).StatusCode);
+        await using (var scope = app.Services.CreateAsyncScope())   // the null sender delivers no link
+            await scope.ServiceProvider.GetRequiredService<GuidContext>().Users.ExecuteUpdateAsync(s => s.SetProperty(u => u.EmailConfirmed, true));
         var login = await http.PostAsJsonAsync("/auth/login", new { email = "EF@test.local", password = "EfCore-Pass-123" });
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
         var tokens = JsonDocument.Parse(await login.Content.ReadAsStringAsync()).RootElement;

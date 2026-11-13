@@ -11,10 +11,9 @@ public interface ISlimAuthManager
     /// <summary>
     /// Signs <paramref name="user"/> in after <b>your</b> first factor – a client certificate, a magic link, your own
     /// password check – with every rule of <c>/login</c> that follows it: inactive (<c>account_disabled</c>), locked
-    /// (<c>locked_out</c>) and unconfirmed with <c>RequireConfirmedEmail</c> (<c>email_not_confirmed</c>) are refused,
-    /// sign-in guards apply. If steps follow – the second factor of an account with 2FA, an own password instead of one
+    /// (<c>locked_out</c>) are refused, sign-in guards apply. If steps follow – the mailbox of an unconfirmed address, the second factor of an account with 2FA, an own password instead of one
     /// set by an administrator – no session is issued: <see cref="SlimAuthResult.ActionRequired"/> holds them; return it
-    /// with status 200, the client continues at <c>POST /auth/login/2fa</c> and <c>/auth/login/password-change</c> like
+    /// with status 200, the client continues at <c>POST /auth/login/verify-email</c>, <c>/auth/login/2fa</c> and <c>/auth/login/password-change</c> like
     /// after a password. Pass <paramref name="secondFactorVerified"/> only if your first factor already is multi-factor
     /// (smart card with PIN).
     /// </summary>

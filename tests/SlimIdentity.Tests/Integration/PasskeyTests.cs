@@ -71,6 +71,24 @@ public sealed class PasskeyTests
     }
 
     [Fact]
+    public async Task A_passkey_sign_in_of_an_unconfirmed_account_asks_for_the_mailbox()
+    {
+        await using var app = await TestApp.StartAsync(WithPasskeys());
+        using var key = new SoftwarePasskey();
+        await RegisterAsync(app, await SignedInAsync(app), key);
+        await app.SetEmailConfirmedAsync(TestApp.UserEmail, false);
+
+        var (status, body) = await LoginAsync(app, key);
+
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal("verify_email", body.GetProperty("actions")[0].GetString());
+        Assert.False(body.TryGetProperty("accessToken", out _));
+        var code = (await app.Mail.WaitForAsync("verification-code", TestApp.UserEmail)).Payload;
+        var session = await app.CreateClient().PostJsonAsync("/auth/login/verify-email", new { flowToken = body.Str("flowToken"), code });
+        Assert.False(string.IsNullOrEmpty(session.Str("accessToken")));
+    }
+
+    [Fact]
     public async Task The_user_handle_is_random_and_shared_by_the_passkeys_of_one_account()
     {
         await using var app = await TestApp.StartAsync(WithPasskeys());
@@ -170,10 +188,10 @@ public sealed class PasskeyTests
         await me.PostJsonAsync("/auth/passkeys/register/options", new { password = "wrong" }, HttpStatusCode.BadRequest);
         await me.PostJsonAsync("/auth/passkeys/register/options", new { }, HttpStatusCode.BadRequest);
 
-        await app.CreateClient().PostJsonAsync("/auth/register", new { email = "fresh@test.local", password = "Fresh-Pass-123!" });
-        var fresh = await SignedInAsync(app, "fresh@test.local", "Fresh-Pass-123!");
+        await app.SetEmailConfirmedAsync(TestApp.UserEmail, false);
         Assert.Equal("email_not_confirmed",
-            (await fresh.PostJsonAsync("/auth/passkeys/register/options", new { password = "Fresh-Pass-123!" }, HttpStatusCode.Forbidden)).Str("code"));
+            (await me.PostJsonAsync("/auth/passkeys/register/options", new { password = TestApp.UserPassword }, HttpStatusCode.Forbidden)).Str("code"));
+        await app.SetEmailConfirmedAsync(TestApp.UserEmail, true);
 
         var admin = await SignedInAsync(app, TestApp.AdminEmail, TestApp.AdminPassword);
         var impersonation = app.CreateClient();

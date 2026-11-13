@@ -19,6 +19,7 @@ public sealed class WithoutEmailTests
     [InlineData("/auth/register")]
     [InlineData("/auth/verify-email")]
     [InlineData("/auth/resend-verification")]
+    [InlineData("/auth/login/verify-email")]
     [InlineData("/auth/change-email")]
     [InlineData("/auth/confirm-email-change")]
     public async Task Mail_based_endpoints_are_not_mapped(string path)
@@ -56,14 +57,6 @@ public sealed class WithoutEmailTests
         await using var app = await TestApp.StartAsync(Mailless(allowSelfRegistration: true));
         await app.CreateClient().PostJsonAsync("/auth/register", new { email = "new@test.local", password = "New-Member-Pass-1" });
         await app.LoginBearerAsync("new@test.local", "New-Member-Pass-1");
-    }
-
-    [Fact]
-    public async Task Self_registration_with_required_confirmation_cannot_start()
-    {
-        var error = await Assert.ThrowsAnyAsync<Exception>(() => TestApp.StartAsync(
-            Mailless(allowSelfRegistration: true, configure: o => o.SignIn.RequireConfirmedEmail = true)));
-        Assert.Contains("RequireConfirmedEmail", error.ToString());
     }
 
     [Fact]

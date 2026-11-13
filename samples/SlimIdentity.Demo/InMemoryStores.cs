@@ -362,6 +362,9 @@ public sealed class ConsoleEmailSender(DemoMailbox mailbox) : ISlimEmailSender
     public Task SendTwoFactorCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) =>
         Write("Your sign-in code", email, code);
 
+    public Task SendEmailVerificationCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) =>
+        Write("Confirm your e-mail address", email, code);
+
     public Task SendEmailChangeConfirmationAsync(SlimEmailContext context, string newEmail, string confirmationTokenOrLink, CancellationToken ct) =>
         Write("Confirm your new e-mail address", newEmail, confirmationTokenOrLink);
 

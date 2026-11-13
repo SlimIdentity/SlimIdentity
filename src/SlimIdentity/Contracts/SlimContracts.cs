@@ -112,6 +112,19 @@ public sealed record SlimResetPasswordRequest(string Token, string NewPassword)
     }
 }
 
+/// <summary>Body of <c>POST /auth/login/verify-email</c>: confirms the address during a sign-in.</summary>
+/// <param name="FlowToken"><c>flowToken</c> of an <c>action_required</c> answer with <c>verify_email</c> as first step.</param>
+/// <param name="Code">The 6-digit code from the mail sent with that answer.</param>
+public sealed record SlimVerifyEmailLoginRequest(string FlowToken, string? Code)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("FlowToken = ").Append(SlimRedaction.Mask(FlowToken));
+        builder.Append(", Code = ").Append(SlimRedaction.Mask(Code));
+        return true;
+    }
+}
+
 /// <summary>Body of <c>POST /auth/login/password-change</c>: the forced change of a password set by an administrator.</summary>
 /// <param name="FlowToken"><c>flowToken</c> of an <c>action_required</c> answer with <c>change_password</c> as first step.</param>
 /// <param name="NewPassword">New password according to the password policy, different from the current one.</param>
@@ -335,8 +348,9 @@ public sealed class SlimActionRequiredResponse
     /// <summary>Always <c>action_required</c>.</summary>
     public string Status { get; init; } = SlimErrorCodes.ActionRequired;
     /// <summary>
-    /// The open steps in order; the first one is taken now: <c>second_factor</c> (<c>POST /auth/login/2fa</c>) or
-    /// <c>change_password</c> (<c>POST /auth/login/password-change</c>). Clients ignore steps they do not know.
+    /// The open steps in order; the first one is taken now: <c>verify_email</c> (<c>POST /auth/login/verify-email</c>),
+    /// <c>second_factor</c> (<c>POST /auth/login/2fa</c>) or <c>change_password</c> (<c>POST /auth/login/password-change</c>).
+    /// Clients ignore steps they do not know.
     /// </summary>
     public required IReadOnlyList<string> Actions { get; init; }
     /// <summary>Token of the sign-in for the step endpoints and <c>POST /auth/flow</c>; every step answers with a new one.</summary>

@@ -86,6 +86,14 @@ Content-Type: application/json
 { "token": "<token from console>" }
 
 ###
+# or at sign-in: login of the unconfirmed account answers 200 { status: "action_required", actions: ["verify_email"], flowToken }
+# and mails a 6-digit code (printed to the console)
+POST {{auth}}/login/verify-email
+Content-Type: application/json
+
+{ "flowToken": "<flowToken>", "code": "123456" }
+
+###
 POST {{auth}}/forgot-password
 Content-Type: application/json
 

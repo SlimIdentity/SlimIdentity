@@ -107,9 +107,6 @@ public sealed class SlimEndpointOptions
 /// <summary>Sign-in requirements and answers.</summary>
 public sealed class SlimSignInOptions
 {
-    /// <summary>Rejects logins (403 <c>email_not_confirmed</c>) until the e-mail is verified.</summary>
-    public bool RequireConfirmedEmail { get; set; }
-
     /// <summary>
     /// <c>false</c> (default, OWASP): <c>/login</c> answers inactive and locked accounts exactly like a wrong password
     /// (401 <c>invalid_credentials</c>, same hashing time), so the response reveals neither existence nor state.

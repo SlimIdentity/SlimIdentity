@@ -45,6 +45,8 @@ public static class SlimEmailKinds
     public const string LockoutNotification = "lockout-notification";
     /// <summary><see cref="ISlimEmailSender.SendTwoFactorCodeAsync"/>.</summary>
     public const string TwoFactorCode = "two-factor-code";
+    /// <summary><see cref="ISlimEmailSender.SendEmailVerificationCodeAsync"/>.</summary>
+    public const string VerificationCode = "verification-code";
 }
 
 /// <summary>

@@ -50,19 +50,19 @@ public sealed class ReviewRound2Tests
     [Fact]
     public async Task F01_the_second_factor_needs_a_confirmed_address_and_then_survives_a_reset()
     {
-        await using var app = await TestApp.StartAsync();   // RequireConfirmedEmail = false (default)
+        await using var app = await TestApp.StartAsync();
         const string email = "legit-unconfirmed@test.local";
         const string pass = "Legit-Pass-123!";
         await app.CreateClient().PostJsonAsync("/auth/register", new { email, password = pass });
-        var verifyToken = (await app.Mail.WaitForAsync("verification", email)).Payload;
         var me = app.CreateClient();
-        me.BearerToken = (await app.LoginBearerAsync(email, pass)).AccessToken;
+        me.BearerToken = (await app.LoginConfirmingAsync(email, pass)).AccessToken;
+        await app.SetEmailConfirmedAsync(email, false);
 
         // unconfirmed: no second factor – nobody has proven the mailbox yet, a later proof would have to remove it
         Assert.Equal("email_not_confirmed", (await me.PostJsonAsync("/auth/2fa/setup", null, HttpStatusCode.Forbidden)).Str("code"));
         await me.PostJsonAsync("/auth/2fa/enable-email", new { password = pass }, HttpStatusCode.Forbidden);
 
-        await app.CreateClient().PostJsonAsync("/auth/verify-email", new { token = verifyToken });
+        await app.SetEmailConfirmedAsync(email, true);
         var setup = await me.PostJsonAsync("/auth/2fa/setup");
         await me.PostJsonAsync("/auth/2fa/enable", new { setupToken = setup.Str("setupToken"), code = Totp(app, setup.Str("sharedKey")), password = pass });
 
@@ -102,8 +102,13 @@ public sealed class ReviewRound2Tests
         const string victim = "victim-ext@test.local";
         await using var app = await TestApp.StartAsync(SocialProvider("attacker-sub", "attacker@test.local"));
         await app.CreateClient().PostJsonAsync("/auth/register", new { email = victim, password = "Attacker-Pass-123" });
+        var pending = await app.CreateClient().PostJsonAsync("/auth/login", new { email = victim, password = "Attacker-Pass-123" });
+        Assert.Equal("verify_email", pending.GetProperty("actions")[0].GetString());   // no session without the mailbox
+
+        // a session whose address is unconfirmed again (changed by the host, imported data) cannot link either
         var attacker = app.CreateClient();
-        attacker.BearerToken = (await app.LoginBearerAsync(victim, "Attacker-Pass-123")).AccessToken;
+        attacker.BearerToken = (await app.LoginConfirmingAsync(victim, "Attacker-Pass-123")).AccessToken;
+        await app.SetEmailConfirmedAsync(victim, false);
 
         // the attacker links an own provider account through the built-in link flow
         var (verifier, challenge) = ReviewRound1Tests.Pkce();

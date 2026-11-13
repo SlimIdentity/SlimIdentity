@@ -20,7 +20,7 @@ Without OpenTelemetry you can watch the counters live: `dotnet-counters monitor 
 
 | Instrument | Tags | Meaning |
 | :--- | :--- | :--- |
-| `slimidentity.logins` | `result` (`success`, `invalid_password`, `unknown_user`, `account_disabled`, `locked_out`, `requires_two_factor`, `email_not_confirmed`, `password_change_required`, `rejected`, `passkey_rejected`), `mode` (`cookie`, `bearer`) | Sign-in attempts (password and passkey) |
+| `slimidentity.logins` | `result` (`success`, `invalid_password`, `unknown_user`, `account_disabled`, `locked_out`, `requires_two_factor`, `email_not_confirmed` (the `verify_email` step follows), `invalid_verification_code`, `too_many_attempts`, `password_change_required`, `rejected`, `passkey_rejected`), `mode` (`cookie`, `bearer`) | Sign-in attempts (password and passkey) |
 | `slimidentity.two_factor.verifications` | `method` (`totp`, `email`, `recovery`, `remembered_device`), `result` (`success`, `failure`, `challenge_reused`) | Second-factor attempts and skips on remembered devices |
 | `slimidentity.lockouts` | – | Account lockouts |
 | `slimidentity.token_refreshes` | `result` (`success`, `invalid`, `reuse_detected`, `session_expired`) | Refresh-token rotations |

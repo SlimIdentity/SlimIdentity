@@ -19,8 +19,8 @@ export interface AuthResponse {
 }
 
 /**
- * The password (passkey, external login) was right, but steps follow before the session: "second_factor" at
- * loginTwoFactor / loginRecoveryCode, "change_password" (set by an administrator) at completePasswordChange. Each step
+ * The password (passkey, external login) was right, but steps follow before the session: "verify_email" (code from
+ * the mail) at verifyEmail, "second_factor" at loginTwoFactor / loginRecoveryCode, "change_password" (set by an administrator) at completePasswordChange. Each step
  * answers with the remaining ones and a new flowToken – or with the session.
  */
 export interface ActionRequired {
@@ -263,6 +263,11 @@ export const cookieAuth = {
   /** On success every session of the account ends – sign in again with the new address. */
   async confirmEmailChange(token: string): Promise<FormResult> {
     return toFormResult(await cookieFetch("/auth/confirm-email-change", { method: "POST", body: JSON.stringify({ token }) }));
+  },
+
+  /** Step "verify_email": the 6-digit code from the mail confirms the address. */
+  async verifyEmail(flowToken: string, code: string): Promise<LoginResult> {
+    return toLoginResult(await cookieFetch("/auth/login/verify-email", { method: "POST", body: JSON.stringify({ flowToken, code }) }));
   },
 
   /** "Remember this device" sets a cookie (if TwoFactor.RememberDeviceLifetime is configured on the server). */
@@ -629,6 +634,11 @@ export const bearerAuth = {
     const result = await toLoginResult(r);
     if (result.kind === "ok") storeTokens(result.auth);
     return result;
+  },
+
+  /** Step "verify_email": the 6-digit code from the mail confirms the address. */
+  async verifyEmail(flowToken: string, code: string): Promise<LoginResult> {
+    return flowStep("/login/verify-email", { flowToken, code });
   },
 
   async loginTwoFactor(flowToken: string, code: string, rememberDevice = false): Promise<LoginResult> {

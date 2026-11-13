@@ -34,7 +34,6 @@ All defaults are the secure choice. The options are listed in three tiers – mo
 
 | Option | Default | Description |
 | :--- | :--- | :--- |
-| `SignIn.RequireConfirmedEmail` | `false` | Rejects logins (`403 email_not_confirmed`) until the e-mail is verified. |
 | `Endpoints.EnableRegistration` | `true` | `/register`. Disable for invite-only apps or custom registration. |
 | `Endpoints.DefaultUseCookies` | `false` | Mode when the request has no `?useCookies=` (only relevant if both modes are available). |
 | `Password.MinimumLength` | `8` | At least 6; 12 or more is recommended without 2FA. |

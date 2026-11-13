@@ -28,6 +28,13 @@ public sealed class SlimNullEmailSender(ILogger<SlimNullEmailSender> logger) : I
     }
 
     /// <inheritdoc />
+    public Task SendEmailVerificationCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct)
+    {
+        Log.NullMailVerificationCode(logger, email, code);
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
     public Task SendEmailChangeConfirmationAsync(SlimEmailContext context, string newEmail, string confirmationTokenOrLink, CancellationToken ct)
     {
         Log.NullMailEmailChange(logger, newEmail, confirmationTokenOrLink);

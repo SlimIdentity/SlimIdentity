@@ -70,7 +70,8 @@ verifier – an intercepted code (deep link, history, another app) is worthless.
 3. Otherwise a new password-less user is created (`AllowAutoRegistration`) – only for a **verified** e-mail, else
    `slim_error=email_not_verified` –, or `slim_error=registration_disabled`.
 
-Inactive, locked and (with `RequireConfirmedEmail`) unconfirmed accounts are rejected with matching error codes.
+Inactive and locked accounts are rejected with matching error codes. An account whose address is unconfirmed (only
+possible for one already linked) continues with the `verify_email` step.
 
 ## Linking while signed in
 

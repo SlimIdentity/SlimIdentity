@@ -10,12 +10,12 @@ internal sealed class SlimMailThrottle(SlimSharedStateAccess state)
 {
     internal static readonly TimeSpan Window = TimeSpan.FromMinutes(15);
     internal const int PerKindAndRecipient = 3;
-    internal const int TwoFactorCodesPerRecipient = 5;   // users legitimately retry a sign-in more often
+    internal const int CodesPerRecipient = 5;   // sign-in codes: users legitimately retry a sign-in more often
 
     /// <summary>True if a mail of <paramref name="kind"/> may be sent to <paramref name="recipient"/> now (and counts it).</summary>
     public async Task<bool> TryAcquireAsync(string kind, string recipient, CancellationToken ct)
     {
-        var limit = kind == SlimEmailKinds.TwoFactorCode ? TwoFactorCodesPerRecipient : PerKindAndRecipient;
+        var limit = kind is SlimEmailKinds.TwoFactorCode or SlimEmailKinds.VerificationCode ? CodesPerRecipient : PerKindAndRecipient;
         var count = await state.CountAsync(SlimSharedStateAccess.Mail, $"{kind}\n{recipient.Trim().ToUpperInvariant()}", Window, ct);
         return count <= limit;
     }

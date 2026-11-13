@@ -62,7 +62,7 @@ A single instance with locally persisted keys is a valid setup – then 8002/800
   instances × `PermitLimit`. The protection that matters most is not affected: the **account lockout** counts failures
   in the database and applies across all instances (also proven by `MultiInstanceTests`).
 - **Without a shared state** (item 6) single-use codes and the mail limit per recipient (3 per kind and 15 minutes,
-  5 for 2FA codes) are tracked per instance: a code can be redeemed once on every instance within its lifetime (exchange
+  5 for sign-in codes) are tracked per instance: a code can be redeemed once on every instance within its lifetime (exchange
   and link codes: 1 minute, PKCE-bound; logout tokens: 5 minutes, server to server), and the mail limit is a multiple.
 
 If you need a hard global limit per client, put it in front of the instances – the gateway sees every request:

@@ -28,7 +28,7 @@ internal sealed class SlimSignInFlow(
 
     /// <summary>
     /// Starts a sign-in whose first factor is proven: the session, the open steps (<see cref="SlimAuthResult.ActionRequired"/>)
-    /// or a refusal – <c>account_disabled</c>, <c>email_not_confirmed</c>, <c>two_factor_unavailable</c> or, with
+    /// or a refusal – <c>account_disabled</c>, <c>two_factor_unavailable</c> or, with
     /// <paramref name="refuseLockedSecondFactor"/>, <c>locked_out</c> for a locked second factor.
     /// </summary>
     public async Task<SlimAuthResult> StartAsync(SlimUser user, bool cookies, bool rememberMe, string amr, SlimSignInProofs proofs,
@@ -47,7 +47,7 @@ internal sealed class SlimSignInFlow(
             decision = SlimSignInChain.Evaluate(user, proofs, O);
         }
 
-        if (Refusal(decision) is { } refusal) return SlimAuthResult.Failed(refusal);
+        if (decision.Refusal is { } refusal) return SlimAuthResult.Failed(refusal);
         if (decision.Complete) return await authManager.SignInCoreAsync(user, cookies, rememberMe, amr, null, null, true, ct);
 
         // no code is sent that cannot be used
@@ -66,7 +66,7 @@ internal sealed class SlimSignInFlow(
     public async Task<SlimAuthResult> ContinueAsync(SlimUser user, SlimFlowPayload state, CancellationToken ct)
     {
         var decision = SlimSignInChain.Evaluate(user, state.Proofs, O);
-        if (Refusal(decision) is { } refusal) return SlimAuthResult.Failed(refusal);
+        if (decision.Refusal is { } refusal) return SlimAuthResult.Failed(refusal);
         if (!decision.Complete) return await StepsAsync(user, state, decision, ct);
 
         // the last step of parallel requests with one token completes the flow once
@@ -97,7 +97,7 @@ internal sealed class SlimSignInFlow(
         if (request is null || !TryRead(request.FlowToken, out var state, out var expiresAt)) return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
         var user = await FindUserAsync(state, ct);
         var decision = user is null ? default : SlimSignInChain.Evaluate(user, state.Proofs, O);
-        if (user is null || Refusal(decision) is not null || decision.Complete) return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
+        if (user is null || decision.Refusal is not null || decision.Complete) return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
 
         return SlimResults.ActionRequired(new SlimActionRequiredResponse
         {
@@ -138,16 +138,21 @@ internal sealed class SlimSignInFlow(
     internal static string HashEmailCode(string userId, string code, long issuedAt) =>
         SlimHashing.Sha256Hex($"slimidentity.email-code.v1:{userId}:{issuedAt}:{code}");
 
-    // the mailbox is proven outside the flow: by the link of the verification mail
-    private static string? Refusal(SlimSignInDecision decision) =>
-        decision.Refusal ?? (decision.Next == SlimSignInActions.VerifyEmail ? SlimErrorCodes.EmailNotConfirmed : null);
+    /// <summary>Bound to the address: the code proves this mailbox only.</summary>
+    internal static string HashVerificationCode(string userId, string email, string code, long issuedAt) =>
+        SlimHashing.Sha256Hex($"slimidentity.verification-code.v1:{userId}:{email.Trim().ToUpperInvariant()}:{issuedAt}:{code}");
 
     private static DateTimeOffset Deadline(SlimFlowPayload state) =>
         DateTimeOffset.FromUnixTimeMilliseconds(state.StartedAt) + SlimIdentityDefaults.SignInFlowLifetime;
 
     private async Task<SlimAuthResult> StepsAsync(SlimUser user, SlimFlowPayload state, SlimSignInDecision decision, CancellationToken ct)
     {
-        if (decision.Next == SlimSignInActions.SecondFactor && state.Method is null)
+        if (decision.Next == SlimSignInActions.VerifyEmail && state.Method is null)
+        {
+            var issuedAt = time.GetUtcNow().ToUnixTimeMilliseconds();
+            state = state with { Method = SlimSignInActions.VerifyEmail, CodeHash = await SendVerificationCodeAsync(user, issuedAt, ct), IssuedAt = issuedAt };
+        }
+        else if (decision.Next == SlimSignInActions.SecondFactor && state.Method is null or SlimSignInActions.VerifyEmail)
         {
             if (await ChallengeAsync(user, ct) is not { } challenge) return SlimAuthResult.Failed(SlimErrorCodes.TwoFactorUnavailable);
             state = state with { Method = challenge.Method, CodeHash = challenge.CodeHash, IssuedAt = challenge.IssuedAt };
@@ -166,7 +171,7 @@ internal sealed class SlimSignInFlow(
     }
 
     private static SlimActionDetails? Details(SlimSignInDecision decision, SlimFlowPayload state) =>
-        decision.Next == SlimSignInActions.SecondFactor && state.Method is { } method
+        decision.Next == SlimSignInActions.SecondFactor && state.Method is { } method and not SlimSignInActions.VerifyEmail
             ? new SlimActionDetails
             {
                 SecondFactor = new SlimSecondFactorDetails
@@ -194,17 +199,31 @@ internal sealed class SlimSignInFlow(
         if (!O.EmailCodesEnabled) return (SlimLoginHandlers.MethodRecovery, null, issuedAt);
 
         var code = SlimTotp.GenerateNumericCode();
-        // sent inline (the user waits for it); over the per-recipient limit the challenge is issued without a mail
-        if (await mailThrottle.TryAcquireAsync(SlimEmailKinds.TwoFactorCode, user.Email, ct))
+        var sent = await SendCodeAsync(SlimEmailKinds.TwoFactorCode, user, (s, x, c) => s.SendTwoFactorCodeAsync(x, user.Email, code, c), ct);
+        return (SlimLoginHandlers.MethodEmail, sent ? HashEmailCode(user.Id, code, issuedAt) : null, issuedAt);
+    }
+
+    /// <summary>The code of step <c>verify_email</c>: its hash, or <c>null</c> if no mail was sent.</summary>
+    private async Task<string?> SendVerificationCodeAsync(SlimUser user, long issuedAt, CancellationToken ct)
+    {
+        var code = SlimTotp.GenerateNumericCode();
+        return await SendCodeAsync(SlimEmailKinds.VerificationCode, user, (s, x, c) => s.SendEmailVerificationCodeAsync(x, user.Email, code, c), ct)
+            ? HashVerificationCode(user.Id, user.Email, code, issuedAt)
+            : null;
+    }
+
+    // Sent inline (the user waits for it). Over the per-recipient limit the step is issued without a mail and without a
+    // valid code: a code that was never sent cannot be guessed either.
+    private async Task<bool> SendCodeAsync(string kind, SlimUser user, Func<ISlimEmailSender, SlimEmailContext, CancellationToken, Task> send, CancellationToken ct)
+    {
+        if (!await mailThrottle.TryAcquireAsync(kind, user.Email, ct))
         {
-            await services.GetRequiredService<ISlimEmailSender>().SendTwoFactorCodeAsync(mailDispatcher.CreateContext(SlimEmailKinds.TwoFactorCode, user.Id), user.Email, code, ct);
-            metrics.Mail(SlimEmailKinds.TwoFactorCode, "sent");
+            Log.MailThrottled(logger, kind);
+            metrics.Mail(kind, "throttled");
+            return false;
         }
-        else
-        {
-            Log.MailThrottled(logger, SlimEmailKinds.TwoFactorCode);
-            metrics.Mail(SlimEmailKinds.TwoFactorCode, "throttled");
-        }
-        return (SlimLoginHandlers.MethodEmail, HashEmailCode(user.Id, code, issuedAt), issuedAt);
+        await send(services.GetRequiredService<ISlimEmailSender>(), mailDispatcher.CreateContext(kind, user.Id), ct);
+        metrics.Mail(kind, "sent");
+        return true;
     }
 }

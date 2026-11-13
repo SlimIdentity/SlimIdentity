@@ -4,7 +4,7 @@
 import { installVirtualPasskey } from "./virtual-passkey.js";
 
 const $ = (id) => document.getElementById(id);
-const state = { accessToken: null, refreshToken: null, flowToken: null, rememberToken: null, totpSecret: null, link: null };
+const state = { accessToken: null, refreshToken: null, flowToken: null, step: null, rememberToken: null, totpSecret: null, link: null };
 
 // ------------------------------------------------------------------ HTTP
 
@@ -87,11 +87,14 @@ const actions = {
   },
 
   async secondFactor() {
-    const r = await call("POST", "/auth/login/2fa", {
-      flowToken: state.flowToken, code: $("code").value || null, recoveryCode: $("recoveryCode").value || null,
-      rememberDevice: $("rememberDevice").checked,
-    });
-    if (r.ok && !showSteps(r.json)) { storeSession(r.json); $("challenge").hidden = true; $("code").value = ""; $("recoveryCode").value = ""; }
+    const r = state.step === "verify_email"
+      ? await call("POST", "/auth/login/verify-email", { flowToken: state.flowToken, code: $("code").value || null })
+      : await call("POST", "/auth/login/2fa", {
+        flowToken: state.flowToken, code: $("code").value || null, recoveryCode: $("recoveryCode").value || null,
+        rememberDevice: $("rememberDevice").checked,
+      });
+    if (r.ok) { $("code").value = ""; $("recoveryCode").value = ""; }
+    if (r.ok && !showSteps(r.json)) { storeSession(r.json); $("challenge").hidden = true; }
     await updateWho();
   },
 
@@ -379,12 +382,14 @@ async function externalLogin(provider) {
   location.href = `/auth/login/${provider}?useCookies=false&returnUrl=${returnUrl}&code_challenge=${challenge}&code_challenge_method=S256`;
 }
 
-// a sign-in with open steps ("action_required"): the playground shows the second factor; other steps only in the log
+// a sign-in with open steps ("action_required"): the playground shows the mailbox and second-factor steps; others only in the log
 function showSteps(json) {
   if (json?.status !== "action_required") return false;
   state.flowToken = json.flowToken;
-  if (json.actions[0] === "second_factor") {
-    const method = json.details?.secondFactor?.methods?.[0];
+  state.step = json.actions[0];
+  if (state.step === "verify_email" || state.step === "second_factor") {
+    const method = state.step === "verify_email" ? "email" : json.details?.secondFactor?.methods?.[0];
+    $("challengeTitle").textContent = state.step === "verify_email" ? "Confirm your e-mail address" : "Second factor required";
     $("challengeMethod").textContent = method === "totp" ? "authenticator app" : method === "email" ? "code sent by e-mail" : "recovery code";
     $("challenge").hidden = false;
   }

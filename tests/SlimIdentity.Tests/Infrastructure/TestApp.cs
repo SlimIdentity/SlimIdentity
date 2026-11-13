@@ -144,13 +144,42 @@ public sealed class TestApp : IAsyncDisposable
     /// <summary>A client with its own cookie jar (one "browser" / "device").</summary>
     public ApiClient CreateClient() => new(App.GetTestClient());
 
-    /// <summary>Bearer login; returns the token response.</summary>
+    /// <summary>Bearer login that must end in a session; returns the token response.</summary>
     public async Task<AuthTokens> LoginBearerAsync(string email, string password)
     {
         var client = CreateClient();
         var response = await client.PostAsync("/auth/login", new { email, password });
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        return (await response.Content.ReadFromJsonAsync<AuthTokens>(ApiClient.Json))!;
+        var tokens = (await response.Content.ReadFromJsonAsync<AuthTokens>(ApiClient.Json))!;
+        Assert.False(string.IsNullOrEmpty(tokens.AccessToken), "no session: " + await response.Content.ReadAsStringAsync());
+        return tokens;
+    }
+
+    /// <summary>
+    /// Sets the confirmation flag directly in the store and keeps the stamp, so running sessions stay valid
+    /// (an address changed by the host, imported data).
+    /// </summary>
+    public async Task SetEmailConfirmedAsync(string email, bool confirmed)
+    {
+        var user = Users.Get(email);
+        user.EmailConfirmed = confirmed;
+        await Users.UpdateSecurityStateAsync(user, default);
+    }
+
+    /// <summary>
+    /// Bearer login of an account whose address is not confirmed yet: takes step <c>verify_email</c> with the mailed code.
+    /// </summary>
+    public async Task<AuthTokens> LoginConfirmingAsync(string email, string password)
+    {
+        var steps = await CreateClient().PostJsonAsync("/auth/login", new { email, password });
+        Assert.True(steps.TryGetProperty("actions", out var actions), steps.ToString());
+        Assert.Equal("verify_email", actions[0].GetString());
+        var code = (await Mail.WaitForAsync("verification-code", email)).Payload;
+        var response = await CreateClient().PostAsync("/auth/login/verify-email", new { flowToken = steps.GetProperty("flowToken").GetString(), code });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var tokens = (await response.Content.ReadFromJsonAsync<AuthTokens>(ApiClient.Json))!;
+        Assert.False(string.IsNullOrEmpty(tokens.AccessToken), "no session: " + await response.Content.ReadAsStringAsync());
+        return tokens;
     }
 
     public async ValueTask DisposeAsync()

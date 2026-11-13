@@ -83,7 +83,7 @@ Challenge them only if you can show a concrete attack or a concrete integration 
 
 - Refresh-token reuse always revokes the token family; two parallel refreshes with the same token end the session
   (no grace window – clients serialize, see `docs/guides/mobile-bearer.md`).
-- Rate limit is per instance; the mail limit (3 per recipient and kind in 15 min, 5 for 2FA codes) and single-use
+- Rate limit is per instance; the mail limit (3 per recipient and kind in 15 min, 5 for sign-in codes) and single-use
   codes live in `ISlimSharedState` (in memory per instance unless a shared one is registered); the account lockout is
   in the database and global. No distributed limiter (gateway's job).
 - CSRF protection = custom header `X-CSRF` + `Origin` check, always on in cookie mode; `SameSite=Strict` by default.

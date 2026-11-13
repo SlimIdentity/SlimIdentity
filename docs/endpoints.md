@@ -29,8 +29,9 @@ metadata (tag `SlimIdentity`), so typed clients can be generated from `/openapi/
 
 | Endpoint | Body | Success | Errors |
 | :--- | :--- | :--- | :--- |
-| `POST /login` ⏱ | `email`, `password`, `rememberMe`, `twoFactorRememberToken` (bearer, optional) | `200` session, or `200 action_required` (see below) | `400 invalid_request`; `401 invalid_credentials`; `403 email_not_confirmed`; `403 <veto>` of a sign-in guard; with `RevealAccountState`: `403 account_disabled`, `423 locked_out` |
+| `POST /login` ⏱ | `email`, `password`, `rememberMe`, `twoFactorRememberToken` (bearer, optional) | `200` session, or `200 action_required` (see below) | `400 invalid_request`; `401 invalid_credentials`; `403 <veto>` of a sign-in guard; with `RevealAccountState`: `403 account_disabled`, `423 locked_out` |
 | `POST /login/2fa` ⏱ | `flowToken` + `code` or `recoveryCode`, `rememberDevice` | `200` session (+ `twoFactorRememberToken` in bearer mode / cookie `SlimAuth.2fa` in cookie mode when remembered), or `200 action_required` with the remaining steps | `401 invalid_token`, `401 invalid_two_factor_code`, `423 locked_out` |
+| `POST /login/verify-email` ⏱ | `flowToken`, `code` (from the mail of kind `verification-code`) | `200` session, or `200 action_required` with the remaining steps; the address is confirmed | `401 invalid_token`, `401 invalid_verification_code`, `429 too_many_attempts` (5 wrong codes per flow, 10 per address in 24 hours – the link from `/resend-verification` still works) |
 | `POST /login/password-change` ⏱ | `flowToken`, `newPassword` | `200` session, or `200 action_required` with the remaining steps | `400 password_unchanged`, `400` validation, `401 invalid_token`, `423 locked_out` |
 | `POST /flow` ⏱ | `flowToken` | `200 action_required` with the open steps of the token – read only, nothing is sent or consumed | `401 invalid_token` (also for a completed, expired or outdated flow) |
 | `POST /refresh` | `refreshToken` | `200` new token pair | `400 invalid_request`, `401 invalid_token`, `401 session_expired` |
@@ -44,14 +45,17 @@ When the first factor is right but steps follow, the answer is `200` without a s
   "details": { "secondFactor": { "methods": ["totp", "recovery"] } } }
 ```
 
-`actions` are the open steps in their order; the first one is next. `second_factor` is completed at `/login/2fa`
+`actions` are the open steps in their order; the first one is next. `verify_email` – with mail, every sign-in of an
+account with an unconfirmed address – is completed at `/login/verify-email` with the code mailed when the step comes up
+(5 code mails per recipient in 15 minutes, shared with second-factor codes; beyond that no code is sent and none is
+accepted). `second_factor` is completed at `/login/2fa`
 (`methods[0]` is the one asked for; `recovery` alone means no code can be sent – only a recovery code helps),
 `change_password` at `/login/password-change` (a password set by an administrator with `mustChange`,
 [running without e-mail](guides/without-email.md#the-forced-password-change)). Every step answers with the session or
 with the remaining steps and a new `flowToken`; a flow lasts 15 minutes from the first factor and completes once. The
 same answer comes from `/login/external/exchange`, `/passkeys/login`, `/invitation/accept` and
-`ISlimAuthManager.SignInAsync`. `/login/2fa` and `/login/password-change` use the mode chosen at the start. `/refresh` only exists with `ISlimRefreshTokenStore`; `/login/2fa` only
-with `ISlimTwoFactorStore`.
+`ISlimAuthManager.SignInAsync`. `/login/verify-email`, `/login/2fa` and `/login/password-change` use the mode chosen at the start. `/refresh` only exists with `ISlimRefreshTokenStore`; `/login/2fa` only
+with `ISlimTwoFactorStore`; `/login/verify-email` not with `WithoutEmail()`.
 
 ## External login (`ISlimExternalLoginStore`)
 
@@ -59,7 +63,7 @@ with `ISlimTwoFactorStore`.
 | :--- | :--- |
 | `GET /login/{provider}?returnUrl=…&useCookies=…&code_challenge=…&code_challenge_method=S256` ⏱ | Browser navigation (not `fetch`). Redirects to the identity provider. Bearer mode requires the PKCE challenge. `404 unknown_provider`, `400 invalid_return_url`, `400 code_challenge_required`, `400 invalid_code_challenge`. |
 | `GET /login/{provider}/callback` | Handled internally; redirects to `returnUrl`. |
-| `POST /login/external/exchange` ⏱ | Bearer clients: `{ "code", "codeVerifier", "twoFactorRememberToken"? }` – `code` from the redirect's fragment, `codeVerifier` from the PKCE challenge → token pair, or `200 action_required`. `401 invalid_token`, `403 account_disabled`, `403 email_not_confirmed`. |
+| `POST /login/external/exchange` ⏱ | Bearer clients: `{ "code", "codeVerifier", "twoFactorRememberToken"? }` – `code` from the redirect's fragment, `codeVerifier` from the PKCE challenge → token pair, or `200 action_required`. `401 invalid_token`, `403 account_disabled`. |
 | `POST /link/external` ⏱ 🔒 | Links the identity of a link flow (`GET /login/{provider}?link=true&code_challenge=…`, code in `#slim_link_code=…`) to the signed-in account: `{ "code", "codeVerifier", "password" }` → `200 external_login_linked`. `400 invalid_password`, `401 invalid_token`, `403 email_not_confirmed`, `409 external_login_taken`, `423`. |
 | `GET /sign-in-methods` 🔒 | `200` `hasPassword`, `externalLogins` (`provider`, `providerKey`). |
 | `POST /sign-in-methods/external/remove` ⏱ 🔒 | `{ "provider", "providerKey", "password" }` (password if the account has one) → `200` with a new session for this client (other sessions end, like on a password change). `400 invalid_password`, `403` during impersonation, `404 external_login_not_found`, `409 last_sign_in_method` / `concurrent_change`, `423`. |
@@ -67,7 +71,7 @@ with `ISlimTwoFactorStore`.
 
 Redirect results on `returnUrl`: cookie mode – cookie set, no parameters; bearer mode – `#code=…` (fragment); steps
 follow in cookie mode – `#slim_status=action_required&flowToken=…` (`POST /flow` names them); errors – `?slim_error=` one of
-`account_conflict`, `email_not_verified`, `registration_disabled`, `email_required`, `account_disabled`, `locked_out`, `email_not_confirmed`,
+`account_conflict`, `email_not_verified`, `registration_disabled`, `email_required`, `account_disabled`, `locked_out`,
 `provider_mismatch`, `missing_provider_key`, `code_challenge_required` (bearer mode or link flow without PKCE),
 `two_factor_unavailable`, the veto code of a registration or sign-in guard, `sign_in_failed` (no session could be
 issued) – and, with `UseSlimErrorRedirects()` on the
@@ -116,7 +120,7 @@ Links are created by the host with `ISlimAuthManager.CreateInvitationAsync` – 
 | `POST /passkeys/register/options` ⏱ 🔒 | `password` | `200` `options` (creation options, base64url), `state` | `400 invalid_password`, `403 password_required` (account without a password), `403 email_not_confirmed`, `403` during impersonation, `423` |
 | `POST /passkeys/register` ⏱ 🔒 | `state`, `credential` (result of `navigator.credentials.create`), `name` | `200` `id`, `name`, `createdUtc`, `backupEligible`, `backedUp` | `400 invalid_passkey`, `409 passkey_exists` |
 | `POST /passkeys/login/options` ⏱ | – | `200` `options` (request options), `state` | – |
-| `POST /passkeys/login?useCookies=…` ⏱ | `state`, `credential` (result of `navigator.credentials.get`), `rememberMe` | `200` session (`amr: passkey`, no second factor), or `200 action_required` (`change_password`) | `401 invalid_passkey`, `403 account_disabled`, `403 email_not_confirmed`, `403 <veto>` |
+| `POST /passkeys/login?useCookies=…` ⏱ | `state`, `credential` (result of `navigator.credentials.get`), `rememberMe` | `200` session (`amr: passkey`, no second factor), or `200 action_required` (`verify_email`, `change_password`) | `401 invalid_passkey`, `403 account_disabled`, `403 <veto>` |
 | `POST /sign-in-methods/passkeys/rename` 🔒 | `id`, `name` (1–64 characters) | `200 passkey_renamed` | `400 invalid_name`, `404 passkey_not_found` |
 | `POST /sign-in-methods/passkeys/remove` ⏱ 🔒 | `id`, `password` (if the account has one) | `200` with a new session for this client (other sessions end) | `400 invalid_password`, `404 passkey_not_found`, `409 last_sign_in_method` / `concurrent_change` |
 

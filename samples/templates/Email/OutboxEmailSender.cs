@@ -34,6 +34,7 @@ public sealed class OutboxEmailSender(AppDbContext db, TimeProvider time) : ISli
     public Task SendVerificationEmailAsync(SlimEmailContext context, string email, string link, CancellationToken ct) => AddAsync(context, email, link, ct);
     public Task SendPasswordResetEmailAsync(SlimEmailContext context, string email, string link, CancellationToken ct) => AddAsync(context, email, link, ct);
     public Task SendTwoFactorCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) => AddAsync(context, email, code, ct);
+    public Task SendEmailVerificationCodeAsync(SlimEmailContext context, string email, string code, CancellationToken ct) => AddAsync(context, email, code, ct);
     public Task SendEmailChangeConfirmationAsync(SlimEmailContext context, string newEmail, string link, CancellationToken ct) => AddAsync(context, newEmail, link, ct);
     public Task SendEmailChangedNotificationAsync(SlimEmailContext context, string oldEmail, string newEmail, CancellationToken ct) => AddAsync(context, oldEmail, newEmail, ct);
     public Task SendAccountExistsEmailAsync(SlimEmailContext context, string email, CancellationToken ct) => AddAsync(context, email, "", ct);
@@ -160,6 +161,7 @@ public sealed class OutboxMailWorker<TTransport>(IServiceScopeFactory scopes, Ti
             SlimEmailKinds.Verification => transport.SendVerificationEmailAsync(context, mail.To, mail.Payload, ct),
             SlimEmailKinds.PasswordReset => transport.SendPasswordResetEmailAsync(context, mail.To, mail.Payload, ct),
             SlimEmailKinds.TwoFactorCode => transport.SendTwoFactorCodeAsync(context, mail.To, mail.Payload, ct),
+            SlimEmailKinds.VerificationCode => transport.SendEmailVerificationCodeAsync(context, mail.To, mail.Payload, ct),
             SlimEmailKinds.EmailChange => transport.SendEmailChangeConfirmationAsync(context, mail.To, mail.Payload, ct),
             SlimEmailKinds.EmailChanged => transport.SendEmailChangedNotificationAsync(context, mail.To, mail.Payload, ct),
             SlimEmailKinds.AccountExists => transport.SendAccountExistsEmailAsync(context, mail.To, ct),

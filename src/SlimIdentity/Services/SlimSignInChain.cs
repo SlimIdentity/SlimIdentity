@@ -3,7 +3,10 @@ namespace SlimIdentity.Services;
 /// <summary>The steps a sign-in may still need once its first factor is proven, in the order they are taken.</summary>
 internal static class SlimSignInActions
 {
-    /// <summary>The mailbox is proven first (<c>SignIn.RequireConfirmedEmail</c>).</summary>
+    /// <summary>
+    /// The mailbox is proven first, by a code sent within the sign-in: every unconfirmed account, as long as SlimIdentity
+    /// sends mail.
+    /// </summary>
     public const string VerifyEmail = "verify_email";
     /// <summary>The second factor of an account with two-factor authentication.</summary>
     public const string SecondFactor = "second_factor";
@@ -48,7 +51,7 @@ internal static class SlimSignInChain
 
     private static readonly Check[] Checks =
     [
-        new(SlimSignInActions.VerifyEmail, static (user, _, o) => o.SignIn.RequireConfirmedEmail && !user.EmailConfirmed),
+        new(SlimSignInActions.VerifyEmail, static (user, _, o) => o.Email.Enabled && !user.EmailConfirmed),
         // the second factor before the own password: whoever chooses it has proven the account completely
         new(SlimSignInActions.SecondFactor, static (user, proofs, _) => user.TwoFactorEnabled && !proofs.HasFlag(SlimSignInProofs.SecondFactor)),
         new(SlimSignInActions.ChangePassword, static (user, _, _) => user.PasswordChangeRequired),

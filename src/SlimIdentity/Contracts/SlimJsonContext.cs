@@ -42,6 +42,7 @@ namespace SlimIdentity.Contracts;
 [JsonSerializable(typeof(SlimExternalLinkRequest))]
 [JsonSerializable(typeof(SlimExternalLinkPayload))]
 [JsonSerializable(typeof(SlimPasswordChangeLoginRequest))]
+[JsonSerializable(typeof(SlimVerifyEmailLoginRequest))]
 [JsonSerializable(typeof(List<SlimSessionDto>))]
 // route / query parameter and framework types (needed by the OpenAPI schema generator under Native AOT)
 [JsonSerializable(typeof(bool?))]
