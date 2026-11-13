@@ -139,15 +139,23 @@ internal sealed class SlimExternalLoginHandlers(
                     // (possibly an attacker, with an own password or an own external login) must not share the account
                     // with the verified owner. Remove the password, every linked identity and every session; the owner
                     // can set a password later via reset.
+                    var claimed = await store.TryWriteSecurityStateAsync(existing, u =>
+                    {
+                        u.EmailConfirmed = true;
+                        u.PasswordHash = string.Empty;
+                        u.PasswordChangeRequired = false;   // the start password is gone – nothing left to change
+                        u.SecurityStamp = SlimUser.NewSecurityStamp();
+                        u.TwoFactorEnabled = false;   // a 2FA set up by the registrant must not lock out the owner
+                    }, ct);
+                    if (!claimed)
+                    {
+                        // the account changed meanwhile (confirmed, password reset …): the next attempt follows the rules above
+                        metrics.ExternalLogin(provider, "conflict");
+                        return Redirect(returnUrl, "slim_error", "account_conflict");
+                    }
                     await externalStore.RemoveExternalLoginsAsync(existing.Id, ct);
                     if (services.GetService<ISlimPasskeySignInMethods>() is { } passkeys)
                         await passkeys.RemoveAllAsync(existing.Id, ct);
-                    existing.EmailConfirmed = true;
-                    existing.PasswordHash = string.Empty;
-                    existing.PasswordChangeRequired = false;   // the start password is gone – nothing left to change
-                    existing.SecurityStamp = SlimUser.NewSecurityStamp();
-                    existing.TwoFactorEnabled = false;   // a 2FA set up by the registrant must not lock out the owner
-                    await store.UpdateSecurityStateAsync(existing, ct);
                     // guesses against the removed password must not lock the owner out of a password set later
                     await services.GetRequiredService<SlimCredentialService>().ResetAttemptsAsync(existing, SlimAttemptFactor.Password, ct);
                     await authManager.RevokeSessionsAsync(existing.Id, null, ct);
@@ -190,10 +198,7 @@ internal sealed class SlimExternalLoginHandlers(
                     return Redirect(returnUrl, "slim_error", "account_conflict");
                 }
                 if (!user.EmailConfirmed)
-                {
-                    user.EmailConfirmed = true;
-                    await store.UpdateSecurityStateAsync(user, ct);
-                }
+                    await store.WriteSecurityStateAsync(user, u => u.EmailConfirmed = true, ct);
                 await externalStore.LinkExternalLoginAsync(user.Id, provider, providerKey, ct);
                 Log.ExternalUserCreated(logger, user.Id, provider);
                 await hooks.RaiseAsync(SlimEventTypes.UserCreated, user.Id, provider, "external", ct: ct);

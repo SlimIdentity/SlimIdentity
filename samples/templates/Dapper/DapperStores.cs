@@ -115,18 +115,23 @@ public sealed class DapperUserStore(NpgsqlDataSource db) : ISlimUserStore
             new { id = user.Id, currentHash, newHash }, cancellationToken: ct));
     }
 
-    public async Task UpdateSecurityStateAsync(SlimUser user, CancellationToken ct)
+    // compare-and-set on the whole stamp: a change based on an outdated copy is never written back over a newer one
+    public async Task<bool> UpdateSecurityStateAsync(SlimUser user, string expectedStamp, CancellationToken ct)
     {
         await using var c = await db.OpenConnectionAsync(ct);
-        await c.ExecuteAsync(new CommandDefinition("""
+        return await c.ExecuteAsync(new CommandDefinition("""
             UPDATE users SET
                 password_hash = @PasswordHash,
                 security_stamp = @SecurityStamp,
                 email_confirmed = @EmailConfirmed,
                 two_factor_enabled = @TwoFactorEnabled,
                 password_change_required = @PasswordChangeRequired
-            WHERE id = @Id::uuid
-            """, user, cancellationToken: ct));
+            WHERE id = @Id::uuid AND COALESCE(security_stamp, '') = @expectedStamp
+            """, new
+            {
+                user.Id, user.PasswordHash, user.SecurityStamp, user.EmailConfirmed, user.TwoFactorEnabled,
+                user.PasswordChangeRequired, expectedStamp,
+            }, cancellationToken: ct)) == 1;
     }
 
     // compare-and-set: a concurrent password or 2FA change is never written back over
@@ -138,19 +143,23 @@ public sealed class DapperUserStore(NpgsqlDataSource db) : ISlimUserStore
             new { id = user.Id, expectedStamp, newStamp }, cancellationToken: ct)) == 1;
     }
 
-    public async Task<bool> UpdateEmailAsync(SlimUser user, string newEmail, CancellationToken ct)
+    public async Task<SlimEmailUpdateResult> UpdateEmailAsync(SlimUser user, string newEmail, string expectedStamp, string newStamp, CancellationToken ct)
     {
         await using var c = await db.OpenConnectionAsync(ct);
         try
         {
             // the UNIQUE constraint on normalized_email decides – no check-then-act race
-            return await c.ExecuteAsync(new CommandDefinition(
-                "UPDATE users SET email = @newEmail, normalized_email = @normalized WHERE id = @id::uuid",
-                new { id = user.Id, newEmail, normalized = newEmail.ToUpperInvariant() }, cancellationToken: ct)) == 1;
+            return await c.ExecuteAsync(new CommandDefinition("""
+                UPDATE users SET email = @newEmail, normalized_email = @normalized, email_confirmed = TRUE, security_stamp = @newStamp
+                WHERE id = @id::uuid AND COALESCE(security_stamp, '') = @expectedStamp
+                """,
+                new { id = user.Id, newEmail, normalized = newEmail.ToUpperInvariant(), expectedStamp, newStamp }, cancellationToken: ct)) == 1
+                ? SlimEmailUpdateResult.Updated
+                : SlimEmailUpdateResult.StampChanged;
         }
         catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UniqueViolation)
         {
-            return false;
+            return SlimEmailUpdateResult.EmailTaken;
         }
     }
 

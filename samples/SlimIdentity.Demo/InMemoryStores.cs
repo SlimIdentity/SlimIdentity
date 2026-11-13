@@ -88,16 +88,20 @@ public sealed class InMemoryUserStore : ISlimUserStore
         return Task.CompletedTask;
     }
 
-    // persists the security fields only (contract of ISlimUserStore)
-    public Task UpdateSecurityStateAsync(SlimUser user, CancellationToken ct)
+    // persists the security fields only, and only while the stamp is unchanged (contract of ISlimUserStore)
+    public Task<bool> UpdateSecurityStateAsync(SlimUser user, string expectedStamp, CancellationToken ct)
     {
-        var stored = _users[user.Id];
-        stored.PasswordHash = user.PasswordHash;
-        stored.SecurityStamp = user.SecurityStamp;
-        stored.EmailConfirmed = user.EmailConfirmed;
-        stored.TwoFactorEnabled = user.TwoFactorEnabled;
-        stored.PasswordChangeRequired = user.PasswordChangeRequired;
-        return Task.CompletedTask;
+        if (!_users.TryGetValue(user.Id, out var stored)) return Task.FromResult(false);
+        lock (stored)
+        {
+            if ((stored.SecurityStamp ?? string.Empty) != expectedStamp) return Task.FromResult(false);
+            stored.PasswordHash = user.PasswordHash;
+            stored.SecurityStamp = user.SecurityStamp;
+            stored.EmailConfirmed = user.EmailConfirmed;
+            stored.TwoFactorEnabled = user.TwoFactorEnabled;
+            stored.PasswordChangeRequired = user.PasswordChangeRequired;
+            return Task.FromResult(true);
+        }
     }
 
     // compare-and-set on the stamp only (contract of ISlimUserStore)
@@ -112,14 +116,19 @@ public sealed class InMemoryUserStore : ISlimUserStore
         }
     }
 
-    public Task<bool> UpdateEmailAsync(SlimUser user, string newEmail, CancellationToken ct)
+    public Task<SlimEmailUpdateResult> UpdateEmailAsync(SlimUser user, string newEmail, string expectedStamp, string newStamp, CancellationToken ct)
     {
         lock (_users)
         {
             if (_users.Values.Any(u => u.Id != user.Id && string.Equals(u.Email, newEmail, StringComparison.OrdinalIgnoreCase)))
-                return Task.FromResult(false);
-            _users[user.Id].Email = newEmail;
-            return Task.FromResult(true);
+                return Task.FromResult(SlimEmailUpdateResult.EmailTaken);
+            if (!_users.TryGetValue(user.Id, out var stored)) return Task.FromResult(SlimEmailUpdateResult.StampChanged);
+            lock (stored)
+            {
+                if ((stored.SecurityStamp ?? string.Empty) != expectedStamp) return Task.FromResult(SlimEmailUpdateResult.StampChanged);
+                (stored.Email, stored.EmailConfirmed, stored.SecurityStamp) = (newEmail, true, newStamp);
+                return Task.FromResult(SlimEmailUpdateResult.Updated);
+            }
         }
     }
 

@@ -23,7 +23,7 @@ public sealed class SeedingTests
         if (admin is null) return;                                                         // created in parallel by another instance
 
         admin.EmailConfirmed = true;                                                       // you vouch for the address
-        await store.UpdateSecurityStateAsync(admin, ct);
+        await store.UpdateSecurityStateAsync(admin, admin.SecurityStamp, ct);
         if (await auth.SetPasswordAsync(admin, startPassword, mustChange: true, ct) is not null)   // 400 with the violated rules
             throw new InvalidOperationException("The start password does not meet the password rules.");
     }

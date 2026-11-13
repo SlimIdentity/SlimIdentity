@@ -174,9 +174,11 @@ internal sealed class SlimAuthManager(
             return SlimIdentity.Http.SlimResults.Validation(errors);
 
         var credentials = services.GetRequiredService<SlimCredentialService>();
-        credentials.ApplyNewPassword(user, password);   // new stamp
-        user.PasswordChangeRequired = mustChange;
-        await store.UpdateSecurityStateAsync(user, ct);
+        await store.WriteSecurityStateAsync(user, u =>
+        {
+            credentials.ApplyNewPassword(u, password);   // new stamp
+            u.PasswordChangeRequired = mustChange;
+        }, ct);
         await credentials.ResetAttemptsAsync(user, SlimAttemptFactor.Password, ct);   // guesses against the old password end
         await RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
         Log.AdminPasswordSet(logger, user.Id, mustChange);
@@ -202,14 +204,16 @@ internal sealed class SlimAuthManager(
     public async Task ResetTwoFactorAsync(SlimUser user, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(user);
+        await store.WriteSecurityStateAsync(user, u =>
+        {
+            u.TwoFactorEnabled = false;
+            u.SecurityStamp = SlimUser.NewSecurityStamp();   // remembered devices and all sessions end
+        }, ct);
         if (services.GetService<SlimTwoFactorService>() is { } twoFactor)
         {
             await twoFactor.RemoveSecretAsync(user, ct);
             await twoFactor.RemoveRecoveryCodesAsync(user, ct);
         }
-        user.TwoFactorEnabled = false;
-        user.SecurityStamp = SlimUser.NewSecurityStamp();   // remembered devices and all sessions end
-        await store.UpdateSecurityStateAsync(user, ct);
         await services.GetRequiredService<SlimCredentialService>().ResetAttemptsAsync(user, SlimAttemptFactor.SecondFactor, ct);
         await RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
         Log.AdminTwoFactorReset(logger, user.Id);
@@ -426,8 +430,11 @@ internal sealed class SlimAuthManager(
         // validation: give it one before anything is bound to it
         if (string.IsNullOrEmpty(user.SecurityStamp))
         {
-            user.SecurityStamp = SlimUser.NewSecurityStamp();
-            await store.UpdateSecurityStateAsync(user, ct);
+            // a concurrent first sign-in may have set one already – either stamp serves
+            await store.WriteSecurityStateAsync(user, u =>
+            {
+                if (string.IsNullOrEmpty(u.SecurityStamp)) u.SecurityStamp = SlimUser.NewSecurityStamp();
+            }, ct);
             Log.SecurityStampMissing(logger, user.Id);
         }
 

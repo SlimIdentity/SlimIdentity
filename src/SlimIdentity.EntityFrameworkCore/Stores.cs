@@ -148,16 +148,22 @@ public class SlimEfUserStore<TContext, TUser, TKey>(SlimEfContext<TContext> cont
     }
 
     /// <inheritdoc />
-    public Task UpdateSecurityStateAsync(SlimUser user, CancellationToken ct)
+    public async Task<bool> UpdateSecurityStateAsync(SlimUser user, string expectedStamp, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(user);
-        return Update(user).ExecuteUpdateAsync(s => s
+        ArgumentNullException.ThrowIfNull(expectedStamp);
+        return await WithStamp(user, expectedStamp).ExecuteUpdateAsync(s => s
             .SetProperty(u => EF.Property<string>(u, nameof(ISlimUserEntity<TKey>.PasswordHash)), user.PasswordHash)
             .SetProperty(u => EF.Property<string>(u, nameof(ISlimUserEntity<TKey>.SecurityStamp)), user.SecurityStamp)
             .SetProperty(u => EF.Property<bool>(u, nameof(ISlimUserEntity<TKey>.EmailConfirmed)), user.EmailConfirmed)
             .SetProperty(u => EF.Property<bool>(u, nameof(ISlimUserEntity<TKey>.TwoFactorEnabled)), user.TwoFactorEnabled)
-            .SetProperty(u => EF.Property<bool>(u, nameof(ISlimUserEntity<TKey>.PasswordChangeRequired)), user.PasswordChangeRequired), ct);
+            .SetProperty(u => EF.Property<bool>(u, nameof(ISlimUserEntity<TKey>.PasswordChangeRequired)), user.PasswordChangeRequired), ct)
+            .ConfigureAwait(false) == 1;
     }
+
+    /// <summary>The user row, only while its stamp is <paramref name="expectedStamp"/> (a missing stamp counts as empty).</summary>
+    private IQueryable<TUser> WithStamp(SlimUser user, string expectedStamp) =>
+        Update(user).Where(u => (EF.Property<string?>(u, nameof(ISlimUserEntity<TKey>.SecurityStamp)) ?? "") == expectedStamp);
 
     /// <inheritdoc />
     public async Task<SlimAttemptReservation?> TryBeginAttemptAsync(SlimUser user, SlimAttemptRequest attempt, CancellationToken ct)
@@ -207,21 +213,26 @@ public class SlimEfUserStore<TContext, TUser, TKey>(SlimEfContext<TContext> cont
             .ConfigureAwait(false) == 1;
 
     /// <inheritdoc />
-    public async Task<bool> UpdateEmailAsync(SlimUser user, string newEmail, CancellationToken ct)
+    public async Task<SlimEmailUpdateResult> UpdateEmailAsync(SlimUser user, string newEmail, string expectedStamp, string newStamp, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(newEmail);
+        ArgumentNullException.ThrowIfNull(expectedStamp);
+        ArgumentNullException.ThrowIfNull(newStamp);
         var normalized = Normalize(newEmail);
         try
         {
             // the unique index decides – no check-then-act race
-            return await Update(user).ExecuteUpdateAsync(s => s
+            var updated = await WithStamp(user, expectedStamp).ExecuteUpdateAsync(s => s
                 .SetProperty(u => EF.Property<string>(u, nameof(ISlimUserEntity<TKey>.Email)), newEmail)
-                .SetProperty(u => EF.Property<string>(u, nameof(ISlimUserEntity<TKey>.NormalizedEmail)), normalized), ct).ConfigureAwait(false) == 1;
+                .SetProperty(u => EF.Property<string>(u, nameof(ISlimUserEntity<TKey>.NormalizedEmail)), normalized)
+                .SetProperty(u => EF.Property<bool>(u, nameof(ISlimUserEntity<TKey>.EmailConfirmed)), true)
+                .SetProperty(u => EF.Property<string>(u, nameof(ISlimUserEntity<TKey>.SecurityStamp)), newStamp), ct).ConfigureAwait(false);
+            return updated == 1 ? SlimEmailUpdateResult.Updated : SlimEmailUpdateResult.StampChanged;
         }
         catch (DbException)
         {
             // ExecuteUpdate bypasses SaveChanges: the provider's own exception arrives, not DbUpdateException
-            if (await IsEmailTakenAsync(normalized, Key(user), ct).ConfigureAwait(false)) return false;
+            if (await IsEmailTakenAsync(normalized, Key(user), ct).ConfigureAwait(false)) return SlimEmailUpdateResult.EmailTaken;
             throw;
         }
     }

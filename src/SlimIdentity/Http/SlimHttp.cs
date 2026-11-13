@@ -193,6 +193,10 @@ internal static class SlimResults
     public static IResult InvalidToken(int statusCode = StatusCodes.Status400BadRequest) =>
         Status("invalid_token", "The token is invalid or has expired.", statusCode);
 
+    /// <summary>A security change of the signed-in account failed: the account changed in the meantime.</summary>
+    public static IResult ConcurrentChange() =>
+        Status("concurrent_change", "The account was changed at the same time; nothing was saved. Reload and try again.", StatusCodes.Status409Conflict);
+
     /// <summary>
     /// Answer after a change that re-issued the caller's session: the new session, or – if it could not be renewed (refresh
     /// chain at its end) – <c>401</c> with the reason; the change itself is saved, the client signs in again.

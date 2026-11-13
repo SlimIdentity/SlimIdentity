@@ -52,7 +52,7 @@ reset, 4010 unlocked; 3004 when all sessions are revoked, 4011 when the user rep
 if (await store.CreateAsync(new SlimNewUser { Email = email }, ct) is not { } user)   // Profile = your business data
     return Results.Conflict();                  // address taken
 user.EmailConfirmed = true;                     // the administrator vouches for the address
-await store.UpdateSecurityStateAsync(user, ct);
+await store.UpdateSecurityStateAsync(user, user.SecurityStamp, ct);
 var reset = await auth.CreatePasswordResetAsync(user, TimeSpan.FromDays(3), ct);
 // hand reset.Link to the new colleague – or: await auth.SetPasswordAsync(user, startPassword, mustChange: true, ct);
 ```

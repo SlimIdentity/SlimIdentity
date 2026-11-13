@@ -128,7 +128,7 @@ public static class AdminEndpoints
                 if (await store.CreateAsync(new SlimNewUser { Email = email }, ct) is not { } user)
                     return Results.Conflict(new { status = "already_exists" });
                 user.EmailConfirmed = true;   // the administrator vouches for the address
-                await store.UpdateSecurityStateAsync(user, ct);
+                await store.UpdateSecurityStateAsync(user, user.SecurityStamp, ct);   // a new account: nothing to lose against
                 // read out on the phone – the user must choose an own password at the first sign-in
                 if (req.StartPassword is { } start && await auth.SetPasswordAsync(user, start, mustChange: true, ct) is null)
                     return Results.Ok(new { status = "created", user.Id });

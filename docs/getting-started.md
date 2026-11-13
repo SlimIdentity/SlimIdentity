@@ -28,9 +28,9 @@ public interface ISlimUserStore
     Task<SlimUser?> FindByEmailAsync(string email, CancellationToken ct);              // case-insensitive!
     Task<SlimUser?> FindByIdAsync(string userId, CancellationToken ct);
     Task<SlimUser?> CreateAsync(SlimNewUser newUser, CancellationToken ct);            // null if the address is taken
-    Task UpdateSecurityStateAsync(SlimUser user, CancellationToken ct);                // persist the security fields only
+    Task<bool> UpdateSecurityStateAsync(SlimUser user, string expectedStamp, CancellationToken ct); // security fields, only while the stamp is unchanged
     Task<bool> UpdateSecurityStampAsync(SlimUser user, string expectedStamp, string newStamp, CancellationToken ct); // only if unchanged
-    Task<bool> UpdateEmailAsync(SlimUser user, string newEmail, CancellationToken ct); // false if the address is taken
+    Task<SlimEmailUpdateResult> UpdateEmailAsync(SlimUser user, string newEmail, string expectedStamp, string newStamp, CancellationToken ct); // address + confirmation + stamp in one step
     Task<IReadOnlyCollection<Claim>> GetClaimsAsync(SlimUser user, CancellationToken ct); // roles, tenant id, …
 
     // sign-in bookkeeping – narrow, atomic operations on their own columns

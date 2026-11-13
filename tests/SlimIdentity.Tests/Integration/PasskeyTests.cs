@@ -433,7 +433,7 @@ public sealed class PasskeyTests
             var users = scope.ServiceProvider.GetRequiredService<ISlimUserStore>();
             var user = (await users.FindByIdAsync(userId, default))!;
             user.PasswordHash = string.Empty;
-            await users.UpdateSecurityStateAsync(user, default);
+            await users.UpdateSecurityStateAsync(user, user.SecurityStamp, default);
         }
 
         await me.PostJsonAsync("/auth/sign-in-methods/external/remove", new { provider = "Fake", providerKey = "google-1" });

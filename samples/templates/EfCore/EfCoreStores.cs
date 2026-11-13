@@ -117,16 +117,17 @@ public sealed class EfCoreUserStore(IdentityDb identity) : ISlimUserStore
             .ExecuteUpdateAsync(s => s.SetProperty(u => u.PasswordHash, newHash), ct);
     }
 
-    public async Task UpdateSecurityStateAsync(SlimUser user, CancellationToken ct)
+    // compare-and-set on the whole stamp: a change based on an outdated copy is never written back over a newer one
+    public async Task<bool> UpdateSecurityStateAsync(SlimUser user, string expectedStamp, CancellationToken ct)
     {
         var id = Guid.Parse(user.Id);
         // Only security columns are touched – business data stays untouched.
-        await db.Users.Where(u => u.Id == id).ExecuteUpdateAsync(s => s
+        return await db.Users.Where(u => u.Id == id && (u.SecurityStamp ?? "") == expectedStamp).ExecuteUpdateAsync(s => s
             .SetProperty(u => u.PasswordHash, user.PasswordHash)
             .SetProperty(u => u.SecurityStamp, user.SecurityStamp)
             .SetProperty(u => u.EmailConfirmed, user.EmailConfirmed)
             .SetProperty(u => u.TwoFactorEnabled, user.TwoFactorEnabled)
-            .SetProperty(u => u.PasswordChangeRequired, user.PasswordChangeRequired), ct);
+            .SetProperty(u => u.PasswordChangeRequired, user.PasswordChangeRequired), ct) == 1;
     }
 
     // compare-and-set: a concurrent password or 2FA change is never written back over
@@ -137,22 +138,26 @@ public sealed class EfCoreUserStore(IdentityDb identity) : ISlimUserStore
             .ExecuteUpdateAsync(s => s.SetProperty(u => u.SecurityStamp, newStamp), ct) == 1;
     }
 
-    public async Task<bool> UpdateEmailAsync(SlimUser user, string newEmail, CancellationToken ct)
+    public async Task<SlimEmailUpdateResult> UpdateEmailAsync(SlimUser user, string newEmail, string expectedStamp, string newStamp, CancellationToken ct)
     {
         var id = Guid.Parse(user.Id);
         var normalized = newEmail.ToUpperInvariant();
         try
         {
             // the unique index on NormalizedEmail decides – no check-then-act race
-            return await db.Users.Where(u => u.Id == id).ExecuteUpdateAsync(s => s
+            return await db.Users.Where(u => u.Id == id && (u.SecurityStamp ?? "") == expectedStamp).ExecuteUpdateAsync(s => s
                 .SetProperty(u => u.Email, newEmail)
-                .SetProperty(u => u.NormalizedEmail, normalized), ct) == 1;
+                .SetProperty(u => u.NormalizedEmail, normalized)
+                .SetProperty(u => u.EmailConfirmed, true)
+                .SetProperty(u => u.SecurityStamp, newStamp), ct) == 1
+                ? SlimEmailUpdateResult.Updated
+                : SlimEmailUpdateResult.StampChanged;
         }
         catch (DbException)
         {
             // ExecuteUpdate bypasses SaveChanges: the provider's own exception arrives (PostgresException, SqlException, …),
             // not DbUpdateException. Report "taken" only if the unique index really is the reason.
-            if (await IsEmailTakenAsync(normalized, id, ct)) return false;
+            if (await IsEmailTakenAsync(normalized, id, ct)) return SlimEmailUpdateResult.EmailTaken;
             throw;
         }
     }

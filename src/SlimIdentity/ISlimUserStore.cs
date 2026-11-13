@@ -21,17 +21,23 @@ public interface ISlimUserStore
     Task<SlimUser?> CreateAsync(SlimNewUser newUser, CancellationToken ct);
 
     /// <summary>
-    /// Persists the security fields of <paramref name="user"/>:
-    /// PasswordHash, SecurityStamp, EmailConfirmed, TwoFactorEnabled, PasswordChangeRequired.
+    /// Persists the security fields of <paramref name="user"/> – PasswordHash, SecurityStamp, EmailConfirmed,
+    /// TwoFactorEnabled, PasswordChangeRequired – <b>only if</b> the stored security stamp still equals
+    /// <paramref name="expectedStamp"/> (the whole string, ordinal); returns whether they were written, e.g.
+    /// <c>UPDATE users SET … WHERE id = @id AND COALESCE(security_stamp, '') = @expectedStamp</c> (affected rows = 1).
+    /// A missing stamp (<c>NULL</c>) equals an empty <paramref name="expectedStamp"/>.
     /// Must <b>not</b> write the failed-attempt counters or lockout ends – those change only through
     /// <see cref="TryBeginAttemptAsync"/> and <see cref="ResetFailedAttemptsAsync"/>.
     /// </summary>
     /// <remarks>
-    /// Used for deliberate state changes (password change, 2FA, e-mail confirmation, …). The high-frequency sign-in
-    /// bookkeeping uses the narrow methods below instead, so that a failed attempt can never write back an outdated
-    /// password hash or security stamp, and an outdated copy of the user can never undo a counted attempt.
+    /// SlimIdentity changes the stamp with every write, so a request that read the user before a concurrent change
+    /// cannot write back an outdated state: it reads the user again and either applies its change once more or gives
+    /// up (a link or a password confirmed against the old state). The high-frequency sign-in bookkeeping uses the narrow
+    /// methods below instead. Code of your own that changes these fields must set a new stamp as well, e.g.
+    /// <c>var expected = user.SecurityStamp; user.EmailConfirmed = true; user.SecurityStamp =
+    /// SlimUser.NewSecurityStamp(); await store.UpdateSecurityStateAsync(user, expected, ct);</c>
     /// </remarks>
-    Task UpdateSecurityStateAsync(SlimUser user, CancellationToken ct);
+    Task<bool> UpdateSecurityStateAsync(SlimUser user, string expectedStamp, CancellationToken ct);
 
     /// <summary>
     /// Replaces <b>only</b> the security stamp, and <b>only if</b> it still equals <paramref name="expectedStamp"/>;
@@ -83,11 +89,18 @@ public interface ISlimUserStore
     Task UpdatePasswordHashAsync(SlimUser user, string currentHash, string newHash, CancellationToken ct);
 
     /// <summary>
-    /// Changes the login e-mail address (after the new address was confirmed via <c>/confirm-email-change</c>), including
-    /// any normalized lookup column. Return <c>false</c> if the address is already taken by another account
-    /// (e.g. unique-index violation) – nothing must be changed then.
+    /// Changes the login e-mail address after the new address was confirmed, in one write: the address (including any
+    /// normalized lookup column), <c>EmailConfirmed = true</c> and the security stamp <paramref name="newStamp"/> –
+    /// <b>only if</b> the stored stamp still equals <paramref name="expectedStamp"/> (as in
+    /// <see cref="UpdateSecurityStateAsync"/>). Nothing must be changed unless the result is
+    /// <see cref="SlimEmailUpdateResult.Updated"/>.
     /// </summary>
-    Task<bool> UpdateEmailAsync(SlimUser user, string newEmail, CancellationToken ct);
+    /// <returns>
+    /// <see cref="SlimEmailUpdateResult.EmailTaken"/> if another account uses the address (e.g. unique-index
+    /// violation), <see cref="SlimEmailUpdateResult.StampChanged"/> if the stamp did not match or the user no longer
+    /// exists.
+    /// </returns>
+    Task<SlimEmailUpdateResult> UpdateEmailAsync(SlimUser user, string newEmail, string expectedStamp, string newStamp, CancellationToken ct);
 
     /// <summary>
     /// Host-specific claims (roles, permissions, tenant_id, …) that are added before the cookie / JWT is signed.
@@ -121,6 +134,19 @@ public sealed class SlimNewUser
 
     /// <summary>The external provider an account is created for (automatic registration), else <c>null</c>.</summary>
     public string? Provider { get; init; }
+}
+
+/// <summary>The answer of <see cref="ISlimUserStore.UpdateEmailAsync"/>.</summary>
+public enum SlimEmailUpdateResult
+{
+    /// <summary>Address, confirmation and stamp were written.</summary>
+    Updated,
+
+    /// <summary>Another account uses the address; nothing was written.</summary>
+    EmailTaken,
+
+    /// <summary>The stored stamp no longer equals the expected one (or the user is gone); nothing was written.</summary>
+    StampChanged,
 }
 
 /// <summary>The factor a failed-attempt counter belongs to. Each factor has its own counter and lockout.</summary>

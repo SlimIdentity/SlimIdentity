@@ -46,6 +46,9 @@ public sealed class StoreConformanceTests
         Assert.Contains(failed, r => r.Contains("never overwrites the password hash"));
         Assert.Contains(failed, r => r.Contains("only if the hash is unchanged"));
         Assert.Contains(failed, r => r.Contains("only the stamp and only if it is unchanged"));
+        Assert.Contains(failed, r => r.Contains("only while the whole stamp is unchanged"));
+        Assert.Contains(failed, r => r.Contains("exactly one wins"));
+        Assert.Contains(failed, r => r.Contains("confirmation and stamp in one step"));
         Assert.Contains("fix:", ex.Message);
         Assert.Contains(ex.Report.Results, r => r.Passed);   // the correct parts are still reported as passed
     }
@@ -82,12 +85,12 @@ public sealed class StoreConformanceTests
             return Copy(user);
         }
 
-        public Task UpdateSecurityStateAsync(SlimUser user, CancellationToken ct)
+        public Task<bool> UpdateSecurityStateAsync(SlimUser user, string expectedStamp, CancellationToken ct)
         {
-            var copy = Copy(user);
+            var copy = Copy(user);   // ignores expectedStamp
             if (_users.TryGetValue(user.Id, out var existing)) copy.Email = existing.Email;
             _users[user.Id] = copy;
-            return Task.CompletedTask;
+            return Task.FromResult(true);
         }
 
         public Task<bool> UpdateSecurityStampAsync(SlimUser user, string expectedStamp, string newStamp, CancellationToken ct)
@@ -103,7 +106,7 @@ public sealed class StoreConformanceTests
             await Task.Delay(5, ct);
             user.FailedLoginAttempts = current.FailedLoginAttempts + 1;   // one counter for every factor
             user.LockoutEndUtc = attempt.NextLockoutEnd(user.FailedLoginAttempts, current.LockoutEndUtc);
-            await UpdateSecurityStateAsync(user, ct);   // writes back the whole (outdated) user
+            await UpdateSecurityStateAsync(user, string.Empty, ct);   // writes back the whole (outdated) user
             return SlimAttemptReservation.Reserved(user.FailedLoginAttempts);
         }
 
@@ -111,7 +114,7 @@ public sealed class StoreConformanceTests
         {
             user.FailedLoginAttempts = 0;
             user.LockoutEndUtc = null;
-            return UpdateSecurityStateAsync(user, ct);
+            return UpdateSecurityStateAsync(user, string.Empty, ct);
         }
 
         public Task UpdatePasswordHashAsync(SlimUser user, string currentHash, string newHash, CancellationToken ct)
@@ -120,10 +123,10 @@ public sealed class StoreConformanceTests
             return Task.CompletedTask;
         }
 
-        public Task<bool> UpdateEmailAsync(SlimUser user, string newEmail, CancellationToken ct)
+        public Task<SlimEmailUpdateResult> UpdateEmailAsync(SlimUser user, string newEmail, string expectedStamp, string newStamp, CancellationToken ct)
         {
-            _users[user.Id].Email = newEmail;
-            return Task.FromResult(true);
+            (_users[user.Id].Email, _users[user.Id].SecurityStamp) = (newEmail, newStamp);   // ignores expectedStamp and other accounts
+            return Task.FromResult(SlimEmailUpdateResult.Updated);
         }
 
         public Task<IReadOnlyCollection<Claim>> GetClaimsAsync(SlimUser user, CancellationToken ct) =>

@@ -252,8 +252,8 @@ internal sealed class SlimLoginHandlers(
         if (await credentials.VerifyPasswordAsync(user, request.NewPassword, ct) != SlimPasswordCheck.Failed)
             return SlimResults.BadRequest("password_unchanged", "Choose a password different from the one set by the administrator.");
 
-        credentials.ApplyNewPassword(user, request.NewPassword);
-        await store.UpdateSecurityStateAsync(user, ct);
+        if (!await store.TryWriteSecurityStateAsync(user, u => credentials.ApplyNewPassword(u, request.NewPassword), ct))
+            return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
         await authManager.RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
         Log.ForcedPasswordChangeCompleted(logger, user.Id);
         await hooks.RaiseAsync(SlimEventTypes.PasswordChanged, user.Id, reason: "forced_change", ct: ct);

@@ -56,8 +56,7 @@ internal sealed class SlimAccountHandlers(
 
         if (!user.EmailConfirmed)
         {
-            user.EmailConfirmed = true;
-            await store.UpdateSecurityStateAsync(user, ct);
+            if (!await store.TryWriteSecurityStateAsync(user, u => u.EmailConfirmed = true, ct)) return SlimResults.InvalidToken();
             await hooks.RaiseAsync(SlimEventTypes.EmailConfirmed, user.Id, ct: ct);
         }
         return SlimResults.Status("email_confirmed");
@@ -113,12 +112,20 @@ internal sealed class SlimAccountHandlers(
         if (await passwordPolicy.ValidateAsync(request!.NewPassword, user.Email, ct, "newPassword") is { } errors)
             return SlimResults.Validation(errors);
 
-        credentials.ApplyNewPassword(user, request.NewPassword); // rotates stamp → token single-use, all sessions revoked
-        if (!user.EmailConfirmed && !payload.ByAdministrator)   // a link handed over by an administrator proves no mailbox
+        var firstProof = false;
+        var written = await store.TryWriteSecurityStateAsync(user, u =>
+        {
+            credentials.ApplyNewPassword(u, request.NewPassword); // rotates stamp → token single-use, all sessions revoked
+            // a link handed over by an administrator proves no mailbox
+            firstProof = !u.EmailConfirmed && !payload.ByAdministrator;
+            if (firstProof) (u.TwoFactorEnabled, u.EmailConfirmed) = (false, true);
+        }, ct);
+        if (!written) return SlimResults.InvalidToken();
+        if (firstProof)
         {
             // First proof of the mailbox: whoever registered the address before (possibly an attacker – pre-account
             // hijacking) must keep neither a second factor that locks the real owner out nor a linked external login.
-            user.TwoFactorEnabled = false;
+            // Removed after the state is written: a link that lost against a concurrent change removes nothing.
             if (services.GetService<SlimTwoFactorService>() is { } twoFactor)
             {
                 await twoFactor.RemoveSecretAsync(user, ct);
@@ -128,9 +135,7 @@ internal sealed class SlimAccountHandlers(
                 await externalLogins.RemoveExternalLoginsAsync(user.Id, ct);
             if (services.GetService<ISlimPasskeySignInMethods>() is { } passkeys)
                 await passkeys.RemoveAllAsync(user.Id, ct);
-            user.EmailConfirmed = true;
         }
-        await store.UpdateSecurityStateAsync(user, ct);
         await credentials.ResetAttemptsAsync(user, SlimAttemptFactor.Password, ct);   // the mailbox proved the account
         await authManager.RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
 
@@ -188,14 +193,24 @@ internal sealed class SlimAccountHandlers(
             || !SlimUser.IsSameSecurityState(user.SecurityStamp, payload.Stamp))
             return SlimResults.InvalidToken();
 
-        // the confirming person controls the new mailbox, so revealing that it is taken is fine here
-        if (!await store.UpdateEmailAsync(user, payload.NewEmail, ct))
-            return SlimResults.BadRequest("email_taken", "The address is already used by another account.");
-
-        user.Email = payload.NewEmail;
-        user.EmailConfirmed = true;
-        user.SecurityStamp = SlimUser.NewSecurityStamp(); // link single use; sessions carry the old address → sign in again
-        await store.UpdateSecurityStateAsync(user, ct);
+        // address, confirmation and a new stamp in one write: link single use; sessions carry the old address → sign in again
+        var newStamp = SlimUser.NewSecurityStamp();
+        for (var attempt = 0; ; attempt++)
+        {
+            var outcome = await store.UpdateEmailAsync(user, payload.NewEmail, user.SecurityStamp ?? string.Empty, newStamp, ct);
+            // the confirming person controls the new mailbox, so revealing that it is taken is fine here
+            if (outcome == SlimEmailUpdateResult.EmailTaken)
+                return SlimResults.BadRequest("email_taken", "The address is already used by another account.");
+            if (outcome == SlimEmailUpdateResult.Updated) break;
+            // only the claims part changed in between: the link still stands for the current state
+            var current = await store.FindByIdAsync(payload.Uid, ct);
+            if (attempt == 2 || current is null
+                || !string.Equals(current.Email, payload.OldEmail, StringComparison.OrdinalIgnoreCase)
+                || !SlimUser.IsSameSecurityState(current.SecurityStamp, payload.Stamp))
+                return SlimResults.InvalidToken();
+            user = current;
+        }
+        (user.Email, user.EmailConfirmed, user.SecurityStamp) = (payload.NewEmail, true, newStamp);
         await authManager.RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
 
         var (oldEmail, newEmail) = (payload.OldEmail, payload.NewEmail);
@@ -230,9 +245,12 @@ internal sealed class SlimAccountHandlers(
         if (await passwordPolicy.ValidateAsync(request!.Password, user.Email, ct) is { } errors)
             return SlimResults.Validation(errors);
 
-        credentials.ApplyNewPassword(user, request.Password); // rotates the stamp → the link is single-use
-        user.EmailConfirmed = true;                            // the invitation was delivered to this mailbox
-        await store.UpdateSecurityStateAsync(user, ct);
+        var written = await store.TryWriteSecurityStateAsync(user, u =>
+        {
+            credentials.ApplyNewPassword(u, request.Password); // rotates the stamp → the link is single-use
+            u.EmailConfirmed = true;                           // the invitation was delivered to this mailbox
+        }, ct);
+        if (!written) return SlimResults.InvalidToken();
         await authManager.RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
         Log.InvitationAccepted(logger, user.Id);
         await hooks.RaiseAsync(SlimEventTypes.PasswordChanged, user.Id, reason: "invitation", ct: ct);
@@ -318,8 +336,9 @@ internal sealed class SlimAccountHandlers(
         if (await credentials.ConfirmPasswordAsync(user, request.CurrentPassword, Http, ct) is { } failure)
             return failure;
 
-        credentials.ApplyNewPassword(user, request.NewPassword); // rotates stamp → other devices are signed out
-        await store.UpdateSecurityStateAsync(user, ct);
+        // rotates stamp → other devices are signed out
+        if (!await store.TryWriteSecurityStateAsync(user, u => credentials.ApplyNewPassword(u, request.NewPassword), ct))
+            return SlimResults.ConcurrentChange();
         await authManager.RevokeSessionsAsync(user.Id, SlimAuthManager.CurrentSessionId(Http.User), ct);
         await hooks.RaiseAsync(SlimEventTypes.PasswordChanged, user.Id, reason: "changed", ct: ct);
 

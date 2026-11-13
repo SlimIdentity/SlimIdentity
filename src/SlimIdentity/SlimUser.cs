@@ -70,6 +70,16 @@ public sealed class SlimUser
         else (FailedSecondFactorAttempts, SecondFactorLockoutEndUtc) = (failedAttempts, lockoutEndUtc);
     }
 
+    /// <summary>Takes over every field of <paramref name="current"/> (a fresh copy of the same user).</summary>
+    internal void CopyFrom(SlimUser current)
+    {
+        (Email, PasswordHash, SecurityStamp, IsActive, EmailConfirmed, TwoFactorEnabled, PasswordChangeRequired) =
+            (current.Email, current.PasswordHash, current.SecurityStamp, current.IsActive, current.EmailConfirmed,
+             current.TwoFactorEnabled, current.PasswordChangeRequired);
+        (FailedLoginAttempts, LockoutEndUtc, FailedSecondFactorAttempts, SecondFactorLockoutEndUtc) =
+            (current.FailedLoginAttempts, current.LockoutEndUtc, current.FailedSecondFactorAttempts, current.SecondFactorLockoutEndUtc);
+    }
+
     /// <summary>Creates a new cryptographically random security stamp (no claims part).</summary>
     public static string NewSecurityStamp() => Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
 
