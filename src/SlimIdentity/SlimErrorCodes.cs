@@ -48,9 +48,14 @@ public static class SlimErrorCodes
     public const string LockedOut = "locked_out";
     /// <summary>The e-mail address has not been confirmed (<c>SignIn.RequireConfirmedEmail</c>, 403).</summary>
     public const string EmailNotConfirmed = "email_not_confirmed";
-    /// <summary>An administrator set the password; the user chooses an own one first.</summary>
+    /// <summary>An administrator set the password; the user chooses an own one first (action <c>change_password</c>).</summary>
     public const string PasswordChangeRequired = "password_change_required";
-    /// <summary>The second factor follows (401 with <c>preAuthToken</c>).</summary>
+    /// <summary>
+    /// Steps follow before a session is issued: <see cref="SlimAuthResult.ActionRequired"/>, answered with 200
+    /// <c>status: "action_required"</c>, <c>actions</c> and <c>flowToken</c>.
+    /// </summary>
+    public const string ActionRequired = "action_required";
+    /// <summary>Metrics and event reason: the second factor follows (action <c>second_factor</c>).</summary>
     public const string RequiresTwoFactor = "requires_two_factor";
     /// <summary>Two-factor authentication is enabled for the account, but no <see cref="ISlimTwoFactorStore"/> is registered.</summary>
     public const string TwoFactorUnavailable = "two_factor_unavailable";

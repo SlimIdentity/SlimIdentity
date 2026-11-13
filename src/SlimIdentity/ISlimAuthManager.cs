@@ -11,11 +11,12 @@ public interface ISlimAuthManager
     /// <summary>
     /// Signs <paramref name="user"/> in after <b>your</b> first factor – a client certificate, a magic link, your own
     /// password check – with every rule of <c>/login</c> that follows it: inactive (<c>account_disabled</c>), locked
-    /// (<c>locked_out</c>), unconfirmed with <c>RequireConfirmedEmail</c> (<c>email_not_confirmed</c>) and
-    /// administrator-set passwords (<c>password_change_required</c>) are refused, sign-in guards apply. If the account
-    /// has 2FA, no session is issued: <see cref="SlimAuthResult.TwoFactorChallenge"/> holds the challenge – return it
-    /// with status 401, the client completes it at <c>POST /auth/login/2fa</c> like after a password. Pass
-    /// <paramref name="secondFactorVerified"/> only if your first factor already is multi-factor (smart card with PIN).
+    /// (<c>locked_out</c>) and unconfirmed with <c>RequireConfirmedEmail</c> (<c>email_not_confirmed</c>) are refused,
+    /// sign-in guards apply. If steps follow – the second factor of an account with 2FA, an own password instead of one
+    /// set by an administrator – no session is issued: <see cref="SlimAuthResult.ActionRequired"/> holds them; return it
+    /// with status 200, the client continues at <c>POST /auth/login/2fa</c> and <c>/auth/login/password-change</c> like
+    /// after a password. Pass <paramref name="secondFactorVerified"/> only if your first factor already is multi-factor
+    /// (smart card with PIN).
     /// </summary>
     /// <param name="user">The account, freshly loaded from the store.</param>
     /// <param name="useCookies">Cookie (<c>true</c>) or JWT pair.</param>
@@ -25,7 +26,7 @@ public interface ISlimAuthManager
     /// <param name="ct">Cancellation.</param>
     /// <example><code>
     /// var result = await auth.SignInAsync(user, useCookies: true, authenticationMethod: "cert", ct: ct);
-    /// if (result.TwoFactorChallenge is { } challenge) return Results.Json(challenge, statusCode: 401);
+    /// if (result.ActionRequired is { } steps) return Results.Ok(steps);
     /// return result.Succeeded ? Results.Ok(result.ToResponse()) : Results.Json(new { status = result.Error }, statusCode: 403);
     /// </code></example>
     Task<SlimAuthResult> SignInAsync(SlimUser user, bool useCookies, bool isPersistent = false, string authenticationMethod = "pwd",

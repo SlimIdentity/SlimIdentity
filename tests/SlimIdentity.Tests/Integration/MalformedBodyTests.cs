@@ -27,7 +27,7 @@ public sealed class MalformedBodyTests
     private static readonly string[] Bodies =
     [
         "null", "{}", "[]", "\"text\"", "42",
-        """{"email":null,"password":null,"token":null,"code":null,"newPassword":null,"currentPassword":null,"newEmail":null,"preAuthToken":null,"recoveryCode":null,"refreshToken":null,"setupToken":null,"state":null,"credential":null,"id":null,"name":null,"provider":null,"providerKey":null,"profile":null,"codeVerifier":null,"twoFactorRememberToken":null}""",
+        """{"email":null,"password":null,"token":null,"code":null,"newPassword":null,"currentPassword":null,"newEmail":null,"flowToken":null,"recoveryCode":null,"refreshToken":null,"setupToken":null,"state":null,"credential":null,"id":null,"name":null,"provider":null,"providerKey":null,"profile":null,"codeVerifier":null,"twoFactorRememberToken":null}""",
         """{"state":"x","credential":{"id":null,"rawId":null,"type":null,"response":null}}""",
         """{"state":"x","credential":{"response":{"clientDataJSON":null,"attestationObject":null,"authenticatorData":null,"signature":null,"userHandle":null}}}""",
     ];

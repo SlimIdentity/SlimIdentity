@@ -23,8 +23,8 @@ public sealed class ReviewRound3Tests
             if (await store.FindByEmailAsync(email, ct) is not { } user) return Results.NotFound();
             var result = await auth.SignInAsync(user, useCookies: false, authenticationMethod: "cert", secondFactorVerified: secondFactor == true, ct: ct);
             if (result.Succeeded) return Results.Ok(result.ToResponse());
-            return result.TwoFactorChallenge is { } challenge
-                ? Results.Json(challenge, statusCode: StatusCodes.Status401Unauthorized)
+            return result.ActionRequired is { } steps
+                ? Results.Ok(steps)
                 : Results.Json(new { status = result.Error }, statusCode: StatusCodes.Status403Forbidden);
         }),
     };
@@ -55,21 +55,31 @@ public sealed class ReviewRound3Tests
         Assert.Equal("cert", (await (await me.GetAsync("/auth/me")).Content.ReadFromJsonAsync<JsonElement>()).Str("authenticationMethod"));
     }
 
-    [Theory]
-    [InlineData("unconfirmed", "email_not_confirmed")]
-    [InlineData("password_change", "password_change_required")]
-    public async Task S2_SignInAsync_refuses_accounts_that_may_not_sign_in(string state, string expected)
+    [Fact]
+    public async Task S2_SignInAsync_refuses_unconfirmed_accounts()
     {
         await using var app = await TestApp.StartAsync(WithHostSignIn(o => o.SignIn.RequireConfirmedEmail = true));
-        await SaveAsync(app, u =>
-        {
-            if (state == "unconfirmed") u.EmailConfirmed = false;
-            if (state == "password_change") u.PasswordChangeRequired = true;
-        });
+        await SaveAsync(app, u => u.EmailConfirmed = false);
 
         var refused = await app.CreateClient().PostJsonAsync($"/api/cert-login/{TestApp.UserEmail}", expected: HttpStatusCode.Forbidden);
+        Assert.Equal("email_not_confirmed", refused.Str("status"));
+    }
 
-        Assert.Equal(expected, refused.Str("status"));
+    [Fact]
+    public async Task S2_SignInAsync_asks_for_an_own_password_instead_of_a_session()
+    {
+        await using var app = await TestApp.StartAsync(WithHostSignIn());
+        await SaveAsync(app, u => u.PasswordChangeRequired = true);
+
+        var steps = await app.CreateClient().PostJsonAsync($"/api/cert-login/{TestApp.UserEmail}");
+        Assert.Equal(["change_password"], steps.GetProperty("actions").EnumerateArray().Select(a => a.GetString()));
+        Assert.False(steps.TryGetProperty("accessToken", out _));
+
+        var session = await app.CreateClient().PostJsonAsync("/auth/login/password-change",
+            new { flowToken = steps.Str("flowToken"), newPassword = "My-Own-Pass-2026" });
+        var me = app.CreateClient();
+        me.BearerToken = session.Str("accessToken");
+        Assert.Equal("cert", (await (await me.GetAsync("/auth/me")).Content.ReadFromJsonAsync<JsonElement>()).Str("authenticationMethod"));
     }
 
     [Fact]
@@ -93,11 +103,11 @@ public sealed class ReviewRound3Tests
         await EnableEmailTwoFactorAsync(app);
         app.Time.Advance(TimeSpan.FromSeconds(1));
 
-        var challenge = await app.CreateClient().PostJsonAsync($"/api/cert-login/{TestApp.UserEmail}", expected: HttpStatusCode.Unauthorized);
-        Assert.Equal("requires_two_factor", challenge.Str("status"));
+        var challenge = await app.CreateClient().PostJsonAsync($"/api/cert-login/{TestApp.UserEmail}");
+        Assert.Equal("second_factor", challenge.GetProperty("actions")[0].GetString());
 
         var code = (await app.Mail.WaitForAsync("two-factor", TestApp.UserEmail)).Payload;
-        var session = await app.CreateClient().PostJsonAsync("/auth/login/2fa", new { preAuthToken = challenge.Str("preAuthToken"), code });
+        var session = await app.CreateClient().PostJsonAsync("/auth/login/2fa", new { flowToken = challenge.Str("flowToken"), code });
         Assert.False(string.IsNullOrEmpty(session.Str("accessToken")));
 
         // a host that checked a second factor itself (e.g. a smart card with PIN) says so explicitly
@@ -115,17 +125,17 @@ public sealed class ReviewRound3Tests
         browser.SendCsrfHeader = true;
         app.Time.Advance(TimeSpan.FromSeconds(1));
         var challenge = await browser.PostJsonAsync("/auth/login?useCookies=true",
-            new { email = TestApp.UserEmail, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized);
+            new { email = TestApp.UserEmail, password = TestApp.UserPassword });
         var code = (await app.Mail.WaitForAsync("two-factor", TestApp.UserEmail)).Payload;
-        await browser.PostJsonAsync("/auth/login/2fa", new { preAuthToken = challenge.Str("preAuthToken"), code, rememberDevice = true });
+        await browser.PostJsonAsync("/auth/login/2fa", new { flowToken = challenge.Str("flowToken"), code, rememberDevice = true });
         await browser.PostAsync("/auth/logout");
         Assert.True(browser.Cookies.ContainsKey("SlimAuth.2fa"));
 
         // the same browser asks for tokens: the cookie remembers the browser's cookie sessions, not token clients
         browser.SendCsrfHeader = false;
         var bearer = await browser.PostJsonAsync("/auth/login?useCookies=false",
-            new { email = TestApp.UserEmail, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized);
-        Assert.Equal("requires_two_factor", bearer.Str("status"));
+            new { email = TestApp.UserEmail, password = TestApp.UserPassword });
+        Assert.Equal("second_factor", bearer.GetProperty("actions")[0].GetString());
     }
 
     // ------------------------------------------------------------------ S-4: bounded in-memory shared state

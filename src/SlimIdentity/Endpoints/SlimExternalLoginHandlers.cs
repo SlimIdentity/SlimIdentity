@@ -15,7 +15,7 @@ internal sealed class SlimExternalLoginHandlers(
     ISlimUserStore store,
     ISlimExternalLoginStore externalStore,
     IAuthenticationSchemeProvider schemes,
-    SlimLoginHandlers login,
+    SlimSignInFlow flow,
     SlimAccountHandlers account,
     SlimCredentialService credentials,
     SlimAuthManager authManager,
@@ -205,11 +205,10 @@ internal sealed class SlimExternalLoginHandlers(
             }
         }
 
-        // the provider proved the account – a lockout of the password or the second factor does not apply. Bearer
-        // clients pass the second factor at the exchange; a start password is replaced first, with the password.
+        // the provider proved the account – a lockout of the password or the second factor does not apply. The steps
+        // that follow (second factor, own password) are taken in the sign-in flow; bearer clients start it at the exchange.
         var decision = SlimSignInChain.Evaluate(user, SlimSignInProofs.None, O);
-        var rejection = decision.Refusal
-            ?? (decision.Next is { } next && next != SlimSignInActions.SecondFactor ? SlimSignInChain.ErrorCode(next) : null);
+        var rejection = decision.Refusal ?? (decision.Next == SlimSignInActions.VerifyEmail ? SlimErrorCodes.EmailNotConfirmed : null);
         if (rejection is not null)
         {
             metrics.ExternalLogin(provider, "rejected");
@@ -220,7 +219,7 @@ internal sealed class SlimExternalLoginHandlers(
         if (!cookies)
         {
             // Bearer clients: never tokens in URLs. A short-lived, single-use, PKCE-bound code in the fragment (never
-            // sent to servers, logs or referrers); the second factor, if any, is handled at the exchange.
+            // sent to servers, logs or referrers); the steps of the sign-in, if any, follow the exchange.
             var code = workflow.Protect(SlimWorkflowTokens.ExternalExchangePurpose,
                 new SlimExchangePayload(user.Id, user.SecurityStamp, provider, Convert.ToHexString(RandomNumberGenerator.GetBytes(16)), codeChallenge!),
                 SlimIdentityDefaults.ExternalExchangeCodeLifetime);
@@ -229,25 +228,16 @@ internal sealed class SlimExternalLoginHandlers(
         }
 
         // the browser may carry a "remember this device" cookie from an earlier second factor
-        var remembered = decision.Next == SlimSignInActions.SecondFactor
-            && services.GetService<SlimTwoFactorService>() is { } twoFactor
-            && twoFactor.IsRememberedDevice(user, Http, cookieMode: true, null);   // only cookie sign-ins get here
-
-        if (decision.Next == SlimSignInActions.SecondFactor && !remembered)
-        {
-            var challenge = await login.BeginTwoFactorAsync(user, cookies, false, ct);
-            if (challenge is null) return Redirect(returnUrl, "slim_error", SlimErrorCodes.TwoFactorUnavailable);
-            // the challenge stands for the passed first factor – fragment only, like the exchange code
+        var result = await flow.StartAsync(user, cookies: true, rememberMe: false, SlimAuthManager.MethodExternal, SlimSignInProofs.None,
+            checkRememberedDevice: true, rememberToken: null, refuseLockedSecondFactor: false, ct);
+        // the flow token stands for the passed first factor – fragment only, like the exchange code
+        if (result.ActionRequired is { } steps)
             return RedirectWithFragment(returnUrl, new()
             {
-                ["slim_status"] = SlimErrorCodes.RequiresTwoFactor,
-                ["preAuthToken"] = challenge.PreAuthToken!,
-                ["method"] = challenge.TwoFactorMethod!,
+                ["slim_status"] = SlimErrorCodes.ActionRequired,
+                ["flowToken"] = steps.FlowToken,
             });
-        }
-
-        var signedIn = await authManager.SignInCoreAsync(user, true, false, remembered ? SlimAuthManager.MethodRememberedDevice : SlimAuthManager.MethodExternal, null, null, false, ct);
-        return signedIn.Succeeded ? Results.Redirect(returnUrl) : Redirect(returnUrl, "slim_error", signedIn.Error ?? SlimErrorCodes.SignInFailed);
+        return result.Succeeded ? Results.Redirect(returnUrl) : Redirect(returnUrl, "slim_error", result.Error ?? SlimErrorCodes.SignInFailed);
     }
 
     // ------------------------------------------------------------------ POST /login/external/exchange
@@ -269,33 +259,12 @@ internal sealed class SlimExternalLoginHandlers(
         if (user is null || !SlimUser.IsSameSecurityState(user.SecurityStamp, payload.Stamp))
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
 
-        // an inactive account makes the code invalid
-        var decision = SlimSignInChain.Evaluate(user, SlimSignInProofs.None, O);
-        if (decision.Refusal is not null) return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
-        if (decision.Next == SlimSignInActions.ChangePassword)
-            return SlimResults.Status(SlimErrorCodes.PasswordChangeRequired,
-                "The password was set by an administrator. Sign in with it once and choose your own password.", StatusCodes.Status403Forbidden);
-        if (decision.Next == SlimSignInActions.VerifyEmail)
-            return SlimResults.Status(SlimErrorCodes.EmailNotConfirmed, "The e-mail address has not been confirmed yet.", StatusCodes.Status403Forbidden);
-
         if (!SlimModes.TryResolve(O, false, out _, out var modeError)) return modeError!;
 
-        // second factor, exactly like at /auth/login: a remembered device (token in the body) skips it
-        var remembered = decision.Next == SlimSignInActions.SecondFactor
-            && services.GetService<SlimTwoFactorService>() is { } twoFactor
-            && twoFactor.IsRememberedDevice(user, Http, cookieMode: false, request.TwoFactorRememberToken);
-        if (decision.Next == SlimSignInActions.SecondFactor && !remembered)
-        {
-            var challenge = await login.BeginTwoFactorAsync(user, useCookies: false, rememberMe: false, ct);
-            return challenge is null
-                ? SlimResults.Problem(StatusCodes.Status500InternalServerError, SlimErrorCodes.TwoFactorUnavailable,
-                "Two-factor authentication is enabled for this user but ISlimTwoFactorStore is not registered.")
-                : SlimResults.Challenge(challenge);
-        }
-
-        var result = await authManager.SignInCoreAsync(user, false, false,
-            remembered ? SlimAuthManager.MethodRememberedDevice : SlimAuthManager.MethodExternal, null, null, true, ct);
-        return SlimLoginHandlers.ToResult(result);
+        // the steps that follow exactly as at /auth/login: a remembered device (token in the body) passes the second factor
+        var result = await flow.StartAsync(user, cookies: false, rememberMe: false, SlimAuthManager.MethodExternal, SlimSignInProofs.None,
+            checkRememberedDevice: true, request.TwoFactorRememberToken, refuseLockedSecondFactor: false, ct);
+        return flow.ToHttpResult(result, user);
     }
 
     // ------------------------------------------------------------------ POST /link/external

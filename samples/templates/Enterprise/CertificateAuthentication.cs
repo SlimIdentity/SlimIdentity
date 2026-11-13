@@ -74,8 +74,9 @@ public static class CertificateAuthentication
 
     /// <summary>
     /// Exchanges a valid client certificate for a regular SlimIdentity session (cookie or JWT), e.g. for smart-card
-    /// logins in a browser. SignInAsync applies the rules of /login: inactive, locked, unconfirmed accounts and
-    /// administrator-set passwords are refused; with 2FA the client gets the challenge and completes it at /auth/login/2fa.
+    /// logins in a browser. SignInAsync applies the rules of /login: inactive and unconfirmed accounts are refused,
+    /// the steps that follow (second factor, own password) are answered as action_required, continued at /auth/login/2fa
+    /// and /auth/login/password-change.
     /// </summary>
     public static IEndpointRouteBuilder MapCertificateLogin(this IEndpointRouteBuilder app)
     {
@@ -89,7 +90,7 @@ public static class CertificateAuthentication
 
                 // a smart card with PIN is multi-factor on its own: pass secondFactorVerified: true for such cards
                 var session = await auth.SignInAsync(user, useCookies ?? false, authenticationMethod: "cert", ct: ct);
-                if (session.TwoFactorChallenge is { } challenge) return Results.Json(challenge, statusCode: StatusCodes.Status401Unauthorized);
+                if (session.ActionRequired is { } steps) return Results.Ok(steps);
                 return session.Succeeded
                     ? Results.Ok(session.ToResponse())
                     : Results.Json(new { status = session.Error }, statusCode: StatusCodes.Status403Forbidden);

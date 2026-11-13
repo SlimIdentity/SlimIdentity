@@ -31,12 +31,12 @@ public sealed class TwoFactorTests
         app.Time.Advance(TimeSpan.FromSeconds(30));   // next time step – the enable code is already used
         var client = app.CreateClient();
 
-        var challenge = await client.PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized);
-        Assert.Equal("requires_two_factor", challenge.Str("status"));
-        Assert.Equal("totp", challenge.Str("twoFactorMethod"));
+        var challenge = await client.PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = TestApp.UserPassword });
+        Assert.Equal("second_factor", challenge.GetProperty("actions")[0].GetString());
+        Assert.Equal("totp", challenge.GetProperty("details").GetProperty("secondFactor").GetProperty("methods")[0].GetString());
 
-        await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = challenge.Str("preAuthToken"), code = "000000" }, HttpStatusCode.Unauthorized);
-        var session = await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = challenge.Str("preAuthToken"), code = Code(app, sharedKey) });
+        await client.PostJsonAsync("/auth/login/2fa", new { flowToken = challenge.Str("flowToken"), code = "000000" }, HttpStatusCode.Unauthorized);
+        var session = await client.PostJsonAsync("/auth/login/2fa", new { flowToken = challenge.Str("flowToken"), code = Code(app, sharedKey) });
         Assert.False(string.IsNullOrEmpty(session.Str("accessToken")));
     }
 
@@ -50,13 +50,13 @@ public sealed class TwoFactorTests
         var client = app.CreateClient();
 
         async Task<string> PreAuth() =>
-            (await client.PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized)).Str("preAuthToken");
+            (await client.PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = TestApp.UserPassword })).Str("flowToken");
 
-        await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = await PreAuth(), code });
+        await client.PostJsonAsync("/auth/login/2fa", new { flowToken = await PreAuth(), code });
         // an attacker who observed the code (phishing proxy, shoulder surfing) cannot reuse it
-        await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = await PreAuth(), code }, HttpStatusCode.Unauthorized);
+        await client.PostJsonAsync("/auth/login/2fa", new { flowToken = await PreAuth(), code }, HttpStatusCode.Unauthorized);
         // the enable code itself was consumed as well: a code from the previous step is rejected
-        await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = await PreAuth(),
+        await client.PostJsonAsync("/auth/login/2fa", new { flowToken = await PreAuth(),
             code = SlimTotp.Compute(SlimBase32.Decode(sharedKey), app.Time.GetUtcNow().ToUnixTimeSeconds() / 30 - 1) }, HttpStatusCode.Unauthorized);
     }
 
@@ -70,11 +70,11 @@ public sealed class TwoFactorTests
         await me.PostJsonAsync("/auth/2fa/enable-email", new { password = TestApp.UserPassword });
 
         var client = app.CreateClient();
-        var preAuth = (await client.PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized)).Str("preAuthToken");
+        var preAuth = (await client.PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = TestApp.UserPassword })).Str("flowToken");
         var code = (await app.Mail.WaitForAsync("two-factor", TestApp.UserEmail)).Payload;
 
-        await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = preAuth, code });
-        await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = preAuth, code }, HttpStatusCode.Unauthorized);
+        await client.PostJsonAsync("/auth/login/2fa", new { flowToken = preAuth, code });
+        await client.PostJsonAsync("/auth/login/2fa", new { flowToken = preAuth, code }, HttpStatusCode.Unauthorized);
     }
 
     [Fact]
@@ -102,10 +102,10 @@ public sealed class TwoFactorTests
         var client = app.CreateClient();
 
         async Task<string> PreAuth() =>
-            (await client.PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized)).Str("preAuthToken");
+            (await client.PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = TestApp.UserPassword })).Str("flowToken");
 
-        await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = await PreAuth(), recoveryCode = recoveryCodes[0] });
-        await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = await PreAuth(), recoveryCode = recoveryCodes[0] }, HttpStatusCode.Unauthorized);
+        await client.PostJsonAsync("/auth/login/2fa", new { flowToken = await PreAuth(), recoveryCode = recoveryCodes[0] });
+        await client.PostJsonAsync("/auth/login/2fa", new { flowToken = await PreAuth(), recoveryCode = recoveryCodes[0] }, HttpStatusCode.Unauthorized);
     }
 
     [Fact]
@@ -127,10 +127,10 @@ public sealed class TwoFactorTests
         await using var app = await TestApp.StartAsync();
         await EnableTotpAsync(app);
         var client = app.CreateClient();
-        var preAuth = (await client.PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized)).Str("preAuthToken");
+        var preAuth = (await client.PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = TestApp.UserPassword })).Str("flowToken");
 
         for (var i = 0; i < 5; i++)
-            await client.PostAsync("/auth/login/2fa", new { preAuthToken = preAuth, code = "000000" });
+            await client.PostAsync("/auth/login/2fa", new { flowToken = preAuth, code = "000000" });
 
         var user = app.Users.Get(TestApp.UserEmail);
         Assert.True(user.IsSecondFactorLockedOut(app.Time.GetUtcNow()));

@@ -5,13 +5,13 @@ internal static class SlimSignInActions
 {
     /// <summary>The mailbox is proven first (<c>SignIn.RequireConfirmedEmail</c>).</summary>
     public const string VerifyEmail = "verify_email";
-    /// <summary>A start password set by an administrator is replaced by an own one.</summary>
-    public const string ChangePassword = "change_password";
     /// <summary>The second factor of an account with two-factor authentication.</summary>
     public const string SecondFactor = "second_factor";
+    /// <summary>A start password set by an administrator is replaced by an own one.</summary>
+    public const string ChangePassword = "change_password";
 }
 
-/// <summary>What the current sign-in has proven beyond its first factor.</summary>
+/// <summary>What the current sign-in has proven.</summary>
 [Flags]
 internal enum SlimSignInProofs
 {
@@ -21,6 +21,8 @@ internal enum SlimSignInProofs
     /// or a host check that is multi-factor on its own.
     /// </summary>
     SecondFactor = 1,
+    /// <summary>The first factor was the password: its lockout holds for the rest of the sign-in.</summary>
+    Password = 2,
 }
 
 /// <summary>The outcome of <see cref="SlimSignInChain.Evaluate"/>.</summary>
@@ -47,8 +49,9 @@ internal static class SlimSignInChain
     private static readonly Check[] Checks =
     [
         new(SlimSignInActions.VerifyEmail, static (user, _, o) => o.SignIn.RequireConfirmedEmail && !user.EmailConfirmed),
-        new(SlimSignInActions.ChangePassword, static (user, _, _) => user.PasswordChangeRequired),
+        // the second factor before the own password: whoever chooses it has proven the account completely
         new(SlimSignInActions.SecondFactor, static (user, proofs, _) => user.TwoFactorEnabled && !proofs.HasFlag(SlimSignInProofs.SecondFactor)),
+        new(SlimSignInActions.ChangePassword, static (user, _, _) => user.PasswordChangeRequired),
     ];
 
     public static SlimSignInDecision Evaluate(SlimUser user, SlimSignInProofs proofs, SlimIdentityOptions options)
@@ -61,7 +64,7 @@ internal static class SlimSignInChain
     }
 
     /// <summary>
-    /// The error code an entry point answers for a step it cannot continue itself – the code of the step's rule.
+    /// The code of a step's rule – the reason in metrics and events, and the answer of an entry point that cannot continue it.
     /// </summary>
     public static string ErrorCode(string action) => action switch
     {

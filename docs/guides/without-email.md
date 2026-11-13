@@ -63,27 +63,27 @@ reset, it leaves an unconfirmed account unconfirmed and keeps its second factor 
 
 ## The forced password change
 
-With `mustChange: true`, `/auth/login` answers the correct start password with **401** and no session:
+With `mustChange: true`, `/auth/login` answers the correct start password without a session:
 
 ```json
-{ "status": "password_change_required", "passwordChangeToken": "CfDJ8…", "expiresIn": 300 }
+{ "status": "action_required", "actions": ["change_password"], "flowToken": "CfDJ8…", "expiresIn": 900 }
 ```
 
 The front end asks for a new password and calls
 
 ```http
 POST /auth/login/password-change
-{ "token": "CfDJ8…", "newPassword": "…" }
+{ "flowToken": "CfDJ8…", "newPassword": "…" }
 ```
 
-The answer is the session – or, with 2FA, the usual `requires_two_factor` challenge. The new password must follow the
-password rules and differ from the start password; the token works once, for 5 minutes, and dies when the
-administrator sets another password. A lockout that starts in between holds (`423`) – the new password does not lift
-it. The TypeScript client handles it as `{ kind: "password_change" }` and
-`completePasswordChange(token, newPassword)`.
+With 2FA the second factor comes first (`["second_factor", "change_password"]`) – no own password before the account is
+proven completely. The new password must follow the password rules and differ from the start password; the flow
+completes once, within 15 minutes, and dies when the administrator sets another password. A lockout of the password
+that starts in between holds (`423`) – the new password does not lift it. The TypeScript client handles it as
+`{ kind: "action_required" }` and `completePasswordChange(flowToken, newPassword)`.
 
-Every other way in waits as well: a passkey or an external login of the account answers `password_change_required`
-without a session until the start password has been replaced – it stays known to whoever set or read it, so it must
+Every other way in waits as well: a passkey or an external login of the account answers `change_password` without a
+session – the passkey or provider proves the account, the start password is not needed – until it has been replaced – it stays known to whoever set or read it, so it must
 not outlive the first sign-in.
 
 ## Second factor without mail

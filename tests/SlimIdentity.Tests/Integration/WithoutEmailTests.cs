@@ -100,10 +100,10 @@ public sealed class WithoutEmailTests
         await app.Users.UpdateSecurityStateAsync(user, default);
 
         var challenge = await app.CreateClient().PostJsonAsync("/auth/login?useCookies=false",
-            new { email = TestApp.UserEmail, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized);
+            new { email = TestApp.UserEmail, password = TestApp.UserPassword });
 
-        Assert.Equal("requires_two_factor", challenge.Str("status"));
-        Assert.Equal("recovery", challenge.Str("twoFactorMethod"));
+        Assert.Equal("second_factor", challenge.GetProperty("actions")[0].GetString());
+        Assert.Equal("recovery", challenge.GetProperty("details").GetProperty("secondFactor").GetProperty("methods")[0].GetString());
     }
 
     [Theory]

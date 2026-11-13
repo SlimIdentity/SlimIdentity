@@ -58,10 +58,10 @@ public sealed class LogSecrecyTests
         var enabled = await me.PostJsonAsync("/auth/2fa/enable", new { setupToken = setup.Str("setupToken"), code, password = newPassword });
         var recovery = enabled.GetProperty("recoveryCodes").EnumerateArray().Select(c => c.GetString()!).ToArray();
         secrets.AddRange(recovery);
-        var challenge = await client.PostJsonAsync("/auth/login", new { email, password = newPassword }, HttpStatusCode.Unauthorized);
-        secrets.Add(challenge.Str("preAuthToken"));
-        await client.PostAsync("/auth/login/2fa", new { preAuthToken = challenge.Str("preAuthToken"), code = "000000" });
-        Collect(await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = challenge.Str("preAuthToken"), recoveryCode = recovery[0] }));
+        var challenge = await client.PostJsonAsync("/auth/login", new { email, password = newPassword });
+        secrets.Add(challenge.Str("flowToken"));
+        await client.PostAsync("/auth/login/2fa", new { flowToken = challenge.Str("flowToken"), code = "000000" });
+        Collect(await client.PostJsonAsync("/auth/login/2fa", new { flowToken = challenge.Str("flowToken"), recoveryCode = recovery[0] }));
 
         await Task.Delay(200);   // background mail queue
         var all = string.Join("\n", logs.Entries);

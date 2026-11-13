@@ -28,15 +28,19 @@ public sealed record SlimAuthResult
     /// <summary>A <see cref="ISlimSignInGuard"/> refused the session.</summary>
     public bool Vetoed { get; init; }
     /// <summary>
-    /// <see cref="ISlimAuthManager.SignInAsync"/> for an account with 2FA: the challenge to return with status 401
-    /// (<see cref="Error"/> is <c>requires_two_factor</c>); the client completes it at <c>POST /auth/login/2fa</c>.
+    /// Steps follow before the session (<see cref="Error"/> is <c>action_required</c>), e.g. the second factor: return it
+    /// with status 200 (<c>Results.Ok(result.ActionRequired)</c>); the client continues at the step endpoints.
     /// </summary>
-    public SlimLoginChallengeResponse? TwoFactorChallenge { get; init; }
+    public SlimActionRequiredResponse? ActionRequired { get; init; }
 
     /// <summary>When the tokens were issued (the registered <see cref="TimeProvider"/>) – the base of <c>expiresIn</c>.</summary>
     internal DateTimeOffset IssuedAt { get; init; }
 
+    /// <summary>The token of a device remembered for the second factor (bearer mode), answered with the session.</summary>
+    internal string? TwoFactorRememberToken { get; init; }
+
     internal static SlimAuthResult Failed(string error) => new() { Succeeded = false, Error = error };
+    internal static SlimAuthResult Steps(SlimActionRequiredResponse response) => new() { Succeeded = false, Error = SlimErrorCodes.ActionRequired, ActionRequired = response };
     internal static SlimAuthResult Veto(SlimVeto veto) => new() { Succeeded = false, Error = veto.Error, ErrorMessage = veto.Message, Vetoed = true };
 
     private bool PrintMembers(System.Text.StringBuilder builder)

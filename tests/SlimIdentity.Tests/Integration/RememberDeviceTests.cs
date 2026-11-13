@@ -21,11 +21,14 @@ public sealed class RememberDeviceTests
         bool rememberDevice, string query = "")
     {
         app.Time.Advance(TimeSpan.FromSeconds(1));   // distinct issue time per e-mail code (fake clock)
-        var challenge = await client.PostJsonAsync($"/auth/login{query}", new { email, password }, HttpStatusCode.Unauthorized);
-        Assert.Equal("requires_two_factor", challenge.Str("status"));
+        var challenge = await client.PostJsonAsync($"/auth/login{query}", new { email, password });
+        Assert.Equal("second_factor", challenge.GetProperty("actions")[0].GetString());
         var code = (await app.Mail.WaitForAsync("two-factor", email)).Payload;
-        return await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = challenge.Str("preAuthToken"), code, rememberDevice });
+        return await client.PostJsonAsync("/auth/login/2fa", new { flowToken = challenge.Str("flowToken"), code, rememberDevice });
     }
+
+    private static async Task AssertSecondFactorAsync(Task<JsonElement> login) =>
+        Assert.Equal("second_factor", (await login).GetProperty("actions")[0].GetString());
 
     [Fact]
     public async Task Bearer_clients_skip_the_second_factor_with_the_remember_token()
@@ -41,7 +44,8 @@ public sealed class RememberDeviceTests
         Assert.False(string.IsNullOrEmpty(remembered.Str("accessToken")));
 
         // another device without the token still needs the second factor, and the password is always required
-        await app.CreateClient().PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized);
+        var other = await app.CreateClient().PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = TestApp.UserPassword });
+        Assert.Equal("second_factor", other.GetProperty("actions")[0].GetString());
         await app.CreateClient().PostJsonAsync("/auth/login",
             new { email = TestApp.UserEmail, password = "wrong", twoFactorRememberToken = rememberToken }, HttpStatusCode.Unauthorized);
     }
@@ -85,8 +89,8 @@ public sealed class RememberDeviceTests
         await browser.PostAsync("/auth/2fa/forget-device");
         Assert.False(browser.Cookies.ContainsKey("SlimAuth.2fa"));
         await browser.PostAsync("/auth/logout");
-        Assert.Equal(HttpStatusCode.Unauthorized,
-            (await browser.PostAsync("/auth/login?useCookies=true", new { email = TestApp.UserEmail, password = TestApp.UserPassword })).StatusCode);
+        var challenged = await browser.PostJsonAsync("/auth/login?useCookies=true", new { email = TestApp.UserEmail, password = TestApp.UserPassword });
+        Assert.Equal("second_factor", challenged.GetProperty("actions")[0].GetString());
     }
 
     [Fact]
@@ -109,9 +113,9 @@ public sealed class RememberDeviceTests
         var userToken = (await SignInWithSecondFactorAsync(app, app.CreateClient(), TestApp.UserEmail, TestApp.UserPassword, true)).Str("twoFactorRememberToken");
 
         var result = await app.CreateClient().PostJsonAsync("/auth/login",
-            new { email = TestApp.AdminEmail, password = TestApp.AdminPassword, twoFactorRememberToken = userToken }, HttpStatusCode.Unauthorized);
+            new { email = TestApp.AdminEmail, password = TestApp.AdminPassword, twoFactorRememberToken = userToken });
 
-        Assert.Equal("requires_two_factor", result.Str("status"));
+        Assert.Equal("second_factor", result.GetProperty("actions")[0].GetString());
     }
 
     [Fact]
@@ -123,8 +127,8 @@ public sealed class RememberDeviceTests
 
         app.Time.Advance(TimeSpan.FromDays(31));
 
-        await app.CreateClient().PostJsonAsync("/auth/login",
-            new { email = TestApp.UserEmail, password = TestApp.UserPassword, twoFactorRememberToken = token }, HttpStatusCode.Unauthorized);
+        await AssertSecondFactorAsync(app.CreateClient().PostJsonAsync("/auth/login",
+            new { email = TestApp.UserEmail, password = TestApp.UserPassword, twoFactorRememberToken = token }));
     }
 
     [Fact]
@@ -141,8 +145,8 @@ public sealed class RememberDeviceTests
 
         client.BearerToken = renewed.Str("accessToken");
         Assert.Equal(HttpStatusCode.OK, (await client.GetAsync("/api/hello")).StatusCode);
-        await app.CreateClient().PostJsonAsync("/auth/login",
-            new { email = TestApp.UserEmail, password = TestApp.UserPassword, twoFactorRememberToken = token }, HttpStatusCode.Unauthorized);
+        await AssertSecondFactorAsync(app.CreateClient().PostJsonAsync("/auth/login",
+            new { email = TestApp.UserEmail, password = TestApp.UserPassword, twoFactorRememberToken = token }));
     }
 
     [Fact]
@@ -157,8 +161,8 @@ public sealed class RememberDeviceTests
         client.BearerToken = session.Str("accessToken");
         await client.PostJsonAsync("/auth/change-password", new { currentPassword = TestApp.UserPassword, newPassword = "Changed123!" });
 
-        await app.CreateClient().PostJsonAsync("/auth/login",
-            new { email = TestApp.UserEmail, password = "Changed123!", twoFactorRememberToken = token }, HttpStatusCode.Unauthorized);
+        await AssertSecondFactorAsync(app.CreateClient().PostJsonAsync("/auth/login",
+            new { email = TestApp.UserEmail, password = "Changed123!", twoFactorRememberToken = token }));
     }
 
     [Fact]
@@ -172,8 +176,8 @@ public sealed class RememberDeviceTests
 
         app.Time.Advance(TimeSpan.FromSeconds(1));
         var client = app.CreateClient();
-        var preAuth = (await client.PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized)).Str("preAuthToken");
-        var session = await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = preAuth, recoveryCode = codes[0].GetString(), rememberDevice = true });
+        var preAuth = (await client.PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = TestApp.UserPassword })).Str("flowToken");
+        var session = await client.PostJsonAsync("/auth/login/2fa", new { flowToken = preAuth, recoveryCode = codes[0].GetString(), rememberDevice = true });
 
         Assert.False(session.TryGetProperty("twoFactorRememberToken", out var token) && token.ValueKind == JsonValueKind.String);
     }

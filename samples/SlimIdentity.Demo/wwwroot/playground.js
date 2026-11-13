@@ -4,7 +4,7 @@
 import { installVirtualPasskey } from "./virtual-passkey.js";
 
 const $ = (id) => document.getElementById(id);
-const state = { accessToken: null, refreshToken: null, preAuthToken: null, rememberToken: null, totpSecret: null, link: null };
+const state = { accessToken: null, refreshToken: null, flowToken: null, rememberToken: null, totpSecret: null, link: null };
 
 // ------------------------------------------------------------------ HTTP
 
@@ -75,13 +75,7 @@ const actions = {
       email: email(), password: password(), rememberMe: $("rememberMe").checked,
       twoFactorRememberToken: mode() === "bearer" ? state.rememberToken : null,
     });
-    if (r.status === 401 && r.json?.status === "requires_two_factor") {
-      state.preAuthToken = r.json.preAuthToken;
-      $("challengeMethod").textContent = r.json.twoFactorMethod === "totp" ? "authenticator app" : "code sent by e-mail";
-      $("challenge").hidden = false;
-      $("mailboxAddress").value = email();
-      return;
-    }
+    if (showSteps(r.json)) { $("mailboxAddress").value = email(); return; }
     $("challenge").hidden = true;
     if (r.ok) storeSession(r.json);
     await updateWho();
@@ -94,10 +88,10 @@ const actions = {
 
   async secondFactor() {
     const r = await call("POST", "/auth/login/2fa", {
-      preAuthToken: state.preAuthToken, code: $("code").value || null, recoveryCode: $("recoveryCode").value || null,
+      flowToken: state.flowToken, code: $("code").value || null, recoveryCode: $("recoveryCode").value || null,
       rememberDevice: $("rememberDevice").checked,
     });
-    if (r.ok) { storeSession(r.json); $("challenge").hidden = true; $("code").value = ""; $("recoveryCode").value = ""; }
+    if (r.ok && !showSteps(r.json)) { storeSession(r.json); $("challenge").hidden = true; $("code").value = ""; $("recoveryCode").value = ""; }
     await updateWho();
   },
 
@@ -385,6 +379,18 @@ async function externalLogin(provider) {
   location.href = `/auth/login/${provider}?useCookies=false&returnUrl=${returnUrl}&code_challenge=${challenge}&code_challenge_method=S256`;
 }
 
+// a sign-in with open steps ("action_required"): the playground shows the second factor; other steps only in the log
+function showSteps(json) {
+  if (json?.status !== "action_required") return false;
+  state.flowToken = json.flowToken;
+  if (json.actions[0] === "second_factor") {
+    const method = json.details?.secondFactor?.methods?.[0];
+    $("challengeMethod").textContent = method === "totp" ? "authenticator app" : method === "email" ? "code sent by e-mail" : "recovery code";
+    $("challenge").hidden = false;
+  }
+  return true;
+}
+
 // back from the provider: an error in the query, secrets in the fragment (never sent to a server)
 async function handleExternalReturn() {
   const error = new URLSearchParams(location.search).get("slim_error");
@@ -395,20 +401,15 @@ async function handleExternalReturn() {
   sessionStorage.removeItem("slim.mode");
   if (started) { $("mode").value = started; document.body.classList.toggle("bearer", started === "bearer"); }
   if (error) { log("GET", "external login", 0, `slim_error=${error}`); return; }
-  if (fragment.get("slim_status") === "requires_two_factor") {
-    state.preAuthToken = fragment.get("preAuthToken");
-    $("challengeMethod").textContent = fragment.get("method") === "totp" ? "authenticator app" : "code sent by e-mail";
-    $("challenge").hidden = false;
+  if (fragment.get("slim_status") === "action_required") {
+    const r = await call("POST", "/auth/flow", { flowToken: fragment.get("flowToken") });   // names the open steps
+    showSteps(r.json);
     return;
   }
   if (fragment.get("code")) {
     const r = await call("POST", "/auth/login/external/exchange", { code: fragment.get("code"), codeVerifier: sessionStorage.getItem("slim.pkce") });
     sessionStorage.removeItem("slim.pkce");
-    if (r.status === 401 && r.json?.status === "requires_two_factor") {
-      state.preAuthToken = r.json.preAuthToken;
-      $("challengeMethod").textContent = r.json.twoFactorMethod === "totp" ? "authenticator app" : "code sent by e-mail";
-      $("challenge").hidden = false;
-    } else if (r.ok) storeSession(r.json);
+    if (!showSteps(r.json) && r.ok) storeSession(r.json);
   }
 }
 

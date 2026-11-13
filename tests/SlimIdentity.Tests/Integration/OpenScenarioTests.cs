@@ -174,7 +174,7 @@ public sealed class OpenScenarioTests
             await app.CreateClient().SendRawAsync("/auth/login", "email=a&password=b", "application/x-www-form-urlencoded"),  // wrong type
             await app.CreateClient().SendRawAsync("/auth/login", """{"email":"x@test.local","password":["a"]}""", "application/json"), // wrong shape
             await app.CreateClient().PostAsync("/auth/reset-password", new { token = "AAAA" + new string('x', 300), newPassword = "Whatever-123" }),
-            await app.CreateClient().PostAsync("/auth/login/2fa", new { preAuthToken = "not-a-token", code = "123456" }),
+            await app.CreateClient().PostAsync("/auth/login/2fa", new { flowToken = "not-a-token", code = "123456" }),
             await app.CreateClient().PostAsync("/auth/refresh", new { refreshToken = "CfDJ8" + new string('A', 200) }),
             await app.CreateClient().PostAsync("/auth/register", new { email = "not-an-address", password = "x" }),
         };

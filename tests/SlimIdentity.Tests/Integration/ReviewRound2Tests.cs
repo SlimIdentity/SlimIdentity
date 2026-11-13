@@ -71,8 +71,8 @@ public sealed class ReviewRound2Tests
         var resetToken = (await app.Mail.WaitForAsync("password-reset", email)).Payload;
         await app.CreateClient().PostJsonAsync("/auth/reset-password", new { token = resetToken, newPassword = "Attacker-New-Pass-123!" });
 
-        var login = await app.CreateClient().PostJsonAsync("/auth/login", new { email, password = "Attacker-New-Pass-123!" }, HttpStatusCode.Unauthorized);
-        Assert.Equal("requires_two_factor", login.Str("status"));
+        var login = await app.CreateClient().PostJsonAsync("/auth/login", new { email, password = "Attacker-New-Pass-123!" });
+        Assert.Equal("second_factor", login.GetProperty("actions")[0].GetString());
     }
 
     private static TestAppOptions SocialProvider(string providerKey, string email) => new()
@@ -152,7 +152,7 @@ public sealed class ReviewRound2Tests
         user.PasswordChangeRequired = true;
         await app.Users.UpdateSecurityStateAsync(user, default);
         return (await app.CreateClient().PostJsonAsync("/auth/login?useCookies=false",
-            new { email = TestApp.UserEmail, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized)).Str("passwordChangeToken");
+            new { email = TestApp.UserEmail, password = TestApp.UserPassword })).Str("flowToken");
     }
 
     [Fact]
@@ -165,7 +165,7 @@ public sealed class ReviewRound2Tests
             await app.CreateClient().PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = "wrong" }, HttpStatusCode.Unauthorized);
         Assert.True(app.Users.Get(TestApp.UserEmail).IsLockedOut(app.Time.GetUtcNow()));
 
-        var answer = await app.CreateClient().PostAsync("/auth/login/password-change", new { token, newPassword = "New-Valid-Pass-123!" });
+        var answer = await app.CreateClient().PostAsync("/auth/login/password-change", new { flowToken = token, newPassword = "New-Valid-Pass-123!" });
 
         Assert.Equal((HttpStatusCode)423, answer.StatusCode);
         Assert.True(app.Users.Get(TestApp.UserEmail).IsLockedOut(app.Time.GetUtcNow()));   // the lockout was not cleared
@@ -182,7 +182,7 @@ public sealed class ReviewRound2Tests
 
         app.Time.Advance(TimeSpan.FromMinutes(1) + TimeSpan.FromSeconds(1));   // first lockout: 1 minute, token: 5 minutes
 
-        var session = await app.CreateClient().PostJsonAsync("/auth/login/password-change", new { token, newPassword = "New-Valid-Pass-123!" });
+        var session = await app.CreateClient().PostJsonAsync("/auth/login/password-change", new { flowToken = token, newPassword = "New-Valid-Pass-123!" });
         Assert.False(string.IsNullOrEmpty(session.Str("accessToken")));
     }
 
@@ -227,9 +227,9 @@ public sealed class ReviewRound2Tests
     private static async Task<string> SignInWithEmailCodeAsync(TestApp app)
     {
         var challenge = await app.CreateClient().PostJsonAsync("/auth/login?useCookies=false",
-            new { email = TestApp.UserEmail, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized);
+            new { email = TestApp.UserEmail, password = TestApp.UserPassword });
         var code = (await app.Mail.WaitForAsync("two-factor", TestApp.UserEmail)).Payload;
-        return (await app.CreateClient().PostJsonAsync("/auth/login/2fa", new { preAuthToken = challenge.Str("preAuthToken"), code })).Str("accessToken");
+        return (await app.CreateClient().PostJsonAsync("/auth/login/2fa", new { flowToken = challenge.Str("flowToken"), code })).Str("accessToken");
     }
 
     // ------------------------------------------------------------------ F-05: mail throttle at capacity

@@ -42,8 +42,8 @@ After the provider round trip SlimIdentity redirects to `returnUrl`:
 | Situation | Redirect |
 | :--- | :--- |
 | Cookie mode, success | `returnUrl` – the cookie is set |
-| Cookie mode, 2FA enabled | `returnUrl#slim_status=requires_two_factor&preAuthToken=…&method=…` → continue with `/auth/login/2fa` |
-| Bearer mode | `returnUrl#code=…` → `POST /auth/login/external/exchange { code, codeVerifier, twoFactorRememberToken? }` returns the token pair – or, with 2FA, `401 requires_two_factor` with `preAuthToken` |
+| Cookie mode, steps follow (2FA, own password) | `returnUrl#slim_status=action_required&flowToken=…` → `POST /auth/flow` names the steps, continue with `/auth/login/2fa` or `/auth/login/password-change` |
+| Bearer mode | `returnUrl#code=…` → `POST /auth/login/external/exchange { code, codeVerifier, twoFactorRememberToken? }` returns the token pair – or `200 action_required` with the steps |
 | Error | `returnUrl?slim_error=<code>` |
 
 Secrets travel only in the URL **fragment**, which browsers never send to servers, logs or referrers; only error codes

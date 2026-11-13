@@ -316,6 +316,22 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
 
 ### Changed
 
+- **Breaking** (wire format, `SlimAuthResult`): a sign-in whose first factor is right but which needs further steps
+  answers `200 { "status": "action_required", "actions": [...], "flowToken", "expiresIn", "details"? }` instead of
+  `401 requires_two_factor` (`preAuthToken`, `twoFactorMethod`) or `401 password_change_required`
+  (`passwordChangeToken`). `actions` lists the open steps in order (`second_factor` before `change_password`), the
+  second-factor methods are in `details.secondFactor.methods`. `/login/2fa` and `/login/password-change` take
+  `flowToken` and answer with the session or the remaining steps. The same answer comes from
+  `/login/external/exchange`, `/passkeys/login`, `/invitation/accept` (account with 2FA) and
+  `ISlimAuthManager.SignInAsync` (`SlimAuthResult.ActionRequired` replaces the challenge properties). A flow lasts
+  `SlimIdentityDefaults.SignInFlowLifetime` (15 minutes) from the first factor and completes once.
+- New `POST /auth/flow { flowToken }`: names the open steps of a flow without changing anything. The cookie-mode
+  redirect of an external login carries `#slim_status=action_required&flowToken=…`.
+- Passkey sign-in and the external-login exchange answer an inactive account with `403 account_disabled`; a forced
+  password change there is a `change_password` step instead of `403 password_change_required`.
+- TypeScript client: `LoginResult` kind `action_required` (with `steps`) replaces `two_factor`, `password_change` and
+  `sign_in_required`; new `readFlow`; `readExternalLoginResult` is async.
+
 - **Breaking** (`ISlimUserStore`, user entity): password and second factor have separate attempt counters
   (`SlimUser.FailedSecondFactorAttempts`, `SecondFactorLockoutEndUtc`; new columns in the EF Core entity and the
   templates). An attempt is reserved in the store before it is evaluated: `TryBeginAttemptAsync` counts and, at the

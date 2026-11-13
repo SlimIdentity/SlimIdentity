@@ -54,24 +54,12 @@ internal sealed class SlimAuthManager(
 
         // the rules of /login after the first factor – a host endpoint must not be a way around them. A lockout guards
         // the password and the second factor against guessing; it does not apply here (the host checks its own factor).
-        var decision = SlimSignInChain.Evaluate(user, secondFactorVerified ? SlimSignInProofs.SecondFactor : SlimSignInProofs.None, options.Value);
-        if (decision.Next == SlimSignInActions.SecondFactor)
-        {
-            var challenge = await services.GetRequiredService<Endpoints.SlimLoginHandlers>().BeginTwoFactorAsync(user, useCookies, isPersistent, ct);
-            return challenge is null
-                ? SlimAuthResult.Failed(SlimErrorCodes.TwoFactorUnavailable)   // 2FA enabled, but no ISlimTwoFactorStore registered
-                : new SlimAuthResult { Succeeded = false, Error = SlimErrorCodes.RequiresTwoFactor, TwoFactorChallenge = challenge };
-        }
-
-        // the steps before the second factor cannot be continued here: they are refused with the code of their rule
-        var refusal = decision.Refusal ?? (decision.Next is { } next ? SlimSignInChain.ErrorCode(next) : null);
-        if (refusal is not null)
-        {
-            await Hooks.RaiseAsync(SlimEventTypes.SignInFailed, user.Id, authenticationMethod, refusal, ct: ct);
-            return SlimAuthResult.Failed(refusal);
-        }
-
-        return await SignInCoreAsync(user, useCookies, isPersistent, authenticationMethod, null, null, issueRefreshToken: true, ct);
+        var result = await services.GetRequiredService<SlimSignInFlow>().StartAsync(user, useCookies, isPersistent, authenticationMethod,
+            secondFactorVerified ? SlimSignInProofs.SecondFactor : SlimSignInProofs.None,
+            checkRememberedDevice: false, rememberToken: null, refuseLockedSecondFactor: false, ct);
+        if (!result.Succeeded && result.ActionRequired is null && !result.Vetoed && result.Error != SlimErrorCodes.TwoFactorUnavailable)
+            await Hooks.RaiseAsync(SlimEventTypes.SignInFailed, user.Id, authenticationMethod, result.Error, ct: ct);
+        return result;
     }
 
     private static bool IsHostMethod(string? method) =>

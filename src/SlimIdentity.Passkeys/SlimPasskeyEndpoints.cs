@@ -76,8 +76,9 @@ internal sealed class SlimPasskeyEndpoints : ISlimEndpointModule
         group.MapPost("/login", static ([FromBody] SlimPasskeyLoginRequest request, [FromQuery] bool? useCookies,
                 [FromServices] SlimPasskeyHandlers h, CancellationToken ct) => h.LoginAsync(request, useCookies, ct))
             .WithName("SlimIdentity_PasskeyLogin")
-            .WithSummary("Sign in with the result of navigator.credentials.get. A passkey is multi-factor: no second factor follows.")
+            .WithSummary("Sign in with the result of navigator.credentials.get.             A passkey is multi-factor: no second factor follows (action_required only for change_password).")
             .Produces<SlimAuthResponse>()
+                        .Produces<SlimActionRequiredResponse>()
             .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
             .ProducesSlimProblem(StatusCodes.Status403Forbidden)
             .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)

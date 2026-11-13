@@ -30,20 +30,20 @@ public sealed class ConcurrencyTests
         var (sharedKey, recoveryCodes) = await EnableTotpAsync(app);
         var client = app.CreateClient();
 
-        var preAuth = (await client.PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized)).Str("preAuthToken");
-        await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = preAuth, code = Code(app, sharedKey) });
+        var preAuth = (await client.PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = TestApp.UserPassword })).Str("flowToken");
+        await client.PostJsonAsync("/auth/login/2fa", new { flowToken = preAuth, code = Code(app, sharedKey) });
 
         // the same challenge with another, valid factor: a fresh TOTP step …
         app.Time.Advance(TimeSpan.FromSeconds(30));
-        var reused = await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = preAuth, code = Code(app, sharedKey) }, HttpStatusCode.Unauthorized);
+        var reused = await client.PostJsonAsync("/auth/login/2fa", new { flowToken = preAuth, code = Code(app, sharedKey) }, HttpStatusCode.Unauthorized);
         Assert.Equal("invalid_token", reused.Str("code"));
         // … or a recovery code
-        await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = preAuth, recoveryCode = recoveryCodes[0] }, HttpStatusCode.Unauthorized);
+        await client.PostJsonAsync("/auth/login/2fa", new { flowToken = preAuth, recoveryCode = recoveryCodes[0] }, HttpStatusCode.Unauthorized);
 
         // a new challenge (password again) works
         app.Time.Advance(TimeSpan.FromSeconds(30));
-        var fresh = (await client.PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized)).Str("preAuthToken");
-        await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = fresh, code = Code(app, sharedKey) });
+        var fresh = (await client.PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = TestApp.UserPassword })).Str("flowToken");
+        await client.PostJsonAsync("/auth/login/2fa", new { flowToken = fresh, code = Code(app, sharedKey) });
     }
 
     [Fact]
@@ -53,9 +53,9 @@ public sealed class ConcurrencyTests
         var (sharedKey, _) = await EnableTotpAsync(app);
         var client = app.CreateClient();
 
-        var preAuth = (await client.PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized)).Str("preAuthToken");
-        await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = preAuth, code = "000000" }, HttpStatusCode.Unauthorized);
-        await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = preAuth, code = Code(app, sharedKey) });
+        var preAuth = (await client.PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = TestApp.UserPassword })).Str("flowToken");
+        await client.PostJsonAsync("/auth/login/2fa", new { flowToken = preAuth, code = "000000" }, HttpStatusCode.Unauthorized);
+        await client.PostJsonAsync("/auth/login/2fa", new { flowToken = preAuth, code = Code(app, sharedKey) });
     }
 
     [Fact]
@@ -66,19 +66,19 @@ public sealed class ConcurrencyTests
         var client = app.CreateClient();
         client.SendCsrfHeader = true;
 
-        var preAuth = (await client.PostJsonAsync("/auth/login?useCookies=true", new { email = TestApp.UserEmail, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized)).Str("preAuthToken");
+        var preAuth = (await client.PostJsonAsync("/auth/login?useCookies=true", new { email = TestApp.UserEmail, password = TestApp.UserPassword })).Str("flowToken");
 
         // no session cookie, no useCookies flag – only the signed challenge says "cookie mode"
         client.SendCsrfHeader = false;
-        var missingHeader = await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = preAuth, code = Code(app, sharedKey) }, HttpStatusCode.Forbidden);
+        var missingHeader = await client.PostJsonAsync("/auth/login/2fa", new { flowToken = preAuth, code = Code(app, sharedKey) }, HttpStatusCode.Forbidden);
         Assert.Equal("csrf_validation_failed", missingHeader.Str("code"));
 
         client.SendCsrfHeader = true;
         client.Origin = "https://evil.example";
-        await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = preAuth, code = Code(app, sharedKey) }, HttpStatusCode.Forbidden);
+        await client.PostJsonAsync("/auth/login/2fa", new { flowToken = preAuth, code = Code(app, sharedKey) }, HttpStatusCode.Forbidden);
 
         client.Origin = null;
-        await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = preAuth, code = Code(app, sharedKey) });
+        await client.PostJsonAsync("/auth/login/2fa", new { flowToken = preAuth, code = Code(app, sharedKey) });
         Assert.True(client.Cookies.ContainsKey("SlimAuth"));
     }
 
@@ -89,8 +89,8 @@ public sealed class ConcurrencyTests
         var (sharedKey, _) = await EnableTotpAsync(app);
         var client = app.CreateClient();
 
-        var preAuth = (await client.PostJsonAsync("/auth/login?useCookies=false", new { email = TestApp.UserEmail, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized)).Str("preAuthToken");
-        var session = await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = preAuth, code = Code(app, sharedKey) });
+        var preAuth = (await client.PostJsonAsync("/auth/login?useCookies=false", new { email = TestApp.UserEmail, password = TestApp.UserPassword })).Str("flowToken");
+        var session = await client.PostJsonAsync("/auth/login/2fa", new { flowToken = preAuth, code = Code(app, sharedKey) });
         Assert.False(string.IsNullOrEmpty(session.Str("accessToken")));
     }
 

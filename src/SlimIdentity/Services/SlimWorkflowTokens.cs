@@ -17,7 +17,7 @@ internal sealed class SlimWorkflowTokens(IDataProtectionProvider provider, TimeP
 
     public const string EmailVerificationPurpose = "SlimIdentity.EmailVerification.v1";
     public const string PasswordResetPurpose = "SlimIdentity.PasswordReset.v1";
-    public const string PreAuthPurpose = "SlimIdentity.PreAuth.v1";
+    public const string SignInFlowPurpose = "SlimIdentity.SignInFlow.v1";
     public const string TwoFactorSetupPurpose = "SlimIdentity.TwoFactorSetup.v1";
     public const string ExternalExchangePurpose = "SlimIdentity.ExternalExchange.v1";
     public const string ExternalLinkPurpose = "SlimIdentity.ExternalLink.v1";
@@ -25,7 +25,6 @@ internal sealed class SlimWorkflowTokens(IDataProtectionProvider provider, TimeP
     public const string InvitationPurpose = "SlimIdentity.Invitation.v1";
     public const string EmailChangePurpose = "SlimIdentity.EmailChange.v1";
     public const string RememberDevicePurpose = "SlimIdentity.TwoFactorRememberDevice.v1";
-    public const string PasswordChangePurpose = "SlimIdentity.PasswordChange.v1";
 
     // AOT-safe: metadata comes from the source-generated context, never from reflection
     private static JsonTypeInfo<T> TypeInfo<T>() =>
@@ -90,10 +89,14 @@ internal sealed class SlimWorkflowTokens(IDataProtectionProvider provider, TimeP
 internal sealed record SlimEmailTokenPayload(string Uid, string Email, string Stamp);
 /// <summary><c>ByAdministrator</c>: handed over by an administrator – no proof that the user controls the mailbox.</summary>
 internal sealed record SlimResetTokenPayload(string Uid, string Stamp, bool ByAdministrator = false);
-/// <summary>The password was verified; a new one must be chosen before any session exists.</summary>
-internal sealed record SlimPasswordChangePayload(string Uid, string Stamp, bool UseCookies, bool RememberMe);
-/// <summary><c>IssuedAt</c> (unix milliseconds) makes e-mail codes single use via <c>ISlimTwoFactorStore.TryMarkCodeUsedAsync</c>.</summary>
-internal sealed record SlimPreAuthPayload(string Uid, string Stamp, bool UseCookies, bool RememberMe, string Method, string? CodeHash, long IssuedAt);
+/// <summary>
+/// A sign-in between its first factor and the session. <c>Proofs</c> and <c>Amr</c> (method of the session) say what is
+/// proven so far; <c>FlowId</c> completes at most one session; <c>StartedAt</c> (unix milliseconds) bounds the whole flow.
+/// The open second-factor challenge: <c>Method</c>, <c>CodeHash</c> of an e-mail code and <c>IssuedAt</c> (unix
+/// milliseconds, single use via <c>ISlimTwoFactorStore.TryMarkChallengeUsedAsync</c> and <c>TryMarkCodeUsedAsync</c>).
+/// </summary>
+internal sealed record SlimFlowPayload(string Uid, string Stamp, string FlowId, long StartedAt, SlimSignInProofs Proofs, string Amr,
+    bool UseCookies, bool RememberMe, bool RememberDevice = false, string? Method = null, string? CodeHash = null, long IssuedAt = 0);
 /// <summary>"Remember this device" for 2FA; <c>ExpiresAt</c> (unix seconds) is checked against the injected clock.</summary>
 internal sealed record SlimRememberDevicePayload(string Uid, string Stamp, long ExpiresAt);
 internal sealed record SlimEmailChangePayload(string Uid, string OldEmail, string NewEmail, string Stamp);

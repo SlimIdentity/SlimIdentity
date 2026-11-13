@@ -80,18 +80,18 @@ public sealed class ReviewRound1Tests
 
         // cookie mode: the challenge comes back in the fragment
         var cookieTarget = await SignInExternallyAsync(app.CreateClient());
-        Assert.DoesNotContain("preAuthToken", cookieTarget.Query);
-        Assert.Equal("requires_two_factor", Fragment(cookieTarget)["slim_status"]);
-        Assert.False(string.IsNullOrEmpty(Fragment(cookieTarget)["preAuthToken"]));
+        Assert.DoesNotContain("flowToken", cookieTarget.Query);
+        Assert.Equal("action_required", Fragment(cookieTarget)["slim_status"]);
+        Assert.False(string.IsNullOrEmpty(Fragment(cookieTarget)["flowToken"]));
 
         // bearer mode: the (PKCE-bound) exchange answers with the challenge instead of tokens
         var (verifier, challenge) = Pkce();
         var bearerTarget = await SignInExternallyAsync(app.CreateClient(), $"useCookies=false&returnUrl=/done&code_challenge={challenge}&code_challenge_method=S256");
-        Assert.DoesNotContain("preAuthToken", bearerTarget.Query + bearerTarget.Fragment);
+        Assert.DoesNotContain("flowToken", bearerTarget.Query + bearerTarget.Fragment);
         var exchanged = await app.CreateClient().PostJsonAsync("/auth/login/external/exchange",
-            new { code = Fragment(bearerTarget)["code"], codeVerifier = verifier }, HttpStatusCode.Unauthorized);
-        Assert.Equal("requires_two_factor", exchanged.Str("status"));
-        Assert.False(string.IsNullOrEmpty(exchanged.Str("preAuthToken")));
+            new { code = Fragment(bearerTarget)["code"], codeVerifier = verifier });
+        Assert.Equal("second_factor", exchanged.GetProperty("actions")[0].GetString());
+        Assert.False(string.IsNullOrEmpty(exchanged.Str("flowToken")));
     }
 
     // ------------------------------------------------------------------ R3
@@ -138,12 +138,12 @@ public sealed class ReviewRound1Tests
 
         // the attacker knows the password and races 40 guesses of the 6-digit code
         var preAuth = (await app.CreateClient().PostJsonAsync("/auth/login?useCookies=false",
-            new { email = TestApp.UserEmail, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized)).Str("preAuthToken");
+            new { email = TestApp.UserEmail, password = TestApp.UserPassword })).Str("flowToken");
         var valid = Code(app, setup.Str("sharedKey"));
         var guesses = Enumerable.Range(0, 1_000_000).Select(n => n.ToString("D6", System.Globalization.CultureInfo.InvariantCulture))
             .Where(g => g != valid).Take(40).ToArray();
         await Task.WhenAll(guesses.Select(g => Task.Run(() =>
-            app.CreateClient().PostAsync("/auth/login/2fa", new { preAuthToken = preAuth, code = g }))));
+            app.CreateClient().PostAsync("/auth/login/2fa", new { flowToken = preAuth, code = g }))));
 
         // every evaluated wrong guess is counted – more than five means guesses slipped past the lockout
         Assert.Equal(5, app.Users.Get(TestApp.UserEmail).FailedSecondFactorAttempts);

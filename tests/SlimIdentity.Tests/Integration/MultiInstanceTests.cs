@@ -210,11 +210,11 @@ public sealed class MultiInstanceTests
         await cluster.On(cluster.B, takeOver: me).PostJsonAsync("/auth/2fa/enable", new { setupToken = setup.Str("setupToken"), code = Code(), password = TestApp.UserPassword });
         cluster.Time.Advance(TimeSpan.FromSeconds(30));
 
-        var challenge = await cluster.On(cluster.A).PostJsonAsync("/auth/login", UserLogin, HttpStatusCode.Unauthorized);
-        await cluster.On(cluster.B).PostJsonAsync("/auth/login/2fa", new { preAuthToken = challenge.Str("preAuthToken"), code = Code() });
+        var challenge = await cluster.On(cluster.A).PostJsonAsync("/auth/login", UserLogin);
+        await cluster.On(cluster.B).PostJsonAsync("/auth/login/2fa", new { flowToken = challenge.Str("flowToken"), code = Code() });
 
         cluster.Time.Advance(TimeSpan.FromSeconds(30));   // a fresh, valid code – but the challenge is used up everywhere
-        await cluster.On(cluster.A).PostJsonAsync("/auth/login/2fa", new { preAuthToken = challenge.Str("preAuthToken"), code = Code() }, HttpStatusCode.Unauthorized);
+        await cluster.On(cluster.A).PostJsonAsync("/auth/login/2fa", new { flowToken = challenge.Str("flowToken"), code = Code() }, HttpStatusCode.Unauthorized);
     }
 
     [Fact]

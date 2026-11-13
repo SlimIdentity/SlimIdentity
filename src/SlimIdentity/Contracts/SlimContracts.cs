@@ -29,17 +29,17 @@ public sealed record SlimLoginRequest(string Email, string Password, bool Rememb
 }
 
 /// <summary>Body of <c>POST /auth/login/2fa</c>: either <see cref="Code"/> (TOTP / e-mail code) or <see cref="RecoveryCode"/>.</summary>
-/// <param name="PreAuthToken">Token from the <c>requires_two_factor</c> answer of <c>/auth/login</c>.</param>
+/// <param name="FlowToken"><c>flowToken</c> of an <c>action_required</c> answer with <c>second_factor</c> as first step.</param>
 /// <param name="Code">6-digit TOTP or e-mail code.</param>
 /// <param name="RecoveryCode">One of the recovery codes (single use).</param>
 /// <param name="RememberDevice">
 /// Skip the second factor on this device for <c>TwoFactor.RememberDeviceLifetime</c> (only if the feature is enabled).
 /// </param>
-public sealed record SlimTwoFactorLoginRequest(string PreAuthToken, string? Code = null, string? RecoveryCode = null, bool RememberDevice = false)
+public sealed record SlimTwoFactorLoginRequest(string FlowToken, string? Code = null, string? RecoveryCode = null, bool RememberDevice = false)
 {
     private bool PrintMembers(System.Text.StringBuilder builder)
     {
-        builder.Append("PreAuthToken = ").Append(SlimRedaction.Mask(PreAuthToken));
+        builder.Append("FlowToken = ").Append(SlimRedaction.Mask(FlowToken));
         builder.Append(", Code = ").Append(SlimRedaction.Mask(Code));
         builder.Append(", RecoveryCode = ").Append(SlimRedaction.Mask(RecoveryCode));
         builder.Append(", RememberDevice = ").Append(RememberDevice);
@@ -113,14 +113,25 @@ public sealed record SlimResetPasswordRequest(string Token, string NewPassword)
 }
 
 /// <summary>Body of <c>POST /auth/login/password-change</c>: the forced change of a password set by an administrator.</summary>
-/// <param name="Token"><c>passwordChangeToken</c> from the <c>password_change_required</c> answer of <c>/auth/login</c>.</param>
+/// <param name="FlowToken"><c>flowToken</c> of an <c>action_required</c> answer with <c>change_password</c> as first step.</param>
 /// <param name="NewPassword">New password according to the password policy, different from the current one.</param>
-public sealed record SlimPasswordChangeLoginRequest(string Token, string NewPassword)
+public sealed record SlimPasswordChangeLoginRequest(string FlowToken, string NewPassword)
 {
     private bool PrintMembers(System.Text.StringBuilder builder)
     {
-        builder.Append("Token = ").Append(SlimRedaction.Mask(Token));
+        builder.Append("FlowToken = ").Append(SlimRedaction.Mask(FlowToken));
         builder.Append(", NewPassword = ").Append(SlimRedaction.Mask(NewPassword));
+        return true;
+    }
+}
+
+/// <summary>Body of <c>POST /auth/flow</c>: reads the open steps of a sign-in again.</summary>
+/// <param name="FlowToken"><c>flowToken</c> of an <c>action_required</c> answer.</param>
+public sealed record SlimFlowRequest(string FlowToken)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("FlowToken = ").Append(SlimRedaction.Mask(FlowToken));
         return true;
     }
 }
@@ -316,24 +327,43 @@ public sealed class SlimAuthResponse
 }
 
 /// <summary>
-/// 401 body of <c>/auth/login</c>: <c>invalid_credentials</c>, <c>requires_two_factor</c> (then
-/// <see cref="PreAuthToken"/> and <see cref="TwoFactorMethod"/> are set) or <c>password_change_required</c> (then
-/// <see cref="PasswordChangeToken"/> is set).
+/// 200 body of a sign-in that needs further steps before its session (<c>/auth/login</c>, <c>/auth/login/2fa</c>,
+/// <c>/auth/login/password-change</c>, <c>/auth/flow</c> and other sign-in entry points).
 /// </summary>
-public sealed class SlimLoginChallengeResponse
+public sealed class SlimActionRequiredResponse
 {
-    /// <summary><c>invalid_credentials</c>, <c>requires_two_factor</c> or <c>password_change_required</c>.</summary>
-    public string Status { get; init; } = SlimErrorCodes.InvalidCredentials;
-    /// <summary>Human-readable English description.</summary>
-    public string? Message { get; init; }
-    /// <summary>Short-lived token for <c>POST /auth/login/2fa</c>.</summary>
-    public string? PreAuthToken { get; init; }
-    /// <summary><c>totp</c>, <c>email</c> or <c>recovery</c> (no codes can be sent – only a recovery code helps).</summary>
-    public string? TwoFactorMethod { get; init; }
-    /// <summary>Short-lived token for <c>POST /auth/login/password-change</c>.</summary>
-    public string? PasswordChangeToken { get; init; }
-    /// <summary>Lifetime of <see cref="PreAuthToken"/> or <see cref="PasswordChangeToken"/> in seconds.</summary>
-    public int? ExpiresIn { get; init; }
+    /// <summary>Always <c>action_required</c>.</summary>
+    public string Status { get; init; } = SlimErrorCodes.ActionRequired;
+    /// <summary>
+    /// The open steps in order; the first one is taken now: <c>second_factor</c> (<c>POST /auth/login/2fa</c>) or
+    /// <c>change_password</c> (<c>POST /auth/login/password-change</c>). Clients ignore steps they do not know.
+    /// </summary>
+    public required IReadOnlyList<string> Actions { get; init; }
+    /// <summary>Token of the sign-in for the step endpoints and <c>POST /auth/flow</c>; every step answers with a new one.</summary>
+    public required string FlowToken { get; init; }
+    /// <summary>Seconds until the sign-in expires (all steps together).</summary>
+    public int ExpiresIn { get; init; }
+    /// <summary>Details of the first step, if it has any.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SlimActionDetails? Details { get; init; }
+}
+
+/// <summary>Details of the open step of a <see cref="SlimActionRequiredResponse"/>.</summary>
+public sealed class SlimActionDetails
+{
+    /// <summary>Set for <c>second_factor</c>.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SlimSecondFactorDetails? SecondFactor { get; init; }
+}
+
+/// <summary>How the open second factor can be proven.</summary>
+public sealed class SlimSecondFactorDetails
+{
+    /// <summary>
+    /// <c>totp</c> (authenticator app), <c>email</c> (a code was sent) and <c>recovery</c> (a recovery code). Only
+    /// <c>recovery</c>: no codes can be sent – a recovery code or an administrator's reset helps.
+    /// </summary>
+    public required IReadOnlyList<string> Methods { get; init; }
 }
 
 /// <summary>

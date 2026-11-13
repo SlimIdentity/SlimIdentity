@@ -284,7 +284,9 @@ public sealed class PasskeyTests
         var store = (TestPasskeyStore)app.App.Services.GetRequiredService<ISlimPasskeyStore>();
         app.Users.SetActive(app.Users.Get(TestApp.UserEmail).Id, false);
 
-        Assert.Equal(HttpStatusCode.Unauthorized, (await LoginAsync(app, key)).Status);
+        var (status, body) = await LoginAsync(app, key);
+        Assert.Equal(HttpStatusCode.Forbidden, status);
+        Assert.Equal("account_disabled", body.Str("code"));
         // the refused sign-in leaves no trace on the passkey (counter, last use)
         var stored = await store.FindPasskeyAsync(key.CredentialId, default);
         Assert.Null(stored!.LastUsedUtc);
@@ -352,13 +354,14 @@ public sealed class PasskeyTests
 
         var (status, body) = await LoginAsync(app, key);
 
-        Assert.Equal(HttpStatusCode.Forbidden, status);
-        Assert.Equal("password_change_required", body.Str("code"));
+        Assert.Equal(HttpStatusCode.OK, status);
+        Assert.Equal(["change_password"], body.GetProperty("actions").EnumerateArray().Select(a => a.GetString()));
+        Assert.False(body.TryGetProperty("accessToken", out _));
 
-        // the way out: the start password, then an own one – afterwards the passkey works again
-        var client = app.CreateClient();
-        var change = await client.PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = "Start-Password-123" }, HttpStatusCode.Unauthorized);
-        await client.PostJsonAsync("/auth/login/password-change", new { token = change.Str("passwordChangeToken"), newPassword = "Own-Password-456" });
+        // the passkey proves the account: an own password follows directly, afterwards the passkey works alone
+        var session = await app.CreateClient().PostJsonAsync("/auth/login/password-change",
+            new { flowToken = body.Str("flowToken"), newPassword = "Own-Password-456" });
+        Assert.False(string.IsNullOrEmpty(session.Str("accessToken")));
         Assert.Equal(HttpStatusCode.OK, (await LoginAsync(app, key)).Status);
     }
 

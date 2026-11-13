@@ -210,8 +210,8 @@ internal static class SlimResults
     public static IResult Unauthenticated() =>
         Problem(StatusCodes.Status401Unauthorized, SlimErrorCodes.Unauthenticated, "Authentication is required.");
 
-    public static IResult Challenge(SlimLoginChallengeResponse challenge) =>
-        Results.Json(challenge, SlimJsonContext.Default.SlimLoginChallengeResponse, statusCode: StatusCodes.Status401Unauthorized);
+    public static IResult ActionRequired(SlimActionRequiredResponse response) =>
+        Results.Json(response, SlimJsonContext.Default.SlimActionRequiredResponse);
 
     public static IResult Locked(HttpContext http, DateTimeOffset lockoutEnd, DateTimeOffset now)
     {

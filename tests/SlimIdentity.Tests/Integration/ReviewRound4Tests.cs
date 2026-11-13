@@ -138,7 +138,10 @@ public sealed class ReviewRound4Tests
         var start = await browser.GetAsync("/auth/login/Fake?useCookies=true&returnUrl=/done");
         var callback = await browser.GetAsync(start.Headers.Location!.OriginalString);
 
-        Assert.Contains("slim_error=password_change_required", callback.Headers.Location!.OriginalString);
+        var target = callback.Headers.Location!.OriginalString;
+        Assert.Contains("#slim_status=action_required", target);
+        Assert.Contains("flowToken=", target);
+        Assert.DoesNotContain("flowToken", target.Split('#')[0]);
         Assert.Equal(HttpStatusCode.Unauthorized, (await browser.GetAsync("/auth/me")).StatusCode);
     }
 
@@ -212,9 +215,9 @@ public sealed class ReviewRound4Tests
         app.Time.Advance(TimeSpan.FromSeconds(31 - app.Time.GetUtcNow().ToUnixTimeSeconds() % 30));   // early in a TOTP step
 
         var client = app.CreateClient();
-        var challenge = await client.PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized);
+        var challenge = await client.PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = TestApp.UserPassword });
         var code = (await app.Mail.WaitForAsync("two-factor", TestApp.UserEmail)).Payload;
-        client.BearerToken = (await client.PostJsonAsync("/auth/login/2fa", new { preAuthToken = challenge.Str("preAuthToken"), code })).Str("accessToken");
+        client.BearerToken = (await client.PostJsonAsync("/auth/login/2fa", new { flowToken = challenge.Str("flowToken"), code })).Str("accessToken");
 
         app.Time.Advance(TimeSpan.FromSeconds(5));                                   // same TOTP step as the e-mail code
         var authenticator = await client.PostJsonAsync("/auth/2fa/setup");

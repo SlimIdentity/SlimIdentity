@@ -182,26 +182,24 @@ internal sealed class SlimPasskeyHandlers(
         // Possession and user verification are multi-factor on their own – no second factor follows.
         var user = await store.FindByIdAsync(passkey.UserId, ct);
         if (user is null) return Failed("account");
+        var flow = services.GetRequiredService<SlimSignInFlow>();
         var decision = SlimSignInChain.Evaluate(user, SlimSignInProofs.SecondFactor, O);
-        if (decision.Refusal is not null) return Failed("account");
-        switch (decision.Next)
+        if (decision.Refusal is not null || decision.Next == SlimSignInActions.VerifyEmail)
         {
-            case SlimSignInActions.VerifyEmail:
-                return SlimResults.Status(SlimErrorCodes.EmailNotConfirmed, "The e-mail address has not been confirmed yet.", StatusCodes.Status403Forbidden);
-            // a start password set by an administrator is replaced with the password – this entry cannot continue it
-            case SlimSignInActions.ChangePassword:
-                metrics.Login(SlimErrorCodes.PasswordChangeRequired, cookies);
-                return SlimResults.Status(SlimErrorCodes.PasswordChangeRequired,
-                    "The password was set by an administrator. Sign in with it once and choose your own password.", StatusCodes.Status403Forbidden);
+            var refused = SlimAuthResult.Failed(decision.Refusal ?? SlimErrorCodes.EmailNotConfirmed);
+            metrics.Login(SlimSignInFlow.MetricReason(refused), cookies);
+            return flow.ToHttpResult(refused, user);
         }
 
         // single use, atomically: this challenge must be newer than the last one used with this passkey
         if (!await passkeys.TryRecordUseAsync(credentialId, passkey.SignCount, authData.SignCount, state.IssuedAt, time.GetUtcNow(), authData.BackedUp, ct))
             return Failed("replay");
 
-        var result = await authManager.SignInCoreAsync(user, cookies, request.RememberMe, SlimAuthManager.MethodPasskey, null, null, true, ct);
-        metrics.Login(result.Succeeded ? "success" : "rejected", cookies);
-        return SlimLoginHandlers.ToResult(result);
+        // a start password set by an administrator is replaced in the flow that follows
+        var result = await flow.StartAsync(user, cookies, request.RememberMe, SlimAuthManager.MethodPasskey, SlimSignInProofs.SecondFactor,
+            checkRememberedDevice: false, rememberToken: null, refuseLockedSecondFactor: false, ct);
+        metrics.Login(SlimSignInFlow.MetricReason(result), cookies);
+        return flow.ToHttpResult(result, user);
 
         IResult Failed(string reason)
         {

@@ -100,7 +100,7 @@ public sealed class AttackScenarioTests
         var link = (await app.Mail.WaitForAsync("password-reset", TestApp.UserEmail)).Payload;
         await app.CreateClient().PostJsonAsync("/auth/reset-password", new { token = link, newPassword = "New-Pass-789" });
 
-        var login = await app.CreateClient().PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = "New-Pass-789" }, HttpStatusCode.Unauthorized);
-        Assert.Equal("requires_two_factor", login.Str("status"));   // a reset alone must never bypass an owner's 2FA
+        var login = await app.CreateClient().PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = "New-Pass-789" });
+        Assert.Equal("second_factor", login.GetProperty("actions")[0].GetString());   // a reset alone must never bypass an owner's 2FA
     }
 }

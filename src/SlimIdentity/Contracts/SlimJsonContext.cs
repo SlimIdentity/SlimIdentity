@@ -26,7 +26,8 @@ namespace SlimIdentity.Contracts;
 // responses
 [JsonSerializable(typeof(SlimStatusResponse))]
 [JsonSerializable(typeof(SlimAuthResponse))]
-[JsonSerializable(typeof(SlimLoginChallengeResponse))]
+[JsonSerializable(typeof(SlimActionRequiredResponse))]
+[JsonSerializable(typeof(SlimFlowRequest))]
 [JsonSerializable(typeof(SlimProblemResponse))]
 [JsonSerializable(typeof(SlimMeResponse))]
 [JsonSerializable(typeof(SlimTwoFactorStatusResponse))]
@@ -41,7 +42,6 @@ namespace SlimIdentity.Contracts;
 [JsonSerializable(typeof(SlimExternalLinkRequest))]
 [JsonSerializable(typeof(SlimExternalLinkPayload))]
 [JsonSerializable(typeof(SlimPasswordChangeLoginRequest))]
-[JsonSerializable(typeof(SlimPasswordChangePayload))]
 [JsonSerializable(typeof(List<SlimSessionDto>))]
 // route / query parameter and framework types (needed by the OpenAPI schema generator under Native AOT)
 [JsonSerializable(typeof(bool?))]
@@ -51,7 +51,7 @@ namespace SlimIdentity.Contracts;
 // stateless token payloads and the actor claim
 [JsonSerializable(typeof(SlimEmailTokenPayload))]
 [JsonSerializable(typeof(SlimResetTokenPayload))]
-[JsonSerializable(typeof(SlimPreAuthPayload))]
+[JsonSerializable(typeof(SlimFlowPayload))]
 [JsonSerializable(typeof(SlimTwoFactorSetupPayload))]
 [JsonSerializable(typeof(SlimExchangePayload))]
 [JsonSerializable(typeof(SlimRefreshPayload))]

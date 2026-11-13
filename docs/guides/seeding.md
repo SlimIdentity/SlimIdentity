@@ -35,7 +35,7 @@ static async Task SeedAdministratorAsync(IServiceProvider services, string email
 
 - **Runs on every start** and does nothing once the account exists; with several instances the unique address decides
   (`CreateAsync` returns `null` for the loser).
-- **`mustChange: true`** – the first sign-in answers `password_change_required` and issues no session until the
+- **`mustChange: true`** – the first sign-in answers `action_required` (`change_password`) and issues no session until the
   administrator has chosen an own password (TypeScript: `completePasswordChange`). The start password is then worthless;
   remove it from the configuration.
 - **The role** – your business data: pass it as `Profile` and write it in your store (EF Core package:

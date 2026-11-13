@@ -92,7 +92,7 @@ These are deliberately not configurable – changing them would only weaken the 
 | CSRF protection in cookie mode | always on: header `X-CSRF` (`SlimIdentityDefaults.CsrfHeaderName`) + `Origin` check |
 | Refresh-token reuse | always treated as theft (RFC 9700): the session – or without a session store all sessions – is revoked |
 | Password composition rules | none (NIST SP 800-63B): length counts; add a breached-password rule with `.AddPasswordRule<T>()` |
-| Sign-in challenge (`preAuthToken`) | 5 minutes, single use |
+| Sign-in flow (`flowToken`, `SlimIdentityDefaults.SignInFlowLifetime`) | 15 minutes from the first factor, single use |
 | 2FA setup token | 10 minutes |
 | External-login exchange code | 1 minute, single use |
 | TOTP | RFC 6238, 30-second steps, ±1 step tolerance |

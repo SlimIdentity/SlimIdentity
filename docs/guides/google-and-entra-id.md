@@ -73,11 +73,11 @@ A sign-in with Google is a **page navigation**, not a `fetch`. With the TypeScri
 button.onclick = () => auth.loginWith("Google");
 
 // the /after-login page
-const result = auth.readExternalLoginResult();          // cookie mode
+const result = await auth.readExternalLoginResult();    // cookie mode
 // const result = await auth.completeExternalLogin();   // bearer mode (PKCE is handled by the client)
 switch (result.kind) {
   case "ok":         router.go("/"); break;
-  case "two_factor": showCodeInput(result.preAuthToken, result.method); break;   // then auth.loginTwoFactor(…)
+  case "action_required": showSteps(result.steps); break;   // then auth.loginTwoFactor(…) / completePasswordChange(…)
   case "error":      showMessage(messages[result.status] ?? "Sign-in failed."); break;
 }
 ```
@@ -92,7 +92,6 @@ Messages for the errors a user can actually run into:
 | `email_not_verified` | "Google has not verified this address. Verify it at Google or register with your e-mail." |
 | `registration_disabled` | "There is no account for this address." |
 | `account_disabled`, `locked_out` | as for a password sign-in |
-| `password_change_required` | "Sign in with your password once – you have to change it." |
 
 The full list is in the [endpoint reference](../endpoints.md#external-login-islimexternalloginstore).
 

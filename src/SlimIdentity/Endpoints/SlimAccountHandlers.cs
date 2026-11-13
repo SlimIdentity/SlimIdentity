@@ -256,14 +256,14 @@ internal sealed class SlimAccountHandlers(
         await hooks.RaiseAsync(SlimEventTypes.PasswordChanged, user.Id, reason: "invitation", ct: ct);
         metrics.Invitation("accepted");
 
-        // the invitation proves the mailbox and sets an own password – only the second factor can follow; this entry
-        // does not continue it: 2FA users (pre-provisioned by the host) sign in normally
-        if (SlimSignInChain.Evaluate(user, SlimSignInProofs.None, O).Pending.Contains(SlimSignInActions.SecondFactor))
-            return SlimResults.Status("invitation_accepted", "Password set. Please sign in.");
-
-        var result = await authManager.SignInCoreAsync(user, cookies, false, SlimAuthManager.MethodPassword, null, null, true, ct);
-        if (result.Vetoed) return SlimResults.Status(result.Error!, result.ErrorMessage ?? "The sign-in was refused.", StatusCodes.Status403Forbidden);
-        return result.Succeeded ? Results.Ok(result.ToResponse()) : SlimResults.InvalidToken();
+        // the invitation proves the mailbox and sets an own password – the second factor of an account the host set up
+        // with one follows in the sign-in flow
+        var result = await services.GetRequiredService<SlimSignInFlow>().StartAsync(user, cookies, rememberMe: false, SlimAuthManager.MethodPassword,
+            SlimSignInProofs.None, checkRememberedDevice: false, rememberToken: null, refuseLockedSecondFactor: false, ct);
+        if (result.Succeeded || result.ActionRequired is not null || result.Vetoed) return SlimLoginHandlers.ToResult(result);
+        return result.Error == SlimErrorCodes.TwoFactorUnavailable
+            ? services.GetRequiredService<SlimSignInFlow>().ToHttpResult(result, user)
+            : SlimResults.InvalidToken();
     }
 
     private async Task<(SlimUser? User, DateTimeOffset ExpiresAt)> LoadInvitationAsync(string? token, CancellationToken ct)

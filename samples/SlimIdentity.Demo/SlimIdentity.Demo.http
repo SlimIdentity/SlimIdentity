@@ -153,11 +153,11 @@ Content-Type: application/json
 { "setupToken": "<setupToken>", "code": "123456", "password": "User1234!" }
 
 ###
-# login now answers 401 { status: "requires_two_factor", preAuthToken }
+# login now answers 200 { status: "action_required", actions: ["second_factor"], flowToken }
 POST {{auth}}/login/2fa
 Content-Type: application/json
 
-{ "preAuthToken": "<preAuthToken>", "code": "123456" }
+{ "flowToken": "<flowToken>", "code": "123456" }
 
 ### ---------------------------------------------------------------- Sudo mode & impersonation
 

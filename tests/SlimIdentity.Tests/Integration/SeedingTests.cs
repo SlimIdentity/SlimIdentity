@@ -37,11 +37,11 @@ public sealed class SeedingTests
         await SeedAdministratorAsync(app.App.Services, AdminEmail, "Another-Start-456", default);   // idempotent
 
         var client = app.CreateClient();
-        var first = await client.PostJsonAsync("/auth/login", new { email = AdminEmail, password = "Start-Password-123" }, HttpStatusCode.Unauthorized);
-        Assert.Equal("password_change_required", first.Str("status"));
+        var first = await client.PostJsonAsync("/auth/login", new { email = AdminEmail, password = "Start-Password-123" });
+        Assert.Equal("change_password", first.GetProperty("actions")[0].GetString());
 
         var session = await client.PostJsonAsync("/auth/login/password-change",
-            new { token = first.Str("passwordChangeToken"), newPassword = "Own-Admin-Password-789" });
+            new { flowToken = first.Str("flowToken"), newPassword = "Own-Admin-Password-789" });
         Assert.False(string.IsNullOrEmpty(session.Str("accessToken")));
         Assert.True(app.Users.Get(AdminEmail).EmailConfirmed);
     }

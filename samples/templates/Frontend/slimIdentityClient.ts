@@ -18,11 +18,17 @@ export interface AuthResponse {
   twoFactorRememberToken?: string;
 }
 
-export interface LoginChallenge {
-  status: "requires_two_factor" | "password_change_required";
-  preAuthToken?: string;
-  twoFactorMethod?: "totp" | "email" | "recovery";
-  passwordChangeToken?: string;
+/**
+ * The password (passkey, external login) was right, but steps follow before the session: "second_factor" at
+ * loginTwoFactor / loginRecoveryCode, "change_password" (set by an administrator) at completePasswordChange. Each step
+ * answers with the remaining ones and a new flowToken – or with the session.
+ */
+export interface ActionRequired {
+  status: "action_required";
+  actions: string[];
+  flowToken: string;
+  expiresIn: number;
+  details?: { secondFactor?: { methods: ("totp" | "email" | "recovery")[] } };
 }
 
 export interface SignInMethods {
@@ -68,11 +74,7 @@ export function checkPassword(password: string, p: PasswordPolicy): string[] {
 
 export type LoginResult =
   | { kind: "ok"; auth: AuthResponse }
-  | { kind: "two_factor"; preAuthToken: string; method: "totp" | "email" | "recovery" }
-  /** The password was set by an administrator: ask for an own one, then call completePasswordChange. */
-  | { kind: "password_change"; passwordChangeToken: string }
-  /** Accepted, but no session was issued (e.g. "invitation_accepted" for a 2FA account): show the sign-in form. */
-  | { kind: "sign_in_required"; status: string }
+  | { kind: "action_required"; steps: ActionRequired }
   | { kind: "locked"; until: string }
   | { kind: "error"; status: string };
 
@@ -264,23 +266,25 @@ export const cookieAuth = {
   },
 
   /** "Remember this device" sets a cookie (if TwoFactor.RememberDeviceLifetime is configured on the server). */
-  async loginTwoFactor(preAuthToken: string, code: string, rememberDevice = false): Promise<LoginResult> {
-    const r = await cookieFetch("/auth/login/2fa", { method: "POST", body: JSON.stringify({ preAuthToken, code, rememberDevice }) });
+  async loginTwoFactor(flowToken: string, code: string, rememberDevice = false): Promise<LoginResult> {
+    const r = await cookieFetch("/auth/login/2fa", { method: "POST", body: JSON.stringify({ flowToken, code, rememberDevice }) });
     return toLoginResult(r);
   },
 
   /** Second step with one of the recovery codes (single use) instead of an authenticator / e-mail code. */
-  async loginRecoveryCode(preAuthToken: string, recoveryCode: string): Promise<LoginResult> {
-    return toLoginResult(await cookieFetch("/auth/login/2fa", { method: "POST", body: JSON.stringify({ preAuthToken, recoveryCode }) }));
+  async loginRecoveryCode(flowToken: string, recoveryCode: string): Promise<LoginResult> {
+    return toLoginResult(await cookieFetch("/auth/login/2fa", { method: "POST", body: JSON.stringify({ flowToken, recoveryCode }) }));
   },
 
-  /** After { kind: "password_change" }: sets the own password – the result is the session or the 2FA challenge. */
-  async completePasswordChange(passwordChangeToken: string, newPassword: string): Promise<LoginResult> {
-    const r = await cookieFetch("/auth/login/password-change", {
-      method: "POST",
-      body: JSON.stringify({ token: passwordChangeToken, newPassword }),
-    });
+  /** Step "change_password": sets the own password – the result is the session or the remaining steps. */
+  async completePasswordChange(flowToken: string, newPassword: string): Promise<LoginResult> {
+    const r = await cookieFetch("/auth/login/password-change", { method: "POST", body: JSON.stringify({ flowToken, newPassword }) });
     return toLoginResult(r);
+  },
+
+  /** The open steps of a flowToken again (e.g. after a reload); changes nothing. */
+  async readFlow(flowToken: string): Promise<LoginResult> {
+    return toLoginResult(await cookieFetch("/auth/flow", { method: "POST", body: JSON.stringify({ flowToken }) }));
   },
 
   /** Call after F5 to restore the session state. */
@@ -314,7 +318,7 @@ export const cookieAuth = {
     return r.ok ? r.json() : null;
   },
 
-  /** Sets the password and signs in – or { kind: "sign_in_required" } for a 2FA account (sign in normally). */
+  /** Sets the password and signs in – or { kind: "action_required" } when the second factor follows. */
   async acceptInvitation(token: string, password: string): Promise<LoginResult> {
     const r = await cookieFetch("/auth/invitation/accept?useCookies=true", {
       method: "POST",
@@ -330,17 +334,16 @@ export const cookieAuth = {
   },
 
   /**
-   * On the /after-login page: the session cookie is set – unless 2FA is required; then the challenge arrives in the
-   * URL fragment (#slim_status=requires_two_factor&preAuthToken=…), which is never sent to a server. Errors come as
-   * ?slim_error=….
+   * On the /after-login page: the session cookie is set – unless steps follow (2FA, own password); then the flowToken
+   * arrives in the URL fragment (#slim_status=action_required&flowToken=…), which is never sent to a server, and
+   * /auth/flow names the steps. Errors come as ?slim_error=….
    */
-  readExternalLoginResult(): LoginResult {
+  async readExternalLoginResult(): Promise<LoginResult> {
     const fragment = new URLSearchParams(window.location.hash.slice(1));
     const error = new URLSearchParams(window.location.search).get("slim_error");
     history.replaceState(null, "", window.location.pathname);   // remove secrets from the address bar / history
     if (error) return { kind: "error", status: error };
-    if (fragment.get("slim_status") === "requires_two_factor")
-      return { kind: "two_factor", preAuthToken: fragment.get("preAuthToken") ?? "", method: toTwoFactorMethod(fragment.get("method")) };
+    if (fragment.get("slim_status") === "action_required") return cookieAuth.readFlow(fragment.get("flowToken") ?? "");
     return { kind: "ok", auth: { status: "success", mode: "cookie" } as AuthResponse };
   },
 
@@ -569,8 +572,8 @@ async function removeExternal(send: (path: string, init: RequestInit) => Promise
   return codeOf(body, r);
 }
 
-async function twoFactorStep(body: { preAuthToken: string; code?: string; recoveryCode?: string; rememberDevice?: boolean }): Promise<LoginResult> {
-  const r = await fetch(`${AUTH}/login/2fa`, { method: "POST", headers: jsonHeaders, body: JSON.stringify(body) });
+async function flowStep(path: string, body: { flowToken: string } & Record<string, unknown>): Promise<LoginResult> {
+  const r = await fetch(`${AUTH}${path}`, { method: "POST", headers: jsonHeaders, body: JSON.stringify(body) });
   const result = await toLoginResult(r);
   if (result.kind === "ok") storeTokens(result.auth);
   return result;
@@ -628,25 +631,23 @@ export const bearerAuth = {
     return result;
   },
 
-  async loginTwoFactor(preAuthToken: string, code: string, rememberDevice = false): Promise<LoginResult> {
-    return twoFactorStep({ preAuthToken, code, rememberDevice });
+  async loginTwoFactor(flowToken: string, code: string, rememberDevice = false): Promise<LoginResult> {
+    return flowStep("/login/2fa", { flowToken, code, rememberDevice });
   },
 
   /** Second step with one of the recovery codes (single use) instead of an authenticator / e-mail code. */
-  async loginRecoveryCode(preAuthToken: string, recoveryCode: string): Promise<LoginResult> {
-    return twoFactorStep({ preAuthToken, recoveryCode });
+  async loginRecoveryCode(flowToken: string, recoveryCode: string): Promise<LoginResult> {
+    return flowStep("/login/2fa", { flowToken, recoveryCode });
   },
 
-  /** After { kind: "password_change" }: sets the own password – the result is the session or the 2FA challenge. */
-  async completePasswordChange(passwordChangeToken: string, newPassword: string): Promise<LoginResult> {
-    const r = await fetch(`${AUTH}/login/password-change`, {
-      method: "POST",
-      headers: jsonHeaders,
-      body: JSON.stringify({ token: passwordChangeToken, newPassword }),
-    });
-    const result = await toLoginResult(r);
-    if (result.kind === "ok") storeTokens(result.auth);
-    return result;
+  /** Step "change_password": sets the own password – the result is the session or the remaining steps. */
+  async completePasswordChange(flowToken: string, newPassword: string): Promise<LoginResult> {
+    return flowStep("/login/password-change", { flowToken, newPassword });
+  },
+
+  /** The open steps of a flowToken again (e.g. after a reload); changes nothing. */
+  async readFlow(flowToken: string): Promise<LoginResult> {
+    return flowStep("/flow", { flowToken });
   },
 
   /**
@@ -837,7 +838,7 @@ export const bearerAuth = {
     return r.ok ? r.json() : null;
   },
 
-  /** Sets the password and signs in – or { kind: "sign_in_required" } for a 2FA account (sign in normally). */
+  /** Sets the password and signs in – or { kind: "action_required" } when the second factor follows. */
   async acceptInvitation(token: string, password: string): Promise<LoginResult> {
     const r = await fetch(`${AUTH}/invitation/accept?useCookies=false`, {
       method: "POST",
@@ -854,18 +855,10 @@ export const bearerAuth = {
 
 // =====================================================================================
 
-function toTwoFactorMethod(method: string | null): "totp" | "email" | "recovery" {
-  return method === "totp" || method === "recovery" ? method : "email";
-}
-
 async function toLoginResult(r: Response): Promise<LoginResult> {
   const body = await r.json().catch(() => ({}));
   if (r.ok && body.status === "success") return { kind: "ok", auth: body as AuthResponse };
-  if (r.ok) return { kind: "sign_in_required", status: body.status ?? "ok" };
-  if (r.status === 401 && body.status === "requires_two_factor")
-    return { kind: "two_factor", preAuthToken: body.preAuthToken, method: body.twoFactorMethod };
-  if (r.status === 401 && body.status === "password_change_required")
-    return { kind: "password_change", passwordChangeToken: body.passwordChangeToken };
+  if (r.ok && body.status === "action_required") return { kind: "action_required", steps: body as ActionRequired };
   // only with SignIn.RevealAccountState = true – by default locked accounts answer like a wrong password
   if (r.status === 423) return { kind: "locked", until: body.lockoutEndUtc };
   return { kind: "error", status: codeOf(body, r) };
