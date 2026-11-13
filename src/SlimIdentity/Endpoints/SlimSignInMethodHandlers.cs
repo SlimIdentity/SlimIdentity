@@ -8,6 +8,8 @@ namespace SlimIdentity.Endpoints;
 internal sealed class SlimSignInMethodHandlers(
     SlimAccountHandlers account,
     SlimCredentialService credentials,
+    SlimAuthManager authManager,
+    ISlimUserStore userStore,
     SlimHookRunner hooks,
     SlimMetrics metrics,
     IServiceProvider services,
@@ -41,27 +43,33 @@ internal sealed class SlimSignInMethodHandlers(
 
         // the password – or, without one, a fresh sign-in – keeps a stolen session from cutting the owner's methods
         if (await credentials.ConfirmPasswordAsync(user, request.Password, Http, ct) is { } failure) return failure;
-        if (await credentials.HasPasswordAsync(user, ct))
-        {
-            // the password stays a way in
-            if (!await store.RemoveExternalLoginAsync(user.Id, target.Provider, target.ProviderKey, ct)) return NotFound();
-        }
-        else
-        {
-            // no password: the remaining links are the only way in – check and remove as one step per account, so two
-            // parallel requests cannot remove the last two
-            using var attempt = await credentials.TryEnterAttemptAsync(user.Id, ct);
-            if (attempt is null) return LastMethod();
-            var links = await store.GetExternalLoginsAsync(user.Id, ct);
-            if (!links.Contains(target)) return NotFound();
-            if (links.Count + await PasskeyCountAsync(user.Id, ct) <= 1) return LastMethod();
-            if (!await store.RemoveExternalLoginAsync(user.Id, target.Provider, target.ProviderKey, ct)) return NotFound();
-        }
+        if (!await credentials.HasPasswordAsync(user, ct)
+            && (await store.GetExternalLoginsAsync(user.Id, ct)).Count + await PasskeyCountAsync(user.Id, ct) <= 1)
+            return LastMethod();
+
+        if (await BeginRemovalAsync(user, ct) is { } conflict) return conflict;
+        await store.RemoveExternalLoginAsync(user.Id, target.Provider, target.ProviderKey, ct);
 
         Log.ExternalLoginRemoved(logger, target.Provider, user.Id);
         metrics.ExternalLogin(target.Provider, "removed");
         await hooks.RaiseAsync(SlimEventTypes.ExternalLoginRemoved, user.Id, target.Provider, ct: ct);
-        return SlimResults.Status("external_login_removed");
+        return await EndRemovalAsync(user, ct);
+    }
+
+    /// <summary>
+    /// Before a sign-in method is removed: a new security stamp, bound to the state this request saw. Of two parallel
+    /// removals – on any instance – only one passes, so the methods counted before stay counted; other sessions end.
+    /// </summary>
+    private async Task<IResult?> BeginRemovalAsync(SlimUser user, CancellationToken ct) =>
+        await userStore.TryWriteSecurityStateAsync(user, u => u.SecurityStamp = SlimUser.NewSecurityStamp(), ct)
+            ? null
+            : SlimResults.ConcurrentChange();
+
+    /// <summary>After the removal: other sessions end, this one is issued again with the new stamp.</summary>
+    private async Task<IResult> EndRemovalAsync(SlimUser user, CancellationToken ct)
+    {
+        await authManager.RevokeSessionsAsync(user.Id, SlimAuthManager.CurrentSessionId(Http.User), ct);
+        return SlimResults.ReissuedSession(await authManager.RefreshCurrentSessionAsync(user, ct));
     }
 
     private async Task<int> PasskeyCountAsync(string userId, CancellationToken ct) =>

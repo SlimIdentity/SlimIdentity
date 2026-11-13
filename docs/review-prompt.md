@@ -126,7 +126,7 @@ Look for concrete defects, not general advice:
    from a token; cookie attributes; login CSRF; CORS derived from the origin policy.
 5. **Enumeration and timing** – answers, status codes, headers, mails and timing for unknown / existing / inactive /
    locked / unconfirmed accounts across all endpoints, including registration with a profile and passkey sign-in.
-6. **Brute force** – lockout arithmetic, counter atomicity, the per-account attempt gate, 2FA code guessing,
+6. **Brute force** – lockout arithmetic, counter atomicity, the compare-and-set on the security stamp, 2FA code guessing,
    rate-limit partitioning (IPv6, proxies).
 7. **Concurrency** – races between parallel requests (sign-in vs. password change, double consumption of codes,
    challenges and passkey assertions, registration, last-sign-in-method protection), and whether the store contracts

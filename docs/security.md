@@ -42,7 +42,7 @@ reviewing an integration, focus on [assumptions](#assumptions), [host responsibi
 | Phishing, credential stuffing (passkeys) | Passkeys are bound to the RP id and to trusted origins; the private key never leaves the device. Every WebAuthn check of registration and sign-in, user verification required; each challenge counts once per passkey (atomic), a counter that does not increase is treated as a cloned authenticator. Adding a passkey needs the password (or a sign-in within the last 5 minutes for accounts without one) and a confirmed address. |
 | Replayed 2FA code (phishing proxy, shoulder surfing) | Every TOTP time step and every e-mail code is accepted at most once (RFC 6238 §5.2, atomic store update). Every wrong code counts towards the second-factor lockout (separate from the password's). Installing or replacing the authenticator requires the current password; a setup token dies with the security stamp. |
 | Reused sign-in challenge (`preAuthToken`) | The challenge stands for the verified password; it completes at most one sign-in (atomic store update), so a captured token cannot mint further sessions with later codes or recovery codes. |
-| Parallel requests (races) | Password and second-factor attempts are reserved in the store before they are evaluated (`TryBeginAttemptAsync`: counter and lockout end in one atomic step), so parallel guesses beyond the threshold are not evaluated – also across instances; an attempt that cannot be reserved gets the answer of a failed attempt without being evaluated. The forced password change and removing a sign-in method still run one after another per instance (queue keyed by the user id, at most 8 waiting attempts); sign-in bookkeeping never writes back a whole user, so a failed login or a rehash cannot undo a concurrent password change; a duplicate registration gets the uniform answer. |
+| Parallel requests (races) | Password and second-factor attempts are reserved in the store before they are evaluated (`TryBeginAttemptAsync`: counter and lockout end in one atomic step), so parallel guesses beyond the threshold are not evaluated – also across instances; an attempt that cannot be reserved gets the answer of a failed attempt without being evaluated. Security writes (password, e-mail, 2FA, removing a sign-in method) are a compare-and-set on the security stamp: of two parallel changes – on any instance – one wins, the other gets `409 concurrent_change` or an invalid-token answer; sign-in bookkeeping never writes back a whole user, so a failed login or a rehash cannot undo a concurrent password change; a duplicate registration gets the uniform answer. |
 | Stolen "remember this device" token | Off by default; the password is still required; the token is bound to user and security stamp, expires (≤ 90 days) and is revoked by password change, sign out everywhere, 2FA changes and "forget all devices". Never issued after a recovery code. |
 | Database leak → 2FA bypass | TOTP secrets are encrypted with Data Protection before they reach the store; recovery codes have 80 bits of entropy and are stored as SHA-256 salted per user. A database dump alone yields neither. |
 | Sessions after password change, ban, 2FA or e-mail change | Security stamp rotation invalidates cookies, JWTs, refresh tokens and pending links; validated on every bearer request and every `SecurityStampValidationInterval` for cookies. |
@@ -109,15 +109,6 @@ reviewing an integration, focus on [assumptions](#assumptions), [host responsibi
   gateway. The account lockout is stored in the database and therefore global
   ([several instances](guides/multiple-instances.md)).
 - The mail limit per recipient is kept in memory per instance; with several instances the effective limit is a multiple.
-- Password and second-factor attempts are counted in the store before the check and hold across instances. The
-  forced password change and removing a sign-in method are serialized per instance only: attempts that arrive on
-  different instances at the very moment the threshold is reached can each still be evaluated – at most one extra
-  guess per additional instance and lockout cycle.
-- E-mail verification, e-mail change confirmation, claiming an account via external login and the user's own 2FA
-  changes (enable, disable) write the security fields of a user read at the start of the request. A password change
-  that completes in the same instant can be overwritten (the narrow store methods protect sign-in bookkeeping and the
-  pure stamp rotations – sign-out everywhere, `RefreshClaimsAsync`, forgetting remembered devices – not these rare
-  flows).
 - With an `ISlimCustomPasswordValidator` (LDAP, legacy hashes) unknown accounts burn a local dummy hash while known
   accounts wait for the directory – the response time can reveal whether an account exists.
 - The code has not been independently audited yet. The [attack scenarios](attack-scenarios.md) list what is covered by

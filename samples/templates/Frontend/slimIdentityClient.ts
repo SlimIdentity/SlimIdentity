@@ -397,12 +397,12 @@ export const cookieAuth = {
     return statusOf(cookieFetch("/auth/sign-in-methods/passkeys/rename", { method: "POST", body: JSON.stringify({ id, name }) }));
   },
 
-  /** "passkey_removed", or last_sign_in_method / invalid_password. */
+  /** "success" (other devices are signed out), or last_sign_in_method / invalid_password / concurrent_change. */
   removePasskey(id: string, password?: string): Promise<string> {
     return statusOf(cookieFetch("/auth/sign-in-methods/passkeys/remove", { method: "POST", body: JSON.stringify({ id, password }) }));
   },
 
-  /** "external_login_removed", or an error code – last_sign_in_method: add another way in first. */
+  /** "success" (other devices are signed out), or an error code – last_sign_in_method: add another way in first. */
   removeExternalLogin(provider: string, providerKey: string, password?: string): Promise<string> {
     return removeExternal((path, init) => cookieFetch(path, init), provider, providerKey, password);
   },
@@ -564,7 +564,9 @@ async function enableTwoFactorWith(path: string, body: object): Promise<Recovery
 async function removeExternal(send: (path: string, init: RequestInit) => Promise<Response>,
   provider: string, providerKey: string, password?: string): Promise<string> {
   const r = await send("/auth/sign-in-methods/external/remove", { method: "POST", body: JSON.stringify({ provider, providerKey, password }) });
-  return codeOf(await r.json().catch(() => ({})), r);
+  const body = await r.json().catch(() => ({}));
+  if (r.ok && body.accessToken) storeTokens(body);
+  return codeOf(body, r);
 }
 
 async function twoFactorStep(body: { preAuthToken: string; code?: string; recoveryCode?: string; rememberDevice?: boolean }): Promise<LoginResult> {
@@ -740,8 +742,12 @@ export const bearerAuth = {
     return statusOf(bearerFetch("/auth/sign-in-methods/passkeys/rename", { method: "POST", body: JSON.stringify({ id, name }) }));
   },
 
-  removePasskey(id: string, password?: string): Promise<string> {
-    return statusOf(bearerFetch("/auth/sign-in-methods/passkeys/remove", { method: "POST", body: JSON.stringify({ id, password }) }));
+  /** Other devices are signed out; this client gets new tokens. */
+  async removePasskey(id: string, password?: string): Promise<string> {
+    const r = await bearerFetch("/auth/sign-in-methods/passkeys/remove", { method: "POST", body: JSON.stringify({ id, password }) });
+    const body = await r.json().catch(() => ({}));
+    if (r.ok) storeTokens(body);
+    return codeOf(body, r);
   },
 
   removeExternalLogin(provider: string, providerKey: string, password?: string): Promise<string> {

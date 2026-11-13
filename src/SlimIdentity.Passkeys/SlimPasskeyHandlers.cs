@@ -228,27 +228,23 @@ internal sealed class SlimPasskeyHandlers(
 
         // the password – or, without one, a fresh sign-in – keeps a stolen session from cutting the owner's methods
         if (await credentials.ConfirmPasswordAsync(user, request?.Password, Http, ct) is { } failure) return failure;
-        if (await credentials.HasPasswordAsync(user, ct))
+        if (!await credentials.HasPasswordAsync(user, ct))
         {
-            // the password stays a way in
-            if (!await passkeys.RemovePasskeyAsync(user.Id, id, ct)) return NotFound();
-        }
-        else
-        {
-            // no password: passkeys and external logins are the only ways in – check and remove as one step per account
-            using var attempt = await credentials.TryEnterAttemptAsync(user.Id, ct);
-            if (attempt is null) return SlimSignInMethodHandlers.LastMethod();
-            var remaining = await passkeys.GetPasskeysAsync(user.Id, ct);
-            if (!remaining.Any(p => p.CredentialId.AsSpan().SequenceEqual(id))) return NotFound();
+            // no password: passkeys and external logins are the only ways in
             var external = services.GetService<ISlimExternalLoginStore>() is { } externalStore
                 ? (await externalStore.GetExternalLoginsAsync(user.Id, ct)).Count : 0;
-            if (remaining.Count + external <= 1) return SlimSignInMethodHandlers.LastMethod();
-            if (!await passkeys.RemovePasskeyAsync(user.Id, id, ct)) return NotFound();
+            if ((await passkeys.GetPasskeysAsync(user.Id, ct)).Count + external <= 1) return SlimSignInMethodHandlers.LastMethod();
         }
+
+        // a new stamp bound to the state this request saw: of two parallel removals – on any instance – only one passes
+        if (!await store.TryWriteSecurityStateAsync(user, u => u.SecurityStamp = SlimUser.NewSecurityStamp(), ct))
+            return SlimResults.ConcurrentChange();
+        await passkeys.RemovePasskeyAsync(user.Id, id, ct);
 
         Log.PasskeyRemoved(logger, user.Id);
         await hooks.RaiseAsync(SlimEventTypes.PasskeyRemoved, user.Id, SlimAuthManager.MethodPasskey, ct: ct);
-        return SlimResults.Status("passkey_removed");
+        await authManager.RevokeSessionsAsync(user.Id, SlimAuthManager.CurrentSessionId(Http.User), ct);
+        return SlimResults.ReissuedSession(await authManager.RefreshCurrentSessionAsync(user, ct));
     }
 
     // ------------------------------------------------------------------ helpers

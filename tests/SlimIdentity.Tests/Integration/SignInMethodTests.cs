@@ -67,8 +67,11 @@ public sealed class SignInMethodTests
         await me.PostJsonAsync("/auth/sign-in-methods/external/remove", new { provider = "Fake", providerKey = "google-9", password = "wrong" }, HttpStatusCode.BadRequest);
         var removed = await me.PostJsonAsync("/auth/sign-in-methods/external/remove", new { provider = "Fake", providerKey = "google-9", password = TestApp.UserPassword });
 
-        Assert.Equal("external_login_removed", removed.Str("status"));
         Assert.Null(await Links(app).FindByExternalLoginAsync("Fake", "google-9", default));
+        // the removal ends the old session state; the reissued tokens carry on
+        Assert.Equal(HttpStatusCode.Unauthorized, (await me.GetAsync("/api/hello")).StatusCode);
+        me.BearerToken = removed.Str("accessToken");
+        Assert.Equal(HttpStatusCode.OK, (await me.GetAsync("/api/hello")).StatusCode);
     }
 
     [Fact]

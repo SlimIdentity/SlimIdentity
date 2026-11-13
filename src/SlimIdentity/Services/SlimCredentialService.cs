@@ -13,7 +13,6 @@ internal sealed class SlimCredentialService(
     ISlimUserStore store,
     SlimEmailDispatcher mail,
     SlimMetrics metrics,
-    SlimAttemptGate gate,
     SlimHookRunner hooks,
     IOptions<SlimIdentityOptions> options,
     TimeProvider time,
@@ -114,11 +113,6 @@ internal sealed class SlimCredentialService(
             : Http.SlimResults.BadRequest("invalid_password", "The password is incorrect.");
     }
 
-    /// <summary>
-    /// Serializes some security steps of one account in this instance (see <see cref="SlimAttemptGate"/>);
-    /// <c>null</c> when too many are queued - answer as for a failed attempt without evaluating it.
-    /// </summary>
-    public Task<SlimAttemptGate.Lease?> TryEnterAttemptAsync(string userId, CancellationToken ct) => gate.TryEnterAsync(userId, ct);
 
     /// <summary>
     /// Reserves one attempt of <paramref name="factor"/> in the store before it is checked (see

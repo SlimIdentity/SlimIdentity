@@ -26,12 +26,17 @@ public sealed class MultiInstanceTests
         public readonly TestUserStore Users = new();
         public readonly TestSessionStore Sessions = new();
         public readonly TestTwoFactorStore TwoFactor = new();
+        public readonly LockstepLinks Links;
         public readonly CapturingEmailSender Mail = new();
         public readonly TestRefreshTokenStore RefreshTokens;
         private readonly DirectoryInfo _keys = Directory.CreateTempSubdirectory("slim-cluster-keys");
         public WebApplication A = null!, B = null!;
 
-        private Cluster() => RefreshTokens = new TestRefreshTokenStore(Time);
+        private Cluster()
+        {
+            RefreshTokens = new TestRefreshTokenStore(Time);
+            Links = new LockstepLinks(new TestExternalLoginStore(Users));
+        }
 
         public static async Task<Cluster> StartAsync(bool sharedKeyRing = true, int permitLimit = 10_000)
         {
@@ -61,13 +66,15 @@ public sealed class MultiInstanceTests
                 .AddEmailSender<CapturingEmailSender>(ServiceLifetime.Singleton)
                 .AddRefreshTokenStore<TestRefreshTokenStore>(ServiceLifetime.Singleton)
                 .AddSessionStore<TestSessionStore>(ServiceLifetime.Singleton)
-                .AddTwoFactorStore<TestTwoFactorStore>(ServiceLifetime.Singleton);
+                .AddTwoFactorStore<TestTwoFactorStore>(ServiceLifetime.Singleton)
+                .AddExternalLoginStore<LockstepLinks>(ServiceLifetime.Singleton);
             // one database: every node gets the same store instances
             builder.Services.Replace(ServiceDescriptor.Singleton<ISlimUserStore>(Users));
             builder.Services.Replace(ServiceDescriptor.Singleton<ISlimEmailSender>(Mail));
             builder.Services.Replace(ServiceDescriptor.Singleton<ISlimRefreshTokenStore>(RefreshTokens));
             builder.Services.Replace(ServiceDescriptor.Singleton<ISlimSessionStore>(Sessions));
             builder.Services.Replace(ServiceDescriptor.Singleton<ISlimTwoFactorStore>(TwoFactor));
+            builder.Services.Replace(ServiceDescriptor.Singleton<ISlimExternalLoginStore>(Links));
 
             var app = builder.Build();
             app.UseRateLimiter();
@@ -99,7 +106,66 @@ public sealed class MultiInstanceTests
         }
     }
 
+    /// <summary>
+    /// The shared link table; while <see cref="Pairs"/> is set, reads are released in pairs – two parallel requests
+    /// see the same links at every step, the worst interleaving for a check followed by a removal.
+    /// </summary>
+    private sealed class LockstepLinks(TestExternalLoginStore inner) : ISlimExternalLoginStore
+    {
+        private readonly Lock _gate = new();
+        private readonly List<(int Needed, TaskCompletionSource Released)> _waiting = [];
+        private int _arrivals;
+        public bool Pairs { get; set; }
+
+        public async Task<IReadOnlyList<SlimExternalLogin>> GetExternalLoginsAsync(string userId, CancellationToken ct)
+        {
+            if (Pairs)
+            {
+                Task released;
+                lock (_gate)
+                {
+                    var needed = (++_arrivals + 1) / 2 * 2;
+                    var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                    _waiting.Add((needed, tcs));
+                    foreach (var w in _waiting.Where(w => w.Needed <= _arrivals).ToList()) { w.Released.TrySetResult(); _waiting.Remove(w); }
+                    released = tcs.Task;
+                }
+                await released.WaitAsync(TimeSpan.FromSeconds(5), ct).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            }
+            return await inner.GetExternalLoginsAsync(userId, ct);
+        }
+
+        public Task<SlimUser?> FindByExternalLoginAsync(string provider, string providerKey, CancellationToken ct) => inner.FindByExternalLoginAsync(provider, providerKey, ct);
+        public Task LinkExternalLoginAsync(string userId, string provider, string providerKey, CancellationToken ct) => inner.LinkExternalLoginAsync(userId, provider, providerKey, ct);
+        public Task RemoveExternalLoginsAsync(string userId, CancellationToken ct) => inner.RemoveExternalLoginsAsync(userId, ct);
+        public Task<bool> RemoveExternalLoginAsync(string userId, string provider, string providerKey, CancellationToken ct) => inner.RemoveExternalLoginAsync(userId, provider, providerKey, ct);
+    }
+
     private static object UserLogin => new { email = TestApp.UserEmail, password = TestApp.UserPassword };
+
+    [Fact]
+    public async Task Two_instances_never_remove_the_last_two_sign_in_methods_together()
+    {
+        await using var cluster = await Cluster.StartAsync();
+        var me = cluster.On(cluster.A);
+        me.BearerToken = (await me.PostJsonAsync("/auth/login", UserLogin)).Str("accessToken");
+        // an account without a password: two external logins are its only ways in
+        var user = cluster.Users.Get(TestApp.UserEmail);
+        await cluster.Links.LinkExternalLoginAsync(user.Id, "Fake", "one", default);
+        await cluster.Links.LinkExternalLoginAsync(user.Id, "Fake", "two", default);
+        user.PasswordHash = string.Empty;
+        await cluster.Users.UpdateSecurityStateAsync(user, user.SecurityStamp, default);
+
+        cluster.Links.Pairs = true;
+        var responses = await Task.WhenAll(
+            cluster.On(cluster.A, me).PostAsync("/auth/sign-in-methods/external/remove", new { provider = "Fake", providerKey = "one" }),
+            cluster.On(cluster.B, me).PostAsync("/auth/sign-in-methods/external/remove", new { provider = "Fake", providerKey = "two" }));
+        cluster.Links.Pairs = false;
+
+        Assert.Single(responses, r => r.StatusCode == HttpStatusCode.OK);
+        Assert.Contains(responses, r => r.StatusCode == HttpStatusCode.Conflict);
+        Assert.Single(await cluster.Links.GetExternalLoginsAsync(user.Id, default));
+    }
 
     [Fact]
     public async Task A_cookie_issued_by_one_instance_works_on_the_other()

@@ -42,27 +42,6 @@ public sealed class ReviewRound2Tests
         Assert.Equal(5, app.Users.Get(TestApp.UserEmail).FailedLoginAttempts);
     }
 
-    [Fact]
-    public async Task The_queue_of_one_account_is_limited()
-    {
-        var gate = new SlimAttemptGate();
-        using var running = await gate.TryEnterAsync("user-1", default);
-        Assert.NotNull(running);
-
-        var waiting = Enumerable.Range(0, SlimAttemptGate.MaxWaitingPerAccount).Select(_ => gate.TryEnterAsync("user-1", default)).ToArray();
-        Assert.All(waiting, w => Assert.False(w.IsCompleted));                       // queued behind the running attempt
-
-        var overflow = gate.TryEnterAsync("user-1", default);                          // full: answered at once, never evaluated
-        Assert.True(overflow.IsCompleted, "The attempt beyond the queue limit waits instead of being refused.");
-        Assert.Null(await overflow);
-        using (var other = await gate.TryEnterAsync("user-2", default)) Assert.NotNull(other);   // other accounts are unaffected
-
-        running!.Dispose();
-        foreach (var w in waiting) (await w)!.Dispose();
-        using var later = await gate.TryEnterAsync("user-1", default);
-        Assert.NotNull(later);
-    }
-
     // ------------------------------------------------------------------ F-01 / F-02: unconfirmed accounts
 
     private static string Totp(TestApp app, string sharedKey) =>

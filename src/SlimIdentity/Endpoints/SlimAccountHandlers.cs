@@ -393,8 +393,12 @@ internal sealed class SlimAccountHandlers(
             return (null, SlimResults.Status("not_allowed_while_impersonating",
                 "This action is not allowed during an impersonation session.", StatusCodes.Status403Forbidden));
 
+        // the session was validated when the request began; a security change since then (password, removed sign-in
+        // method – on any instance) ends it here as well, so a change of this request is bound to the state it saw
         var user = await store.FindByIdAsync(id, ct);
-        return user is { IsActive: true } ? (user, null) : (null, Results.Unauthorized());
+        return user is { IsActive: true } && SlimUser.IsSameSecurityState(user.SecurityStamp, principal.FindFirst(SlimClaimTypes.SecurityStamp)?.Value)
+            ? (user, null)
+            : (null, Results.Unauthorized());
     }
 
     private static bool IsValidEmail(string? email) => SlimRegistrationService.IsValidEmail(email);

@@ -436,7 +436,7 @@ public sealed class PasskeyTests
             await users.UpdateSecurityStateAsync(user, user.SecurityStamp, default);
         }
 
-        await me.PostJsonAsync("/auth/sign-in-methods/external/remove", new { provider = "Fake", providerKey = "google-1" });
+        me.BearerToken = (await me.PostJsonAsync("/auth/sign-in-methods/external/remove", new { provider = "Fake", providerKey = "google-1" })).Str("accessToken");
         var refused = await me.PostJsonAsync("/auth/sign-in-methods/passkeys/remove", new { id = key.IdBase64Url }, HttpStatusCode.Conflict);
         Assert.Equal("last_sign_in_method", refused.Str("status"));
         Assert.Equal(HttpStatusCode.OK, (await LoginAsync(app, key)).Status);

@@ -105,7 +105,7 @@ public sealed class AuditTrail(AppDbContext db) : ISlimEventObserver
 | :--- | :--- |
 | `claims_changed` | – (`RefreshClaimsAsync`) |
 | `signed_in` | method (`pwd`, `mfa`, `ext`, …); `ActorId` during an impersonation |
-| `sign_in_failed` | reason: `invalid_password`, `unknown_user` (no `UserId`), `locked_out`, `account_disabled`, `attempts_queued`, `invalid_two_factor_code`, a guard's veto code |
+| `sign_in_failed` | reason: `invalid_password`, `unknown_user` (no `UserId`), `locked_out`, `account_disabled`, `invalid_two_factor_code`, a guard's veto code |
 | `locked_out`, `unlocked` | – |
 | `user_created` | reason `registration` or `external` (method = provider) |
 | `email_confirmed`, `email_changed` | – |
