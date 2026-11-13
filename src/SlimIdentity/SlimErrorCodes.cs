@@ -67,6 +67,11 @@ public static class SlimErrorCodes
     public const string ActionRequired = "action_required";
     /// <summary>Metrics and event reason: the second factor follows (action <c>second_factor</c>).</summary>
     public const string RequiresTwoFactor = "requires_two_factor";
+    /// <summary>
+    /// Metrics and event reason: <see cref="ISlimSecondFactorPolicy"/> requires a second factor the account sets up first
+    /// (actions <c>setup_second_factor</c>, <c>confirm_recovery_codes</c>).
+    /// </summary>
+    public const string TwoFactorSetupRequired = "two_factor_setup_required";
     /// <summary>Two-factor authentication is enabled for the account, but no <see cref="ISlimTwoFactorStore"/> is registered.</summary>
     public const string TwoFactorUnavailable = "two_factor_unavailable";
     /// <summary>The code of the second factor is wrong (401).</summary>

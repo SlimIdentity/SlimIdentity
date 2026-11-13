@@ -31,6 +31,9 @@ metadata (tag `SlimIdentity`), so typed clients can be generated from `/openapi/
 | :--- | :--- | :--- | :--- |
 | `POST /login` ⏱ | `email`, `password`, `rememberMe`, `twoFactorRememberToken` (bearer, optional) | `200` session, or `200 action_required` (see below) | `400 invalid_request`; `401 invalid_credentials`; `403 <veto>` of a sign-in guard; with `RevealAccountState`: `403 account_disabled`, `423 locked_out` |
 | `POST /login/2fa` ⏱ | `flowToken` + `code` or `recoveryCode`, `rememberDevice` | `200` session (+ `twoFactorRememberToken` in bearer mode / cookie `SlimAuth.2fa` in cookie mode when remembered), or `200 action_required` with the remaining steps | `401 invalid_token`, `401 invalid_two_factor_code`, `423 locked_out` |
+| `POST /login/2fa/setup` ⏱ | `flowToken` (step `setup_second_factor`) | `200` `sharedKey`, `authenticatorUri`, `setupToken` – nothing is stored yet | `401 invalid_token`, `423 locked_out` |
+| `POST /login/2fa/enable` ⏱ | `flowToken`, `setupToken`, `code` | `200 action_required` `["confirm_recovery_codes"]` with `details.recoveryCodes` (shown once); the authenticator is enabled and every other session ends | `400 invalid_two_factor_code`, `401 invalid_token`, `423 locked_out` |
+| `POST /login/2fa/recovery-codes-saved` ⏱ | `flowToken` (step `confirm_recovery_codes`) | `200` session, or `200 action_required` with the remaining steps | `401 invalid_token` |
 | `POST /login/verify-email` ⏱ | `flowToken`, `code` (from the mail of kind `verification-code`) | `200` session, or `200 action_required` with the remaining steps; the address is confirmed | `401 invalid_token`, `401 invalid_verification_code`, `429 too_many_attempts` (5 wrong codes per flow, 10 per address in 24 hours) |
 | `POST /login/password-change` ⏱ | `flowToken`, `newPassword` | `200` session, or `200 action_required` with the remaining steps | `400 password_unchanged`, `400` validation, `401 invalid_token`, `423 locked_out` |
 | `POST /flow?useCookies=…` ⏱ | `flowToken`, or `token` of a registration, reset or invitation link | `flowToken`: `200 action_required` with the open steps of the token – read only, nothing is sent or consumed. `token`: proves the mailbox of a [registration](#registration) and continues it in the mode of this request (the link may open on another device) | `401 invalid_token` (also for a completed, expired or outdated flow, and for an address that has an account by now) |
@@ -51,12 +54,15 @@ account with an unconfirmed address – is completed at `/login/verify-email` wi
 accepted). `second_factor` is completed at `/login/2fa`
 (`methods[0]` is the one asked for; `recovery` alone means no code can be sent – only a recovery code helps),
 `change_password` at `/login/password-change` (a password set by an administrator with `mustChange`,
-[running without e-mail](guides/without-email.md#the-forced-password-change)). Every step answers with the session or
+[running without e-mail](guides/without-email.md#the-forced-password-change)), `setup_second_factor` and
+`confirm_recovery_codes` at `/login/2fa/setup`, `/login/2fa/enable` and `/login/2fa/recovery-codes-saved` (an
+[`ISlimSecondFactorPolicy`](guides/two-factor.md#requiring-a-second-factor) requires a second factor the account
+does not have yet; `details.setupSecondFactor.methods` lists `totp` and, with passkeys, `passkey`). Every step answers with the session or
 with the remaining steps and a new `flowToken`; a flow lasts 15 minutes from the first factor and completes once. A
 [registration](#registration) answers the same way with the steps `verify_email` and `set_credential`. The
 same answer comes from `/login/external/exchange`, `/passkeys/login` and
-`ISlimAuthManager.SignInAsync`. `/login/verify-email`, `/login/2fa` and `/login/password-change` use the mode chosen at the start. `/refresh` only exists with `ISlimRefreshTokenStore`; `/login/2fa` only
-with `ISlimTwoFactorStore`; `/login/verify-email` not with `WithoutEmail()`.
+`ISlimAuthManager.SignInAsync`. `/login/verify-email`, `/login/2fa…` and `/login/password-change` use the mode chosen at the start. `/refresh` only exists with `ISlimRefreshTokenStore`; `/login/2fa` only
+with `ISlimTwoFactorStore` (as do the three setup steps); `/login/verify-email` not with `WithoutEmail()`.
 
 ## External login (`ISlimExternalLoginStore`)
 

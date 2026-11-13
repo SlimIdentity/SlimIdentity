@@ -30,11 +30,13 @@ internal sealed class SlimSignInFlow(
     /// Starts a sign-in whose first factor is proven: the session, the open steps (<see cref="SlimAuthResult.ActionRequired"/>)
     /// or a refusal – <c>account_disabled</c>, <c>two_factor_unavailable</c> or, with
     /// <paramref name="refuseLockedSecondFactor"/>, <c>locked_out</c> for a locked second factor.
+    /// <paramref name="provider"/>: the external provider of an <c>ext</c> sign-in, for <see cref="ISlimSecondFactorPolicy"/>.
     /// </summary>
     public async Task<SlimAuthResult> StartAsync(SlimUser user, bool cookies, bool rememberMe, string amr, SlimSignInProofs proofs,
-        bool checkRememberedDevice, string? rememberToken, bool refuseLockedSecondFactor, CancellationToken ct)
+        bool checkRememberedDevice, string? rememberToken, bool refuseLockedSecondFactor, CancellationToken ct, string? provider = null)
     {
-        var decision = SlimSignInChain.Evaluate(user, proofs, O);
+        var required = user.IsActive && await SecondFactorRequiredAsync(user, amr, provider, ct);
+        var decision = SlimSignInChain.Evaluate(user, proofs, O, required);
 
         // checkRememberedDevice: a device on which the second factor was passed before proves it again.
         // Possession of the device: a lockout of the second factor does not apply, and its counter stays.
@@ -43,8 +45,10 @@ internal sealed class SlimSignInFlow(
         {
             metrics.TwoFactor("remembered_device", "success");
             proofs |= SlimSignInProofs.SecondFactor;
+            // the device stands for the account's second factor: an authenticator app, or a mail code
+            if (required && (await twoFactor.GetSecretAsync(user, ct)).Configured) proofs |= SlimSignInProofs.StrongSecondFactor;
             amr = SlimAuthManager.MethodRememberedDevice;
-            decision = SlimSignInChain.Evaluate(user, proofs, O);
+            decision = SlimSignInChain.Evaluate(user, proofs, O, required);
         }
 
         if (decision.Refusal is { } refusal) return SlimAuthResult.Failed(refusal);
@@ -55,8 +59,20 @@ internal sealed class SlimSignInFlow(
             return SlimAuthResult.Failed(SlimErrorCodes.LockedOut);
 
         var flowId = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
-        var state = new SlimFlowPayload(user.Id, user.SecurityStamp, flowId, time.GetUtcNow().ToUnixTimeMilliseconds(), proofs, amr, cookies, rememberMe);
+        var state = new SlimFlowPayload(user.Id, user.SecurityStamp, flowId, time.GetUtcNow().ToUnixTimeMilliseconds(), proofs, amr, cookies, rememberMe,
+            SecondFactorRequired: required);
         return await StepsAsync(user, state, decision, ct);
+    }
+
+    /// <summary>Whether any <see cref="ISlimSecondFactorPolicy"/> requires a second factor for this sign-in.</summary>
+    private async Task<bool> SecondFactorRequiredAsync(SlimUser user, string amr, string? provider, CancellationToken ct)
+    {
+        foreach (var policy in services.GetServices<ISlimSecondFactorPolicy>())
+        {
+            var context = new SlimSecondFactorPolicyContext { User = user, AuthenticationMethod = amr, Provider = provider, HttpContext = httpContextAccessor.HttpContext };
+            if (await policy.IsRequiredAsync(context, ct)) return true;
+        }
+        return false;
     }
 
     /// <summary>
@@ -65,6 +81,9 @@ internal sealed class SlimSignInFlow(
     /// </summary>
     public async Task<SlimAuthResult> ContinueAsync(SlimUser user, SlimFlowPayload state, CancellationToken ct)
     {
+        // a flow that started without a sign-in (registration, link) asks once its way in is set
+        if (state.SecondFactorRequired is null && state.Link is null && !state.IsRegistration)
+            state = state with { SecondFactorRequired = await SecondFactorRequiredAsync(user, state.Amr, null, ct) };
         var decision = SlimSignInChain.Evaluate(user, state, O);
         if (decision.Refusal is { } refusal) return SlimAuthResult.Failed(refusal);
         if (!decision.Complete) return await StepsAsync(user, state, decision, ct);
@@ -114,7 +133,7 @@ internal sealed class SlimSignInFlow(
             Actions = decision.Pending,
             FlowToken = request.FlowToken!,
             ExpiresIn = (int)Math.Max(0, (expiresAt - time.GetUtcNow()).TotalSeconds),
-            Details = Details(decision, state, user),
+            Details = await DetailsAsync(decision, state, user, ct),
         });
     }
 
@@ -230,12 +249,14 @@ internal sealed class SlimSignInFlow(
             Actions = decision.Pending,
             FlowToken = workflow.Protect(SlimWorkflowTokens.SignInFlowPurpose, state, lifetime),
             ExpiresIn = (int)lifetime.TotalSeconds,
-            Details = Details(decision, state, user),
+            Details = await DetailsAsync(decision, state, user, ct),
         });
     }
 
-    private SlimActionDetails? Details(SlimSignInDecision decision, SlimFlowPayload state, SlimUser user) =>
-        decision.Next == SlimSignInActions.SetCredential
+    private async Task<SlimActionDetails?> DetailsAsync(SlimSignInDecision decision, SlimFlowPayload state, SlimUser user, CancellationToken ct) =>
+        decision.Next == SlimSignInActions.SetupSecondFactor
+            ? new SlimActionDetails { SetupSecondFactor = new SlimSetupSecondFactorDetails { Methods = await SetupMethodsAsync(user, ct) } }
+        : decision.Next == SlimSignInActions.SetCredential
             ? new SlimActionDetails { SetCredential = new SlimSetCredentialDetails { Kinds = CredentialKinds(), Email = user.Email } }
         : decision.Next == SlimSignInActions.SecondFactor && state.Method is { } method and not SlimSignInActions.VerifyEmail
             ? new SlimActionDetails
@@ -246,6 +267,15 @@ internal sealed class SlimSignInFlow(
                 },
             }
             : null;
+
+    /// <summary>
+    /// The ways step <c>setup_second_factor</c> offers: an authenticator app, and – for an account with a passkey – a
+    /// new sign-in with it.
+    /// </summary>
+    private async Task<IReadOnlyList<string>> SetupMethodsAsync(SlimUser user, CancellationToken ct) =>
+        services.GetService<ISlimPasskeySignInMethods>() is { } passkeys && (await passkeys.GetPasskeysAsync(user.Id, ct)).Count > 0
+            ? [SlimLoginHandlers.MethodTotp, SlimCredentialKinds.Passkey]
+            : [SlimLoginHandlers.MethodTotp];
 
     /// <summary>
     /// The second-factor challenge: the method, and for e-mail codes the sent code's hash. Without

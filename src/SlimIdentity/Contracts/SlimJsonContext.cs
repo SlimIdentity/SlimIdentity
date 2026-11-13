@@ -25,6 +25,8 @@ namespace SlimIdentity.Contracts;
 [JsonSerializable(typeof(SlimAuthResponse))]
 [JsonSerializable(typeof(SlimActionRequiredResponse))]
 [JsonSerializable(typeof(SlimFlowRequest))]
+[JsonSerializable(typeof(SlimFlowStepRequest))]
+[JsonSerializable(typeof(SlimTwoFactorSetupLoginRequest))]
 [JsonSerializable(typeof(SlimProblemResponse))]
 [JsonSerializable(typeof(SlimMeResponse))]
 [JsonSerializable(typeof(SlimTwoFactorStatusResponse))]

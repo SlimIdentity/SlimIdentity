@@ -60,6 +60,41 @@ replaces the codes – the old ones stop working at once, sessions stay as they 
    newer one invalidates the older one – that device signs in again.
    In cookie mode (`/login?useCookies=true`) this step needs the CSRF header like every other cookie request.
 
+## Requiring a second factor
+
+By default the second factor is the user's choice. A policy makes it mandatory – for everyone, a role, a tenant or
+one sign-in method:
+
+```csharp
+public sealed class StaffNeedsSecondFactor(IStaffDirectory staff) : ISlimSecondFactorPolicy
+{
+    public async ValueTask<bool> IsRequiredAsync(SlimSecondFactorPolicyContext context, CancellationToken ct)
+        => await staff.IsStaffAsync(context.User.Id, ct);
+}
+
+builder.Services.AddSlimIdentity(…)
+    .AddTwoFactorStore<MyTwoFactorStore>()          // required – startup fails without it
+    .AddSecondFactorPolicy<StaffNeedsSecondFactor>();
+```
+
+The context carries the user, the authentication method of the first factor (`pwd`, `ext`, `passkey`, …), the
+external provider and the `HttpContext`. The policies are asked once when a sign-in starts; one `true` is enough. The
+requirement applies to new sign-ins – existing sessions stay valid.
+
+Only a **phishing-resistant or possession-bound** factor fulfils it: an authenticator code, a recovery code, a passkey,
+a remembered device of an account with an authenticator, or `ISlimAuthManager.SignInAsync(…, secondFactorVerified: true)`.
+An e-mail code does not – whoever controls the mailbox can reset the password as well.
+
+An account without such a factor gets the steps instead of a session (after `second_factor` if it uses e-mail codes):
+
+1. `setup_second_factor`: `POST /auth/login/2fa/setup` with `flowToken` → `sharedKey`, `authenticatorUri`,
+   `setupToken`, as on `/2fa/setup`. `details.setupSecondFactor.methods` lists `totp` and, if the account has
+   passkeys, `passkey` – signing in with a passkey fulfils the requirement as well.
+2. `POST /auth/login/2fa/enable` with `flowToken`, `setupToken` and the first `code` → the authenticator is enabled,
+   the security stamp rotates (other sessions end), and the answer is `action_required` `["confirm_recovery_codes"]`
+   with `details.recoveryCodes` – **show them once**; reading the flow again does not repeat them.
+3. `confirm_recovery_codes`: `POST /auth/login/2fa/recovery-codes-saved` with `flowToken` → session.
+
 ## Remember this device (optional)
 
 Users who sign in daily on the same device can skip the second factor there for a while – the password is still
@@ -75,7 +110,8 @@ o.TwoFactor.RememberDeviceLifetime = TimeSpan.FromDays(30);   // max. 90 days
    routes. **Apps (bearer mode):** the response contains `twoFactorRememberToken` – store it in secure storage and send
    it as `twoFactorRememberToken` with `/auth/login`.
 3. Later sign-ins on that device with the correct password skip the second factor (`amr` = `mfa_remembered`), also
-   for external logins in the same browser. Each proof counts only in its own mode: the cookie for cookie sign-ins,
+   for external logins in the same browser. Under a [policy](#requiring-a-second-factor) this holds only for accounts
+   with an authenticator. Each proof counts only in its own mode: the cookie for cookie sign-ins,
    the token for bearer sign-ins – a token request from a browser that has the cookie still asks for the second factor.
 
 Forgetting:

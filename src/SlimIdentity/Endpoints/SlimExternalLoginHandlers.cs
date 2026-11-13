@@ -201,7 +201,7 @@ internal sealed class SlimExternalLoginHandlers(
 
         // the browser may carry a "remember this device" cookie from an earlier second factor
         var result = await flow.StartAsync(user, cookies: true, rememberMe: false, SlimAuthManager.MethodExternal, SlimSignInProofs.None,
-            checkRememberedDevice: true, rememberToken: null, refuseLockedSecondFactor: false, ct);
+            checkRememberedDevice: true, rememberToken: null, refuseLockedSecondFactor: false, ct, provider);
         // the flow token stands for the passed first factor – fragment only, like the exchange code
         if (result.ActionRequired is { } steps)
             return RedirectWithFragment(returnUrl, new()
@@ -235,7 +235,7 @@ internal sealed class SlimExternalLoginHandlers(
 
         // the steps that follow exactly as at /auth/login: a remembered device (token in the body) passes the second factor
         var result = await flow.StartAsync(user, cookies: false, rememberMe: false, SlimAuthManager.MethodExternal, SlimSignInProofs.None,
-            checkRememberedDevice: true, request.TwoFactorRememberToken, refuseLockedSecondFactor: false, ct);
+            checkRememberedDevice: true, request.TwoFactorRememberToken, refuseLockedSecondFactor: false, ct, payload.Provider);
         return flow.ToHttpResult(result, user);
     }
 

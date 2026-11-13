@@ -168,6 +168,17 @@ public sealed class SlimIdentityBuilder
         return this;
     }
 
+    /// <summary>
+    /// Requires a second factor for some or all sign-ins (see <see cref="ISlimSecondFactorPolicy"/>); needs a
+    /// <see cref="ISlimTwoFactorStore"/>. Can be called several times – each policy can require it.
+    /// </summary>
+    public SlimIdentityBuilder AddSecondFactorPolicy<[DynamicallyAccessedMembers(Ctors)] TPolicy>(ServiceLifetime lifetime = ServiceLifetime.Scoped)
+        where TPolicy : class, ISlimSecondFactorPolicy
+    {
+        Services.TryAddEnumerable(ServiceDescriptor.Describe(typeof(ISlimSecondFactorPolicy), typeof(TPolicy), lifetime));
+        return this;
+    }
+
     /// <summary>Adds a veto against new accounts (see <see cref="ISlimRegistrationGuard"/>). Can be called several times.</summary>
     public SlimIdentityBuilder AddRegistrationGuard<[DynamicallyAccessedMembers(Ctors)] TGuard>(ServiceLifetime lifetime = ServiceLifetime.Scoped)
         where TGuard : class, ISlimRegistrationGuard

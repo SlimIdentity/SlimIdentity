@@ -25,13 +25,22 @@ export interface AuthResponse {
  * A registration answers the same way: "verify_email" at verifyRegistration (or the mailed link at openLink),
  * then "set_credential" at completeRegistration or completeRegistrationWithPasskey. A reset link (openLink) ends in
  * "set_credential" as well – possibly after "verify_email" or "second_factor" – and so does an invitation link.
+ * If the server requires a second factor the account lacks: "setup_second_factor" at setupLoginAuthenticator +
+ * enableLoginAuthenticator (answers with `details.recoveryCodes` – show them once), then "confirm_recovery_codes" at
+ * confirmRecoveryCodes.
  */
 export interface ActionRequired {
   status: "action_required";
   actions: string[];
   flowToken: string;
   expiresIn: number;
-  details?: { secondFactor?: { methods: ("totp" | "email" | "recovery")[] }; setCredential?: { kinds: "password"[] } };
+  details?: {
+    secondFactor?: { methods: ("totp" | "email" | "recovery")[] };
+    setCredential?: { kinds: "password"[] };
+    setupSecondFactor?: { methods: ("totp" | "passkey")[] };
+    /** only in the answer of enableLoginAuthenticator */
+    recoveryCodes?: string[];
+  };
 }
 
 export interface SignInMethods {
@@ -303,6 +312,21 @@ export const cookieAuth = {
   /** Second step with one of the recovery codes (single use) instead of an authenticator / e-mail code. */
   async loginRecoveryCode(flowToken: string, recoveryCode: string): Promise<LoginResult> {
     return toLoginResult(await cookieFetch("/auth/login/2fa", { method: "POST", body: JSON.stringify({ flowToken, recoveryCode }) }));
+  },
+
+  /** Step "setup_second_factor": key and QR code of a new authenticator (see setupAuthenticator). */
+  async setupLoginAuthenticator(flowToken: string, toQrDataUrl: (text: string) => Promise<string>): Promise<AuthenticatorSetupResult> {
+    return toAuthenticatorSetup(await cookieFetch("/auth/login/2fa/setup", { method: "POST", body: JSON.stringify({ flowToken }) }), toQrDataUrl);
+  },
+
+  /** Enables the authenticator with its first code; the answer carries `details.recoveryCodes` – show them exactly once. */
+  async enableLoginAuthenticator(flowToken: string, setupToken: string, code: string): Promise<LoginResult> {
+    return toLoginResult(await cookieFetch("/auth/login/2fa/enable", { method: "POST", body: JSON.stringify({ flowToken, setupToken, code }) }));
+  },
+
+  /** Step "confirm_recovery_codes": the user has saved the codes – the result is the session or the remaining steps. */
+  async confirmRecoveryCodes(flowToken: string): Promise<LoginResult> {
+    return toLoginResult(await cookieFetch("/auth/login/2fa/recovery-codes-saved", { method: "POST", body: JSON.stringify({ flowToken }) }));
   },
 
   /** Step "change_password": sets the own password – the result is the session or the remaining steps. */
@@ -690,6 +714,21 @@ export const bearerAuth = {
   /** Second step with one of the recovery codes (single use) instead of an authenticator / e-mail code. */
   async loginRecoveryCode(flowToken: string, recoveryCode: string): Promise<LoginResult> {
     return flowStep("/login/2fa", { flowToken, recoveryCode });
+  },
+
+  /** Step "setup_second_factor": key and QR code of a new authenticator (see setupAuthenticator). */
+  async setupLoginAuthenticator(flowToken: string, toQrDataUrl: (text: string) => Promise<string>): Promise<AuthenticatorSetupResult> {
+    return toAuthenticatorSetup(await fetch(`${AUTH}/login/2fa/setup`, { method: "POST", headers: jsonHeaders, body: JSON.stringify({ flowToken }) }), toQrDataUrl);
+  },
+
+  /** Enables the authenticator with its first code; the answer carries `details.recoveryCodes` – show them exactly once. */
+  async enableLoginAuthenticator(flowToken: string, setupToken: string, code: string): Promise<LoginResult> {
+    return flowStep("/login/2fa/enable", { flowToken, setupToken, code });
+  },
+
+  /** Step "confirm_recovery_codes": the user has saved the codes – the result is the session or the remaining steps. */
+  async confirmRecoveryCodes(flowToken: string): Promise<LoginResult> {
+    return flowStep("/login/2fa/recovery-codes-saved", { flowToken });
   },
 
   /** Step "change_password": sets the own password – the result is the session or the remaining steps. */

@@ -55,6 +55,37 @@ public interface ISlimSignInGuard
     ValueTask<SlimVeto?> CheckAsync(SlimSignInContext context, CancellationToken ct);
 }
 
+/// <summary>What <see cref="ISlimSecondFactorPolicy"/> decides on.</summary>
+public sealed class SlimSecondFactorPolicyContext
+{
+    /// <summary>The account (current state from the store).</summary>
+    public required SlimUser User { get; init; }
+    /// <summary>The first factor of the sign-in (<c>amr</c>): <c>pwd</c>, <c>ext</c>, <c>passkey</c>, or the method of <see cref="ISlimAuthManager.SignInAsync"/>.</summary>
+    public required string AuthenticationMethod { get; init; }
+    /// <summary>The external provider of an <c>ext</c> sign-in, else <c>null</c>.</summary>
+    public string? Provider { get; init; }
+    /// <summary>The request; <c>null</c> when your own code calls <see cref="ISlimAuthManager"/> outside a request.</summary>
+    public HttpContext? HttpContext { get; init; }
+}
+
+/// <summary>
+/// Optional requirement of a second factor that is more than a mail code – for administrators, a tenant, a role, or
+/// everyone. Asked once when a sign-in starts; can only tighten. Register with <c>AddSecondFactorPolicy&lt;T&gt;()</c>
+/// (several are allowed – each one can require it).
+/// </summary>
+/// <remarks>
+/// A sign-in that requires it and has not proven an authenticator app, a recovery code or a passkey continues with step
+/// <c>setup_second_factor</c>: the account sets up an authenticator app (<c>/login/2fa/setup</c>, <c>/login/2fa/enable</c>)
+/// or signs in with a passkey instead, then confirms its recovery codes (<c>confirm_recovery_codes</c>). An account with
+/// mail codes passes them first. Applies from the next sign-in – including <see cref="ISlimAuthManager.SignInAsync"/> and
+/// external logins; running sessions, refresh and impersonation stay as they are.
+/// </remarks>
+public interface ISlimSecondFactorPolicy
+{
+    /// <summary><c>true</c> to require a second factor for this sign-in.</summary>
+    ValueTask<bool> IsRequiredAsync(SlimSecondFactorPolicyContext context, CancellationToken ct);
+}
+
 /// <summary>When <see cref="ISlimRegistrationGuard"/> is asked.</summary>
 public enum SlimRegistrationStage
 {

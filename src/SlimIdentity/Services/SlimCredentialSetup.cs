@@ -118,7 +118,7 @@ internal sealed class SlimCredentialSetup(
         var result = await flow.ContinueAsync(user, state with
         {
             Stamp = user.SecurityStamp,
-            Proofs = state.Proofs | (passkey ? SlimSignInProofs.SecondFactor : SlimSignInProofs.Password),
+            Proofs = state.Proofs | (passkey ? SlimSignInProofs.StrongSecondFactor : SlimSignInProofs.Password),
             Amr = passkey ? SlimAuthManager.MethodPasskey
                 : state.Proofs.HasFlag(SlimSignInProofs.SecondFactor) ? state.Amr : SlimAuthManager.MethodPassword,
             Link = null, Method = null, CodeHash = null, IssuedAt = 0,

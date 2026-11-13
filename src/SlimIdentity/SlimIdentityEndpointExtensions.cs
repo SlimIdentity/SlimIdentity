@@ -43,6 +43,9 @@ public static class SlimIdentityEndpointExtensions
         if (o.Email.Enabled && !Has<ISlimEmailSender>())
             throw new InvalidOperationException(
                 "SlimIdentity: no ISlimEmailSender registered. Call .AddEmailSender<T>() or .AddNullEmailSender() – or .WithoutEmail() for a host without mail.");
+        if (Has<ISlimSecondFactorPolicy>() && !Has<ISlimTwoFactorStore>())
+            throw new InvalidOperationException(
+                "SlimIdentity: AddSecondFactorPolicy() needs an ISlimTwoFactorStore. Call .AddTwoFactorStore<T>() or use the EF Core stores.");
         if (!o.Email.Enabled && Has<ISlimEmailSender>())
             throw new InvalidOperationException(
                 "SlimIdentity: WithoutEmail() and a mail sender are both registered. Remove one of them.");
@@ -133,6 +136,43 @@ public static class SlimIdentityEndpointExtensions
                     [FromServices] SlimLoginHandlers h, CancellationToken ct) => h.LoginTwoFactorAsync(request, ct))
                 .WithName("SlimIdentity_LoginTwoFactor")
                 .WithSummary("Step second_factor: flowToken + TOTP / e-mail / recovery code; the session or the next step.")
+                .Produces<SlimAuthResponse>()
+                .Produces<SlimActionRequiredResponse>()
+                .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
+                .ProducesSlimProblem(StatusCodes.Status403Forbidden)
+                .ProducesSlimProblem(StatusCodes.Status423Locked)
+                .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
+                .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
+                .AllowAnonymous();
+
+            group.MapPost("/login/2fa/setup", static ([FromBody] SlimFlowStepRequest request,
+                    [FromServices] SlimLoginHandlers h, CancellationToken ct) => h.SetupTwoFactorAsync(request, ct))
+                .WithName("SlimIdentity_LoginTwoFactorSetup")
+                .WithSummary("Step setup_second_factor: a new authenticator secret (shared key, otpauth URI, setup token); nothing is stored yet.")
+                .Produces<SlimTwoFactorSetupResponse>()
+                .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
+                .ProducesSlimProblem(StatusCodes.Status423Locked)
+                .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
+                .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
+                .AllowAnonymous();
+
+            group.MapPost("/login/2fa/enable", static ([FromBody] SlimTwoFactorSetupLoginRequest request,
+                    [FromServices] SlimLoginHandlers h, CancellationToken ct) => h.EnableTwoFactorAsync(request, ct))
+                .WithName("SlimIdentity_LoginTwoFactorEnable")
+                .WithSummary("Step setup_second_factor: flowToken + setup token + first code enables the authenticator; then confirm_recovery_codes with the codes.")
+                .Produces<SlimAuthResponse>()
+                .Produces<SlimActionRequiredResponse>()
+                .ProducesSlimProblem(StatusCodes.Status400BadRequest)
+                .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
+                .ProducesSlimProblem(StatusCodes.Status423Locked)
+                .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
+                .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
+                .AllowAnonymous();
+
+            group.MapPost("/login/2fa/recovery-codes-saved", static ([FromBody] SlimFlowStepRequest request,
+                    [FromServices] SlimLoginHandlers h, CancellationToken ct) => h.ConfirmRecoveryCodesAsync(request, ct))
+                .WithName("SlimIdentity_LoginRecoveryCodesSaved")
+                .WithSummary("Step confirm_recovery_codes: the recovery codes are saved; the session or the next step.")
                 .Produces<SlimAuthResponse>()
                 .Produces<SlimActionRequiredResponse>()
                 .ProducesSlimProblem(StatusCodes.Status401Unauthorized)

@@ -388,6 +388,13 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
   `details.setCredential.email` replaces `/invitation/info`. An account with a second factor passes `second_factor`
   first, a mailed code included. The link answers `401 invalid_token` once the account has a password or another
   address. TypeScript client: `invitationInfo` and `acceptInvitation` are removed; `openLink` covers invitation links.
+- `ISlimSecondFactorPolicy` (`AddSecondFactorPolicy<T>()`, requires `ISlimTwoFactorStore`) makes a second factor
+  mandatory per sign-in. An account without an authenticator gets the steps `setup_second_factor`
+  (`POST /auth/login/2fa/setup`, `POST /auth/login/2fa/enable`) and `confirm_recovery_codes`
+  (`POST /auth/login/2fa/recovery-codes-saved`, the codes come once in `details.recoveryCodes`) instead of a session.
+  Under a policy an e-mail code is no sufficient second factor; an authenticator or recovery code, a passkey, or a
+  remembered device of an account with an authenticator is. New error code `two_factor_setup_required`. TypeScript
+  client: `setupLoginAuthenticator`, `enableLoginAuthenticator`, `confirmRecoveryCodes`.
 - **Breaking** with `UseTenantKey`: the tenant of the request is part of the Data Protection purpose of every token
   (mail links, invitations, sign-in flows, refresh tokens, remembered devices, exchange and link codes, passkey
   ceremonies). A token of one tenant no longer decrypts in another; tokens issued before the update, or outside a

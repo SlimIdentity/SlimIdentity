@@ -55,7 +55,7 @@ internal sealed class SlimAuthManager(
         // the rules of /login after the first factor – a host endpoint must not be a way around them. A lockout guards
         // the password and the second factor against guessing; it does not apply here (the host checks its own factor).
         var result = await services.GetRequiredService<SlimSignInFlow>().StartAsync(user, useCookies, isPersistent, authenticationMethod,
-            secondFactorVerified ? SlimSignInProofs.SecondFactor : SlimSignInProofs.None,
+            secondFactorVerified ? SlimSignInProofs.StrongSecondFactor : SlimSignInProofs.None,
             checkRememberedDevice: false, rememberToken: null, refuseLockedSecondFactor: false, ct);
         if (!result.Succeeded && result.ActionRequired is null && !result.Vetoed && result.Error != SlimErrorCodes.TwoFactorUnavailable)
             await Hooks.RaiseAsync(SlimEventTypes.SignInFailed, user.Id, authenticationMethod, result.Error, ct: ct);

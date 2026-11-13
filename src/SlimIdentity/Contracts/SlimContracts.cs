@@ -163,6 +163,32 @@ public sealed record SlimFlowRequest(string? FlowToken = null, string? Token = n
     }
 }
 
+/// <summary>Body of <c>POST /auth/login/2fa/setup</c> and <c>POST /auth/login/2fa/recovery-codes-saved</c>.</summary>
+/// <param name="FlowToken"><c>flowToken</c> of an <c>action_required</c> answer with the step as first one.</param>
+public sealed record SlimFlowStepRequest(string FlowToken)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("FlowToken = ").Append(SlimRedaction.Mask(FlowToken));
+        return true;
+    }
+}
+
+/// <summary>Body of <c>POST /auth/login/2fa/enable</c>: step <c>setup_second_factor</c> with an authenticator app.</summary>
+/// <param name="FlowToken"><c>flowToken</c> of an <c>action_required</c> answer with <c>setup_second_factor</c> as first step.</param>
+/// <param name="SetupToken">Token from <c>POST /auth/login/2fa/setup</c>.</param>
+/// <param name="Code">First code from the authenticator app.</param>
+public sealed record SlimTwoFactorSetupLoginRequest(string FlowToken, string SetupToken, string Code)
+{
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append("FlowToken = ").Append(SlimRedaction.Mask(FlowToken));
+        builder.Append(", SetupToken = ").Append(SlimRedaction.Mask(SetupToken));
+        builder.Append(", Code = ").Append(SlimRedaction.Mask(Code));
+        return true;
+    }
+}
+
 /// <summary>Body of <c>POST /auth/change-password</c>.</summary>
 /// <param name="CurrentPassword">The current password.</param>
 /// <param name="NewPassword">New password according to the password policy.</param>
@@ -340,8 +366,9 @@ public sealed class SlimActionRequiredResponse
     /// <summary>
     /// The open steps in order; the first one is taken now: <c>verify_email</c> (<c>POST /auth/login/verify-email</c>, in a
     /// registration <c>POST /auth/register/verify</c>), <c>set_credential</c> (<c>POST /auth/register/password</c>),
-    /// <c>second_factor</c> (<c>POST /auth/login/2fa</c>) or <c>change_password</c> (<c>POST /auth/login/password-change</c>).
-    /// Clients ignore steps they do not know.
+    /// <c>second_factor</c> (<c>POST /auth/login/2fa</c>), <c>change_password</c> (<c>POST /auth/login/password-change</c>),
+    /// <c>setup_second_factor</c> (<c>POST /auth/login/2fa/setup</c> and <c>/auth/login/2fa/enable</c>) or
+    /// <c>confirm_recovery_codes</c> (<c>POST /auth/login/2fa/recovery-codes-saved</c>). Clients ignore steps they do not know.
     /// </summary>
     public required IReadOnlyList<string> Actions { get; init; }
     /// <summary>Token of the sign-in for the step endpoints and <c>POST /auth/flow</c>; every step answers with a new one.</summary>
@@ -363,6 +390,27 @@ public sealed class SlimActionDetails
     /// <summary>Set for <c>set_credential</c>.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public SlimSetCredentialDetails? SetCredential { get; init; }
+
+    /// <summary>Set for <c>setup_second_factor</c>.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SlimSetupSecondFactorDetails? SetupSecondFactor { get; init; }
+
+    /// <summary>
+    /// The recovery codes of the second factor just set up – only in the answer of <c>POST /auth/login/2fa/enable</c>,
+    /// shown exactly once (step <c>confirm_recovery_codes</c>).
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<string>? RecoveryCodes { get; init; }
+}
+
+/// <summary>How the second factor the sign-in requires can be set up.</summary>
+public sealed class SlimSetupSecondFactorDetails
+{
+    /// <summary>
+    /// <c>totp</c> (an authenticator app: <c>POST /auth/login/2fa/setup</c>, then <c>/auth/login/2fa/enable</c>) and, for
+    /// an account with a passkey, <c>passkey</c> (sign in with it instead). Clients ignore methods they do not know.
+    /// </summary>
+    public required IReadOnlyList<string> Methods { get; init; }
 }
 
 /// <summary>

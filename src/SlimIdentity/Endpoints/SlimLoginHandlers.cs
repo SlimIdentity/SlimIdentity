@@ -282,7 +282,8 @@ internal sealed class SlimLoginHandlers(
         // "remember this device" – only after a real second factor, never after a recovery code
         var next = state with
         {
-            Proofs = state.Proofs | SlimSignInProofs.SecondFactor,
+            // a mail code proves the mailbox once more – not what ISlimSecondFactorPolicy asks for
+            Proofs = state.Proofs | (method == MethodEmail ? SlimSignInProofs.SecondFactor : SlimSignInProofs.StrongSecondFactor),
             Amr = SlimAuthManager.MethodMfa,
             RememberDevice = request.RememberDevice && method != MethodRecovery,
             Method = null,
@@ -290,6 +291,101 @@ internal sealed class SlimLoginHandlers(
             IssuedAt = 0,
         };
         return flow.ToHttpResult(await flow.ContinueAsync(user, next, ct), user);
+    }
+
+    // ------------------------------------------------------------------ POST /login/2fa/setup
+
+    // a secret for step setup_second_factor – nothing is stored until /login/2fa/enable confirms a code
+    public async Task<IResult> SetupTwoFactorAsync(SlimFlowStepRequest? request, CancellationToken ct)
+    {
+        var (_, user, error) = await ReadStepAsync(request?.FlowToken, SlimSignInActions.SetupSecondFactor, ct);
+        if (user is null) return error!;
+
+        var secret = SlimTotp.GenerateSecret();
+        var setupToken = workflow.Protect(SlimWorkflowTokens.TwoFactorSetupPurpose,
+            new SlimTwoFactorSetupPayload(user.Id, secret, user.SecurityStamp), SlimIdentityDefaults.TwoFactorSetupTokenLifetime);
+        return Results.Ok(new SlimTwoFactorSetupResponse(
+            SlimTotp.FormatSharedKey(secret),
+            SlimTotp.BuildAuthenticatorUri(O.TwoFactor.AuthenticatorIssuer, user.Email, secret),
+            setupToken));
+    }
+
+    // ------------------------------------------------------------------ POST /login/2fa/enable
+
+    // The first factor of this sign-in stands in for the password /2fa/enable asks for. The stamp rotates: the flow token
+    // works once, and every other session ends.
+    public async Task<IResult> EnableTwoFactorAsync(SlimTwoFactorSetupLoginRequest? request, CancellationToken ct)
+    {
+        var (state, user, error) = await ReadStepAsync(request?.FlowToken, SlimSignInActions.SetupSecondFactor, ct);
+        if (user is null) return error!;
+        if (!workflow.TryUnprotect<SlimTwoFactorSetupPayload>(SlimWorkflowTokens.TwoFactorSetupPurpose, request!.SetupToken, out var payload)
+            || !string.Equals(payload.Uid, user.Id, StringComparison.Ordinal)
+            || !SlimUser.IsSameSecurityState(payload.Stamp, user.SecurityStamp))
+            return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
+
+        var twoFactor = services.GetRequiredService<SlimTwoFactorService>();
+        if (!await twoFactor.VerifyTotpAsync(user, payload.Secret, request.Code, ct, newSecret: true))
+            return SlimResults.BadRequest(SlimErrorCodes.InvalidTwoFactorCode, "The code is invalid.");
+
+        var written = await store.TryWriteSecurityStateAsync(user, u =>
+        {
+            u.TwoFactorEnabled = true;
+            u.SecurityStamp = SlimUser.NewSecurityStamp();
+        }, ct);
+        if (!written) return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
+        await twoFactor.SetSecretAsync(user, payload.Secret, ct);
+        var codes = await twoFactor.RegenerateRecoveryCodesAsync(user, ct);
+        await authManager.RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
+        Log.TwoFactorEnabled(logger, user.Id);
+        await hooks.RaiseAsync(SlimEventTypes.TwoFactorEnabled, user.Id, MethodTotp, ct: ct);
+
+        var result = await flow.ContinueAsync(user, state! with
+        {
+            Stamp = user.SecurityStamp,
+            Proofs = state.Proofs | SlimSignInProofs.StrongSecondFactor,
+            Amr = SlimAuthManager.MethodMfa,
+            RecoveryCodesPending = true,
+        }, ct);
+        metrics.Login(SlimSignInFlow.MetricReason(result), state.UseCookies);
+        // the codes are shown exactly once, with step confirm_recovery_codes
+        if (result.ActionRequired is { } steps)
+            result = result with
+            {
+                ActionRequired = new SlimActionRequiredResponse
+                {
+                    Actions = steps.Actions, FlowToken = steps.FlowToken, ExpiresIn = steps.ExpiresIn,
+                    Details = new SlimActionDetails { RecoveryCodes = codes },
+                },
+            };
+        return flow.ToHttpResult(result, user);
+    }
+
+    // ------------------------------------------------------------------ POST /login/2fa/recovery-codes-saved
+
+    public async Task<IResult> ConfirmRecoveryCodesAsync(SlimFlowStepRequest? request, CancellationToken ct)
+    {
+        var (state, user, error) = await ReadStepAsync(request?.FlowToken, SlimSignInActions.ConfirmRecoveryCodes, ct);
+        if (user is null) return error!;
+        var result = await flow.ContinueAsync(user, state! with { RecoveryCodesPending = false }, ct);
+        metrics.Login(SlimSignInFlow.MetricReason(result), state.UseCookies);
+        return flow.ToHttpResult(result, user);
+    }
+
+    /// <summary>
+    /// The flow of a step endpoint whose step is <paramref name="action"/> now – otherwise <c>401</c>, the CSRF error of a
+    /// cookie sign-in, or <c>423</c> for a lockout of the password that started after the token was issued.
+    /// </summary>
+    private async Task<(SlimFlowPayload? State, SlimUser? User, IResult? Error)> ReadStepAsync(string? token, string action, CancellationToken ct)
+    {
+        if (!flow.TryRead(token, out var state, out _)) return (null, null, SlimResults.InvalidToken(StatusCodes.Status401Unauthorized));
+        if (state.UseCookies && SlimCsrfEndpointFilter.Validate(Http.Request, O, logger) is { } csrfError) return (null, null, csrfError);
+        var user = await flow.FindUserAsync(state, ct);
+        if (user is null || SlimSignInChain.Evaluate(user, state, O).Next != action)
+            return (null, null, SlimResults.InvalidToken(StatusCodes.Status401Unauthorized));
+        var now = time.GetUtcNow();
+        if (state.Proofs.HasFlag(SlimSignInProofs.Password) && user.IsLockedOut(now))
+            return (null, null, SlimResults.Locked(Http, user.LockoutEndUtc!.Value, now));
+        return (state, user, null);
     }
 
     // ------------------------------------------------------------------ POST /refresh

@@ -108,11 +108,13 @@ internal sealed class SlimWorkflowTokens(
 /// milliseconds, single use via <c>ISlimTwoFactorStore.TryMarkChallengeUsedAsync</c> and <c>TryMarkCodeUsedAsync</c>).
 /// A registration before its account has no <c>Uid</c> and <c>Stamp</c>, but the <c>Email</c> it registers.
 /// <c>Link</c>: the kind of link (<see cref="SlimLinkPayload"/>) that started a flow ending in <c>set_credential</c> for an
-/// existing account.
+/// existing account. <c>SecondFactorRequired</c>: the answer of <see cref="ISlimSecondFactorPolicy"/>, asked once when the
+/// sign-in starts (<c>null</c>: not asked yet); <c>RecoveryCodesPending</c>: the codes of a second factor set up in this
+/// flow are not confirmed yet.
 /// </summary>
 internal sealed record SlimFlowPayload(string Uid, string Stamp, string FlowId, long StartedAt, SlimSignInProofs Proofs, string Amr,
     bool UseCookies, bool RememberMe, bool RememberDevice = false, string? Method = null, string? CodeHash = null, long IssuedAt = 0,
-    string? Email = null, string? Link = null)
+    string? Email = null, string? Link = null, bool? SecondFactorRequired = null, bool RecoveryCodesPending = false)
 {
     /// <summary>A registration whose account does not exist yet.</summary>
     [System.Text.Json.Serialization.JsonIgnore]

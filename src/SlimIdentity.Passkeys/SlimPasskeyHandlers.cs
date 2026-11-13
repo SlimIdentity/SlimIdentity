@@ -148,7 +148,7 @@ internal sealed class SlimPasskeyHandlers(
 
         Log.PasskeyAdded(logger, user.Id);
         await hooks.RaiseAsync(SlimEventTypes.PasskeyAdded, user.Id, SlimAuthManager.MethodPasskey, ct: ct);
-        return await registration.SignInAsync(user, flow, SlimSignInProofs.SecondFactor, SlimAuthManager.MethodPasskey, ct);
+        return await registration.SignInAsync(user, flow, SlimSignInProofs.StrongSecondFactor, SlimAuthManager.MethodPasskey, ct);
     }
 
     private async Task<IResult> ReplaceCredentialAsync(SlimCredentialSetup setup, SlimUser user, SlimFlowPayload flow,
@@ -236,7 +236,7 @@ internal sealed class SlimPasskeyHandlers(
         var user = await store.FindByIdAsync(passkey.UserId, ct);
         if (user is null) return Failed("account");
         var flow = services.GetRequiredService<SlimSignInFlow>();
-        var decision = SlimSignInChain.Evaluate(user, SlimSignInProofs.SecondFactor, O);
+        var decision = SlimSignInChain.Evaluate(user, SlimSignInProofs.StrongSecondFactor, O);
         if (decision.Refusal is not null)
         {
             var refused = SlimAuthResult.Failed(decision.Refusal);
@@ -249,7 +249,7 @@ internal sealed class SlimPasskeyHandlers(
             return Failed("replay");
 
         // a start password set by an administrator is replaced in the flow that follows
-        var result = await flow.StartAsync(user, cookies, request.RememberMe, SlimAuthManager.MethodPasskey, SlimSignInProofs.SecondFactor,
+        var result = await flow.StartAsync(user, cookies, request.RememberMe, SlimAuthManager.MethodPasskey, SlimSignInProofs.StrongSecondFactor,
             checkRememberedDevice: false, rememberToken: null, refuseLockedSecondFactor: false, ct);
         metrics.Login(SlimSignInFlow.MetricReason(result), cookies);
         return flow.ToHttpResult(result, user);
