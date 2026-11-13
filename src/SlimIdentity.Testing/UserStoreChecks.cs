@@ -51,12 +51,27 @@ internal static class UserStoreChecks
                 }
             });
 
+        await run.CheckAsync(Store, "compares e-mail addresses case-insensitively beyond ASCII",
+            "Normalize in .NET with ToUpperInvariant() and compare the normalized column with '='. Database functions and collations may fold ASCII only (SQLite NOCASE, UPPER() without ICU) and treat É and é as different addresses.",
+            async () =>
+            {
+                var email = $"Élodie.Ærø-{Guid.NewGuid():N}@{run.Options.EmailDomain}";
+                var user = await run.NewUserAsync(email);
+                foreach (var variant in new[] { email.ToUpperInvariant(), email.ToLowerInvariant() })
+                {
+                    var found = await stores.UseAsync<ISlimUserStore, SlimUser?>(s => s.FindByEmailAsync(variant, ct));
+                    Expect.Equal(user.Id, found?.Id, $"FindByEmailAsync(\"{variant}\") → Id");
+                }
+                var duplicate = await stores.UseAsync<ISlimUserStore, SlimUser?>(s => s.CreateAsync(new SlimNewUser { Email = email.ToLowerInvariant(), PasswordHash = ConformanceRun.NewHash() }, ct));
+                Expect.True(duplicate is null, "CreateAsync created a second account for the same address with lower-case non-ASCII letters.");
+            });
+
         await run.CheckAsync(Store, "treats quotes, SQL metacharacters and LIKE wildcards in addresses as plain text",
             "Use parameterized statements only (never build SQL from the address) and compare with '=' – not LIKE, whose '%' and '_' would match other addresses.",
             async () =>
             {
                 var id = Guid.NewGuid().ToString("N");
-                var tricky = $"o'brien\"--;{id}@{run.Options.EmailDomain}";
+                var tricky = $"o'brien'--/*{id}*/@{run.Options.EmailDomain}";   // a valid address, also for a CHECK constraint
                 var user = await run.NewUserAsync(tricky);
                 var found = await stores.UseAsync<ISlimUserStore, SlimUser?>(s => s.FindByEmailAsync(tricky, ct));
                 Expect.Equal(user.Id, found?.Id, "FindByEmailAsync with quotes and comment characters");
@@ -81,7 +96,7 @@ internal static class UserStoreChecks
                 Expect.Equal(first.Id, found?.Id, "the original account after the duplicate attempt");
             });
 
-        await run.CheckAsync(Store, "parallel registrations of one address create exactly one account",
+        await run.CheckRaceAsync(Store, "parallel registrations of one address create exactly one account",
             "Do not check for existence first – insert and let the unique index on the normalized address reject the losers (also for other casings); return null for them instead of throwing.",
             async () =>
             {
@@ -149,6 +164,27 @@ internal static class UserStoreChecks
                 Expect.True(string.IsNullOrEmpty(cleared.PasswordHash), "PasswordHash after removing the password (empty) – the old hash is still stored.");
             });
 
+        await run.CheckAsync(Store, "UpdateSecurityStateAsync leaves IsActive and the address alone",
+            "Write only the five security fields and the stamp – never the whole user. A copy read before an administrator blocked the account must not unblock it, and the address changes only through UpdateEmailAsync.",
+            async () =>
+            {
+                var user = await run.NewUserAsync();
+                var stale = await run.ReloadAsync(user);
+                var expected = stale.SecurityStamp;
+                stale.IsActive = false;
+                stale.Email = run.NewEmail();
+                stale.SecurityStamp = SlimUser.NewSecurityStamp();
+                Expect.True(await WriteStateAsync(stale, expected), "UpdateSecurityStateAsync returned false although the stamp was unchanged.");
+
+                var saved = await run.ReloadAsync(user);
+                Expect.Equal(true, saved.IsActive, "IsActive after UpdateSecurityStateAsync with IsActive = false (must stay)");
+                Expect.Equal(user.Email, saved.Email, "Email after UpdateSecurityStateAsync with another address (must stay)");
+                Expect.Equal(user.Id, (await stores.UseAsync<ISlimUserStore, SlimUser?>(s => s.FindByEmailAsync(user.Email, ct)))?.Id,
+                    "FindByEmailAsync(original address) after UpdateSecurityStateAsync");
+                Expect.True(await stores.UseAsync<ISlimUserStore, SlimUser?>(s => s.FindByEmailAsync(stale.Email, ct)) is null,
+                    "UpdateSecurityStateAsync wrote the address of the user object – it changes only through UpdateEmailAsync.");
+            });
+
         await run.CheckAsync(Store, "UpdateSecurityStateAsync writes only while the whole stamp is unchanged",
             "UPDATE … WHERE id = @id AND COALESCE(security_stamp, '') = @expectedStamp; return affected rows = 1. Compare the whole stamp, claims part included – a copy read before any other change must never be written back over it.",
             async () =>
@@ -177,7 +213,7 @@ internal static class UserStoreChecks
                 Expect.Equal(rotated, (await run.ReloadAsync(stale)).SecurityStamp, "SecurityStamp after a refused write");
             });
 
-        await run.CheckAsync(Store, "of parallel UpdateSecurityStateAsync calls from one stamp exactly one wins",
+        await run.CheckRaceAsync(Store, "of parallel UpdateSecurityStateAsync calls from one stamp exactly one wins",
             "The stamp comparison and the write must be one atomic UPDATE – never read the stamp, compare in code and write afterwards.",
             async () =>
             {
@@ -192,7 +228,7 @@ internal static class UserStoreChecks
                 Expect.Equal(hashes[Array.IndexOf(results, true)], (await run.ReloadAsync(user)).PasswordHash, "PasswordHash (must be the one of the winning write)");
             });
 
-        await run.CheckAsync(Store, "UpdateSecurityStampAsync replaces only the stamp and only if it is unchanged",
+        await run.CheckRaceAsync(Store, "UpdateSecurityStampAsync replaces only the stamp and only if it is unchanged",
             "UPDATE users SET security_stamp = @newStamp WHERE id = @id AND security_stamp = @expectedStamp; return affected rows = 1. Never write other columns.",
             async () =>
             {
@@ -239,7 +275,7 @@ internal static class UserStoreChecks
                 Expect.Equal(1, saved.FailedSecondFactorAttempts, "FailedSecondFactorAttempts after UpdateSecurityStateAsync with an outdated copy (must stay)");
             });
 
-        await run.CheckAsync(Store, "TryBeginAttemptAsync reserves parallel attempts atomically",
+        await run.CheckRaceAsync(Store, "TryBeginAttemptAsync reserves parallel attempts atomically",
             "Read and write counter and lockout end in one atomic step: a row lock (SELECT … FOR UPDATE) in a transaction, or a compare-and-set UPDATE … WHERE counter = @old AND lockout_end IS NOT DISTINCT FROM @oldEnd, retried on 0 rows. Never read, add and write back.",
             async () =>
             {
@@ -255,7 +291,7 @@ internal static class UserStoreChecks
                 Expect.True(counts.Count >= n / 2, $"Only {counts.Count} of {n} parallel attempts were reserved – retry a failed compare-and-set instead of giving up.");
             });
 
-        await run.CheckAsync(Store, "of parallel attempts at the threshold exactly one locks the factor",
+        await run.CheckRaceAsync(Store, "of parallel attempts at the threshold exactly one locks the factor",
             "Store the new lockout end (SlimAttemptRequest.NextLockoutEnd) in the same atomic step as the counter, and refuse every attempt while the stored end lies in the future (SlimAttemptReservation.LockedOut) without counting it.",
             async () =>
             {
@@ -343,6 +379,42 @@ internal static class UserStoreChecks
                 Expect.Equal(rehashed, (await run.ReloadAsync(user)).PasswordHash, "PasswordHash after a rehash with an outdated hash (must stay unchanged)");
             });
 
+        await run.CheckAsync(Store, "UpdatePasswordHashAsync and UpdateEmailAsync write nothing else",
+            "Each is one narrow UPDATE of its own columns – never write back the passed SlimUser, which may have been read before other changes (stamp, attempt counters, block by an administrator).",
+            async () =>
+            {
+                var user = await run.NewUserAsync();
+                await ReserveAsync(user, SlimAttemptFactor.Password, DateTimeOffset.UtcNow, 100);
+                var stored = await run.ReloadAsync(user);
+
+                var stale = await run.ReloadAsync(user);
+                stale.SecurityStamp = SlimUser.NewSecurityStamp();
+                stale.FailedLoginAttempts = 0;
+                stale.EmailConfirmed = true;
+                stale.TwoFactorEnabled = true;
+                stale.IsActive = false;
+                var rehashed = ConformanceRun.NewHash();
+                await stores.UseAsync<ISlimUserStore>(s => s.UpdatePasswordHashAsync(stale, stored.PasswordHash, rehashed, ct));
+                var rehashedUser = await run.ReloadAsync(user);
+                AssertUnchanged(rehashedUser, stored.SecurityStamp, "UpdatePasswordHashAsync");
+                Expect.Equal(false, rehashedUser.EmailConfirmed, "EmailConfirmed after UpdatePasswordHashAsync (must stay)");
+
+                stale.PasswordHash = ConformanceRun.NewHash();
+                var newStamp = SlimUser.NewSecurityStamp();
+                Expect.Equal(SlimEmailUpdateResult.Updated, await ChangeEmailAsync(stale, run.NewEmail(), stored.SecurityStamp, newStamp), "UpdateEmailAsync with the current stamp");
+                var changed = await run.ReloadAsync(user);
+                AssertUnchanged(changed, newStamp, "UpdateEmailAsync");
+                Expect.Equal(rehashed, changed.PasswordHash, "PasswordHash after UpdateEmailAsync (must stay)");
+
+                void AssertUnchanged(SlimUser saved, string stamp, string method)
+                {
+                    Expect.Equal(stamp, saved.SecurityStamp, $"SecurityStamp after {method}");
+                    Expect.Equal(1, saved.FailedLoginAttempts, $"FailedLoginAttempts after {method} (must stay)");
+                    Expect.Equal(false, saved.TwoFactorEnabled, $"TwoFactorEnabled after {method} (must stay)");
+                    Expect.Equal(true, saved.IsActive, $"IsActive after {method} (must stay)");
+                }
+            });
+
         await run.CheckAsync(Store, "UpdateEmailAsync changes the address, confirmation and stamp in one step and refuses taken ones",
             "One UPDATE of address, normalized column, EmailConfirmed = true and the new stamp, WHERE the stamp equals the expected one; Updated for 1 row, StampChanged for 0 rows, EmailTaken on a unique violation (and nothing changed).",
             async () =>
@@ -374,6 +446,35 @@ internal static class UserStoreChecks
                 var unchanged = await run.ReloadAsync(a);
                 Expect.Equal(newAddress, unchanged.Email, "Email after a change with an outdated stamp");
                 Expect.Equal(newStamp, unchanged.SecurityStamp, "SecurityStamp after a change with an outdated stamp");
+            });
+
+        await run.CheckAsync(Store, "UpdateEmailAsync accepts a new spelling of the own address",
+            "The address is taken only if ANOTHER account uses it: a unique index on the normalized column does that by itself; an explicit check must exclude the user's own row.",
+            async () =>
+            {
+                var user = await run.NewUserAsync($"Slim.Spelling-{Guid.NewGuid():N}@{run.Options.EmailDomain}");
+                var respelled = user.Email.ToLowerInvariant();
+                var newStamp = SlimUser.NewSecurityStamp();
+                Expect.Equal(SlimEmailUpdateResult.Updated, await ChangeEmailAsync(user, respelled, user.SecurityStamp, newStamp), "UpdateEmailAsync with a new spelling of the own address");
+                var saved = await run.ReloadAsync(user);
+                Expect.Equal(respelled, saved.Email, "Email after the new spelling");
+                Expect.Equal(newStamp, saved.SecurityStamp, "SecurityStamp after the new spelling");
+            });
+
+        await run.CheckRaceAsync(Store, "of parallel e-mail changes to one address exactly one wins",
+            "Let the unique index on the normalized address decide inside the UPDATE and map the violation to EmailTaken – a check for the address before the write lets several accounts through.",
+            async () =>
+            {
+                var target = $"Slim.Target-{Guid.NewGuid():N}@{run.Options.EmailDomain}";
+                var users = new SlimUser[run.Options.Parallelism];
+                for (var i = 0; i < users.Length; i++) users[i] = await run.NewUserAsync();
+                var results = await run.InParallelAsync(i =>
+                    ChangeEmailAsync(users[i], i % 2 == 0 ? target : target.ToLowerInvariant(), users[i].SecurityStamp, SlimUser.NewSecurityStamp()));
+
+                Expect.Equal(1, results.Count(r => r == SlimEmailUpdateResult.Updated), "parallel changes to one address (two casings) that succeeded");
+                Expect.True(results.All(r => r is SlimEmailUpdateResult.Updated or SlimEmailUpdateResult.EmailTaken), "The losers of the race must get EmailTaken.");
+                var winner = users[Array.IndexOf(results, SlimEmailUpdateResult.Updated)];
+                Expect.Equal(winner.Id, (await stores.UseAsync<ISlimUserStore, SlimUser?>(s => s.FindByEmailAsync(target, ct)))?.Id, "FindByEmailAsync(target) → the winner");
             });
 
         await run.CheckAsync(Store, "GetClaimsAsync works for a new user",

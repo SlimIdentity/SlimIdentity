@@ -338,6 +338,10 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
   events.
 - Passkeys get a random 32-byte WebAuthn user handle instead of the user id (`SlimPasskey.UserHandle`, new column in
   the EF Core entity and the templates). Existing passkeys keep the user id as their handle.
+- Conformance kit: `UpdateSecurityStateAsync` must leave `IsActive` and the address alone, `UpdatePasswordHashAsync`
+  and `UpdateEmailAsync` must write nothing else, `UpdateEmailAsync` must accept a new spelling of the user's own
+  address and let exactly one of parallel changes to one address win, and lookups must ignore case beyond ASCII.
+  Every race check runs `SlimConformanceOptions.RaceRounds` times (default 5) after warming up the connections.
 
 ### Fixed
 

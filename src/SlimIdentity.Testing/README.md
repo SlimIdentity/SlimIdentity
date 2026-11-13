@@ -33,7 +33,7 @@ Works with xUnit, NUnit, MSTest or a console app – the package has no test-fra
 
 | Store | Rules |
 | :--- | :--- |
-| `ISlimUserStore` | create / find; case-insensitive lookup; `CreateAsync` returns `null` for a taken address – also for parallel registrations; all security fields persisted; **parallel** `TryBeginAttemptAsync` reserves every attempt exactly once and exactly one locks at the threshold; separate counters for password and second factor; `UpdateSecurityStateAsync` never writes the counters; bookkeeping never overwrites hash or stamp; conditional rehash; e-mail change refuses taken addresses |
+| `ISlimUserStore` | create / find; case-insensitive lookup, also beyond ASCII; `CreateAsync` returns `null` for a taken address – also for parallel registrations; all security fields persisted; **parallel** `TryBeginAttemptAsync` reserves every attempt exactly once and exactly one locks at the threshold; separate counters for password and second factor; `UpdateSecurityStateAsync` never writes the counters, `IsActive` or the address; rehash and e-mail change write nothing else; bookkeeping never overwrites hash or stamp; conditional rehash; e-mail change refuses taken addresses, **also in parallel**, and accepts a new spelling of the own address |
 | `ISlimTwoFactorStore` | TOTP secret stored unchanged (length!); recovery codes single use, per user, **also in parallel**; code and challenge markers monotonic, per user, **also in parallel**, on separate columns |
 | `ISlimRefreshTokenStore` | single use, **also in parallel**; expired tokens rejected |
 | `ISlimSessionStore` | round trip; touch; revoke one / all / all but current |
@@ -58,4 +58,6 @@ SlimIdentity store conformance: 21 of 22 checks passed.
   their `DbContext` / connection as you do in the application.
 - The checks create users under `@conformance.invalid` (configurable) and **do not delete them**. Never run them
   against production data.
+- Every race check runs `RaceRounds` times (default 5) after warming up `Parallelism` connections, so a race
+  that a single round happens to miss is still found. Raise both in `SlimConformanceOptions` for a more thorough run.
 - `SlimStoreConformance.RunAsync` returns the report without throwing, e.g. to print it.

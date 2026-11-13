@@ -168,12 +168,15 @@ public sealed class EntityFrameworkStoreTests
         return sp;
     }
 
+    // SQLite serializes all writes, so repeated race rounds find little there; the server databases run the default.
+    private static readonly SlimConformanceOptions Sqlite = new() { RaceRounds = 2 };
+
     [Fact]
     public async Task Guid_keys_honour_all_store_contracts_on_SQLite()
     {
         var file = SqliteFile();   // once – the options callback runs per scope
         await using var sp = await BuildAsync<GuidContext, GuidUser, Guid>(o => o.UseSqlite(file), wal: true);
-        var report = await SlimStoreConformance.VerifyAsync(sp);
+        var report = await SlimStoreConformance.VerifyAsync(sp, Sqlite);
         Assert.Equal(6, report.Results.Select(r => r.Store).Distinct().Count());   // user, 2FA, refresh, sessions, external logins, passkeys
     }
 
@@ -248,7 +251,7 @@ public sealed class EntityFrameworkStoreTests
     {
         var file = SqliteFile();
         await using var sp = await BuildAsync<IntContext, IntUser, int>(o => o.UseSqlite(file), wal: true);
-        await SlimStoreConformance.VerifyAsync(sp);
+        await SlimStoreConformance.VerifyAsync(sp, Sqlite);
     }
 
     [Fact]
@@ -256,7 +259,7 @@ public sealed class EntityFrameworkStoreTests
     {
         var file = SqliteFile();
         await using var sp = await BuildAsync<LongContext, LongUser, long>(o => o.UseSqlite(file), wal: true);
-        await SlimStoreConformance.VerifyAsync(sp);
+        await SlimStoreConformance.VerifyAsync(sp, Sqlite);
     }
 
     [Fact]
@@ -264,7 +267,7 @@ public sealed class EntityFrameworkStoreTests
     {
         var file = SqliteFile();
         await using var sp = await BuildAsync<StringContext, StringUser, string>(o => o.UseSqlite(file), wal: true);
-        await SlimStoreConformance.VerifyAsync(sp);
+        await SlimStoreConformance.VerifyAsync(sp, Sqlite);
     }
 
     [SkippableFact]

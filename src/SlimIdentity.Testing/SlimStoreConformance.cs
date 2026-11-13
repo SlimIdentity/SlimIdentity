@@ -55,12 +55,14 @@ public static class SlimStoreConformance
         ArgumentNullException.ThrowIfNull(services);
         options ??= new SlimConformanceOptions();
         if (options.Parallelism < 2) throw new ArgumentOutOfRangeException(nameof(options), "Parallelism must be at least 2.");
+        if (options.RaceRounds < 1) throw new ArgumentOutOfRangeException(nameof(options), "RaceRounds must be at least 1.");
 
         var access = new StoreAccess(services);
         if (!access.Has<ISlimUserStore>())
             throw new InvalidOperationException("SlimStoreConformance: no ISlimUserStore is registered in the service provider.");
 
         var run = new ConformanceRun(access, options, ct);
+        await run.WarmUpAsync().ConfigureAwait(false);
         await UserStoreChecks.RunAsync(run).ConfigureAwait(false);
         if (access.Has<ISlimTwoFactorStore>()) await TwoFactorStoreChecks.RunAsync(run).ConfigureAwait(false);
         if (access.Has<ISlimRefreshTokenStore>()) await RefreshTokenStoreChecks.RunAsync(run).ConfigureAwait(false);
@@ -77,6 +79,12 @@ public sealed class SlimConformanceOptions
 {
     /// <summary>Number of parallel calls in the concurrency checks (at least 2). Default 8.</summary>
     public int Parallelism { get; set; } = 8;
+
+    /// <summary>
+    /// How often each concurrency check runs, each time on fresh data (at least 1). Default 5: a store that checks
+    /// first and writes afterwards can win a single race by chance.
+    /// </summary>
+    public int RaceRounds { get; set; } = 5;
 
     /// <summary>
     /// Domain of the generated test addresses (<c>slim-&lt;guid&gt;@domain</c>). Default <c>conformance.invalid</c>

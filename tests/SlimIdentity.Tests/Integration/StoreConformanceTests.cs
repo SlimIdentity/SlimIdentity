@@ -49,8 +49,54 @@ public sealed class StoreConformanceTests
         Assert.Contains(failed, r => r.Contains("only while the whole stamp is unchanged"));
         Assert.Contains(failed, r => r.Contains("exactly one wins"));
         Assert.Contains(failed, r => r.Contains("confirmation and stamp in one step"));
+        Assert.Contains(failed, r => r.Contains("beyond ASCII"));
+        Assert.Contains(failed, r => r.Contains("leaves IsActive and the address alone"));
+        Assert.Contains(failed, r => r.Contains("write nothing else"));
+        Assert.Contains(failed, r => r.Contains("new spelling of the own address"));
+        Assert.Contains(failed, r => r.Contains("parallel e-mail changes"));
         Assert.Contains("fix:", ex.Message);
         Assert.Contains(ex.Report.Results, r => r.Passed);   // the correct parts are still reported as passed
+    }
+
+    [Fact]
+    public async Task Naive_capability_stores_are_reported_with_the_violated_rules()
+    {
+        await using var services = new ServiceCollection()
+            .AddSingleton(TimeProvider.System)
+            .AddSingleton<ISlimUserStore, TestUserStore>()
+            .AddSingleton<ISlimTwoFactorStore, NaiveTwoFactorStore>()
+            .AddSingleton<ISlimRefreshTokenStore, NaiveRefreshTokenStore>()
+            .AddSingleton<ISlimSessionStore, NaiveSessionStore>()
+            .AddSingleton<ISlimExternalLoginStore, NaiveExternalLoginStore>()
+            .AddSingleton<ISlimPasskeyStore, NaivePasskeyStore>()
+            .AddSingleton<ISlimApiKeyStore>(new PrefixApiKeyStore(ValidKey.Hash))
+            .BuildServiceProvider();
+
+        var ex = await Assert.ThrowsAsync<SlimStoreConformanceException>(() =>
+            SlimStoreConformance.VerifyAsync(services, new SlimConformanceOptions { ApiKey = ValidKey.Key }));
+        var failed = ex.Report.Failures.Select(f => $"{f.Store}: {f.Rule}").ToList();
+
+        Assert.All(ex.Report.Results.Where(r => r.Store == nameof(ISlimUserStore)), r => Assert.True(r.Passed, r.Rule));
+        string[] expected =
+        [
+            "ISlimTwoFactorStore: a recovery code is accepted once even under parallel requests",
+            "ISlimTwoFactorStore: TryMarkCodeUsedAsync accepts a value once even under parallel requests",
+            "ISlimTwoFactorStore: TryMarkChallengeUsedAsync accepts a value once even under parallel requests",
+            "ISlimTwoFactorStore: codes and challenges are tracked independently",
+            "ISlimRefreshTokenStore: expired refresh tokens are not returned",
+            "ISlimRefreshTokenStore: a refresh token is consumed once even under parallel requests",
+            "ISlimSessionStore: TouchAsync updates last-seen and expiry",
+            "ISlimSessionStore: revoked sessions are gone – one, all, or all but the current",
+            "ISlimExternalLoginStore: provider keys are compared case-sensitively",
+            "ISlimExternalLoginStore: an external identity stays linked to its first user",
+            "ISlimExternalLoginStore: RemoveExternalLoginAsync removes exactly one link of its user",
+            "ISlimPasskeyStore: a credential id is registered once",
+            "ISlimPasskeyStore: TryRecordUseAsync is single use and compare-and-set",
+            "ISlimPasskeyStore: a challenge is single use even when the counter stays 0 (synced passkeys)",
+            "ISlimApiKeyStore: unknown and malformed key hashes are rejected",
+            "ISlimApiKeyStore: a valid key returns its owner – and only for its exact hash",
+        ];
+        Assert.All(expected, rule => Assert.Contains(rule, failed));
     }
 
     private static readonly (string Key, string Hash) ValidKey = SlimApiKeys.Generate();
@@ -119,14 +165,17 @@ public sealed class StoreConformanceTests
 
         public Task UpdatePasswordHashAsync(SlimUser user, string currentHash, string newHash, CancellationToken ct)
         {
-            _users[user.Id].PasswordHash = newHash;   // ignores currentHash
-            return Task.CompletedTask;
+            user.PasswordHash = newHash;   // ignores currentHash
+            return UpdateSecurityStateAsync(user, string.Empty, ct);   // writes back the whole (outdated) user
         }
 
-        public Task<SlimEmailUpdateResult> UpdateEmailAsync(SlimUser user, string newEmail, string expectedStamp, string newStamp, CancellationToken ct)
+        public async Task<SlimEmailUpdateResult> UpdateEmailAsync(SlimUser user, string newEmail, string expectedStamp, string newStamp, CancellationToken ct)
         {
-            (_users[user.Id].Email, _users[user.Id].SecurityStamp) = (newEmail, newStamp);   // ignores expectedStamp and other accounts
-            return Task.FromResult(SlimEmailUpdateResult.Updated);
+            // ignores expectedStamp; checks before writing and counts the own row as "taken"
+            if (_users.Values.Any(u => string.Equals(u.Email, newEmail, StringComparison.OrdinalIgnoreCase))) return SlimEmailUpdateResult.EmailTaken;
+            await Task.Delay(5, ct);
+            (_users[user.Id].Email, _users[user.Id].SecurityStamp) = (newEmail, newStamp);
+            return SlimEmailUpdateResult.Updated;
         }
 
         public Task<IReadOnlyCollection<Claim>> GetClaimsAsync(SlimUser user, CancellationToken ct) =>
@@ -138,5 +187,185 @@ public sealed class StoreConformanceTests
             EmailConfirmed = u.EmailConfirmed, FailedLoginAttempts = u.FailedLoginAttempts, LockoutEndUtc = u.LockoutEndUtc,
             TwoFactorEnabled = u.TwoFactorEnabled,
         };
+    }
+
+    private sealed class PrefixApiKeyStore(string validHash) : ISlimApiKeyStore
+    {
+        public Task<IReadOnlyCollection<Claim>?> ValidateApiKeyAsync(string keyHash, CancellationToken ct) =>   // LIKE @hash + '%'
+            Task.FromResult<IReadOnlyCollection<Claim>?>(validHash.StartsWith(keyHash, StringComparison.Ordinal) ? [new Claim(SlimClaimTypes.UserId, "client:conformance")] : null);
+    }
+
+    /// <summary>Check-then-delete recovery codes; one shared, check-then-set column for code and challenge.</summary>
+    private sealed class NaiveTwoFactorStore : ISlimTwoFactorStore
+    {
+        private readonly ConcurrentDictionary<string, string> _secrets = new();
+        private readonly ConcurrentDictionary<string, List<string>> _codes = new();
+        private readonly ConcurrentDictionary<string, long> _lastUsed = new();
+
+        public Task<string?> GetTotpSecretAsync(SlimUser user, CancellationToken ct) => Task.FromResult(_secrets.TryGetValue(user.Id, out var s) ? s : null);
+
+        public Task SetTotpSecretAsync(SlimUser user, string protectedSecret, CancellationToken ct)
+        {
+            if (protectedSecret.Length == 0) _secrets.TryRemove(user.Id, out _);
+            else _secrets[user.Id] = protectedSecret;
+            return Task.CompletedTask;
+        }
+
+        public Task StoreRecoveryCodesAsync(SlimUser user, IEnumerable<string> hashedCodes, CancellationToken ct)
+        {
+            _codes[user.Id] = hashedCodes.ToList();
+            return Task.CompletedTask;
+        }
+
+        public async Task<bool> ValidateAndConsumeRecoveryCodeAsync(SlimUser user, string hashedCode, CancellationToken ct)
+        {
+            if (!_codes.TryGetValue(user.Id, out var codes) || !codes.Contains(hashedCode)) return false;
+            await Task.Delay(5, ct);
+            lock (codes) codes.Remove(hashedCode);
+            return true;
+        }
+
+        public Task<bool> TryMarkCodeUsedAsync(SlimUser user, long usedAt, CancellationToken ct) => MarkAsync(user, usedAt, ct);
+
+        public Task<bool> TryMarkChallengeUsedAsync(SlimUser user, long issuedAt, CancellationToken ct) => MarkAsync(user, issuedAt, ct);
+
+        private async Task<bool> MarkAsync(SlimUser user, long value, CancellationToken ct)
+        {
+            if (_lastUsed.TryGetValue(user.Id, out var last) && last >= value) return false;
+            await Task.Delay(5, ct);
+            _lastUsed[user.Id] = value;
+            return true;
+        }
+    }
+
+    /// <summary>No expiry check; check-then-delete.</summary>
+    private sealed class NaiveRefreshTokenStore : ISlimRefreshTokenStore
+    {
+        private readonly ConcurrentDictionary<string, string> _tokens = new();
+
+        public Task StoreRefreshTokenAsync(string userId, string tokenHash, DateTimeOffset expiresAt, CancellationToken ct)
+        {
+            _tokens[tokenHash] = userId;
+            return Task.CompletedTask;
+        }
+
+        public async Task<string?> ValidateAndConsumeRefreshTokenAsync(string tokenHash, CancellationToken ct)
+        {
+            if (!_tokens.TryGetValue(tokenHash, out var userId)) return null;
+            await Task.Delay(5, ct);
+            _tokens.TryRemove(tokenHash, out _);
+            return userId;
+        }
+    }
+
+    /// <summary>TouchAsync upserts; RevokeAllAsync ignores the excepted session.</summary>
+    private sealed class NaiveSessionStore : ISlimSessionStore
+    {
+        private readonly ConcurrentDictionary<string, SlimSession> _sessions = new();
+        private readonly ConcurrentDictionary<string, SlimSession> _ever = new();
+
+        public Task CreateAsync(SlimSession session, CancellationToken ct)
+        {
+            _sessions[session.Id] = _ever[session.Id] = session;
+            return Task.CompletedTask;
+        }
+
+        public Task<SlimSession?> FindAsync(string sessionId, CancellationToken ct) => Task.FromResult(_sessions.TryGetValue(sessionId, out var s) ? s : null);
+
+        public Task<IReadOnlyCollection<SlimSession>> ListAsync(string userId, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyCollection<SlimSession>>(_sessions.Values.Where(s => s.UserId == userId).ToList());
+
+        public Task TouchAsync(string sessionId, DateTimeOffset lastSeenUtc, DateTimeOffset expiresUtc, CancellationToken ct)
+        {
+            var session = _ever[sessionId];
+            session.LastSeenUtc = lastSeenUtc;
+            session.ExpiresUtc = expiresUtc;
+            _sessions[sessionId] = session;
+            return Task.CompletedTask;
+        }
+
+        public Task RevokeAsync(string sessionId, CancellationToken ct)
+        {
+            _sessions.TryRemove(sessionId, out _);
+            return Task.CompletedTask;
+        }
+
+        public Task RevokeAllAsync(string userId, string? exceptSessionId, CancellationToken ct)
+        {
+            foreach (var s in _sessions.Values.Where(s => s.UserId == userId).ToList()) _sessions.TryRemove(s.Id, out _);
+            return Task.CompletedTask;
+        }
+    }
+
+    /// <summary>Case-insensitive keys (like SQL Server's default collation); linking upserts.</summary>
+    private sealed class NaiveExternalLoginStore(ISlimUserStore users) : ISlimExternalLoginStore
+    {
+        private readonly ConcurrentDictionary<string, (string UserId, string Provider, string Key)> _links = new(StringComparer.OrdinalIgnoreCase);
+
+        public async Task<SlimUser?> FindByExternalLoginAsync(string provider, string providerKey, CancellationToken ct) =>
+            _links.TryGetValue($"{provider}|{providerKey}", out var link) ? await users.FindByIdAsync(link.UserId, ct) : null;
+
+        public Task LinkExternalLoginAsync(string userId, string provider, string providerKey, CancellationToken ct)
+        {
+            _links[$"{provider}|{providerKey}"] = (userId, provider, providerKey);
+            return Task.CompletedTask;
+        }
+
+        public Task RemoveExternalLoginsAsync(string userId, CancellationToken ct)
+        {
+            foreach (var l in _links.Where(l => l.Value.UserId == userId).ToList()) _links.TryRemove(l.Key, out _);
+            return Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyList<SlimExternalLogin>> GetExternalLoginsAsync(string userId, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<SlimExternalLogin>>(_links.Values.Where(l => l.UserId == userId).Select(l => new SlimExternalLogin(l.Provider, l.Key)).ToList());
+
+        public Task<bool> RemoveExternalLoginAsync(string userId, string provider, string providerKey, CancellationToken ct) =>
+            Task.FromResult(_links.TryRemove($"{provider}|{providerKey}", out _));   // ignores the owner
+    }
+
+    /// <summary>Check-then-insert; TryRecordUseAsync reads, waits and writes without a challenge check.</summary>
+    private sealed class NaivePasskeyStore : ISlimPasskeyStore
+    {
+        private readonly ConcurrentDictionary<string, SlimPasskey> _keys = new();
+        private static string Key(byte[] id) => Convert.ToHexString(id);
+
+        public Task<IReadOnlyList<SlimPasskey>> GetPasskeysAsync(string userId, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<SlimPasskey>>(_keys.Values.Where(p => p.UserId == userId).ToList());
+
+        public Task<SlimPasskey?> FindPasskeyAsync(byte[] credentialId, CancellationToken ct) =>
+            Task.FromResult(_keys.TryGetValue(Key(credentialId), out var p) ? p : null);
+
+        public async Task<bool> AddPasskeyAsync(SlimPasskey passkey, CancellationToken ct)
+        {
+            if (_keys.ContainsKey(Key(passkey.CredentialId))) return false;
+            await Task.Delay(5, ct);
+            _keys[Key(passkey.CredentialId)] = passkey;
+            return true;
+        }
+
+        public async Task<bool> TryRecordUseAsync(byte[] credentialId, uint expectedSignCount, uint signCount, long challengeIssuedAt, DateTimeOffset usedUtc, bool backedUp, CancellationToken ct)
+        {
+            if (!_keys.TryGetValue(Key(credentialId), out var p) || p.SignCount != expectedSignCount) return false;
+            await Task.Delay(5, ct);
+            (p.SignCount, p.LastChallengeAt, p.LastUsedUtc, p.BackedUp) = (signCount, challengeIssuedAt, usedUtc, backedUp);
+            return true;
+        }
+
+        public Task<bool> RenamePasskeyAsync(string userId, byte[] credentialId, string name, CancellationToken ct)
+        {
+            if (!_keys.TryGetValue(Key(credentialId), out var p) || p.UserId != userId) return Task.FromResult(false);
+            p.Name = name;
+            return Task.FromResult(true);
+        }
+
+        public Task RemovePasskeysAsync(string userId, CancellationToken ct)
+        {
+            foreach (var (id, p) in _keys) if (p.UserId == userId) _keys.TryRemove(id, out _);
+            return Task.CompletedTask;
+        }
+
+        public Task<bool> RemovePasskeyAsync(string userId, byte[] credentialId, CancellationToken ct) =>
+            Task.FromResult(_keys.TryGetValue(Key(credentialId), out var p) && p.UserId == userId && _keys.TryRemove(Key(credentialId), out _));
     }
 }

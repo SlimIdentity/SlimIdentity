@@ -26,8 +26,9 @@ public interface ISlimUserStore
     /// <paramref name="expectedStamp"/> (the whole string, ordinal); returns whether they were written, e.g.
     /// <c>UPDATE users SET … WHERE id = @id AND COALESCE(security_stamp, '') = @expectedStamp</c> (affected rows = 1).
     /// A missing stamp (<c>NULL</c>) equals an empty <paramref name="expectedStamp"/>.
-    /// Must <b>not</b> write the failed-attempt counters or lockout ends – those change only through
-    /// <see cref="TryBeginAttemptAsync"/> and <see cref="ResetFailedAttemptsAsync"/>.
+    /// Writes <b>no other field</b>: not the failed-attempt counters or lockout ends (those change only through
+    /// <see cref="TryBeginAttemptAsync"/> and <see cref="ResetFailedAttemptsAsync"/>), not <c>IsActive</c> and not the
+    /// address (<see cref="UpdateEmailAsync"/>) – an outdated copy must never unblock an account.
     /// </summary>
     /// <remarks>
     /// SlimIdentity changes the stamp with every write, so a request that read the user before a concurrent change
@@ -84,7 +85,7 @@ public interface ISlimUserStore
     /// Transparent rehash after a successful sign-in (outdated hash parameters): replaces the password hash with
     /// <paramref name="newHash"/> <b>only if</b> it still equals <paramref name="currentHash"/>, e.g.
     /// <c>UPDATE users SET password_hash = @newHash WHERE id = @id AND password_hash = @currentHash</c>.
-    /// A password change in the meantime therefore always wins.
+    /// A password change in the meantime therefore always wins. Writes no other field.
     /// </summary>
     Task UpdatePasswordHashAsync(SlimUser user, string currentHash, string newHash, CancellationToken ct);
 
@@ -92,8 +93,8 @@ public interface ISlimUserStore
     /// Changes the login e-mail address after the new address was confirmed, in one write: the address (including any
     /// normalized lookup column), <c>EmailConfirmed = true</c> and the security stamp <paramref name="newStamp"/> –
     /// <b>only if</b> the stored stamp still equals <paramref name="expectedStamp"/> (as in
-    /// <see cref="UpdateSecurityStateAsync"/>). Nothing must be changed unless the result is
-    /// <see cref="SlimEmailUpdateResult.Updated"/>.
+    /// <see cref="UpdateSecurityStateAsync"/>). Writes no other field, and nothing unless the result is
+    /// <see cref="SlimEmailUpdateResult.Updated"/>. A new spelling of the user's own address is not taken.
     /// </summary>
     /// <returns>
     /// <see cref="SlimEmailUpdateResult.EmailTaken"/> if another account uses the address (e.g. unique-index

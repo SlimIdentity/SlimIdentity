@@ -51,6 +51,33 @@ internal sealed class ConformanceRun(StoreAccess access, SlimConformanceOptions 
         }
     }
 
+    /// <summary>
+    /// A check whose outcome depends on timing: run <see cref="SlimConformanceOptions.RaceRounds"/> times, each on fresh
+    /// data – a check-then-write store may win a single race by chance.
+    /// </summary>
+    public Task CheckRaceAsync(string store, string rule, string hint, Func<Task> body) =>
+        CheckAsync(store, rule, hint, async () =>
+        {
+            for (var round = 1; round <= options.RaceRounds; round++)
+            {
+                try
+                {
+                    await body().ConfigureAwait(false);
+                }
+                catch (ConformanceFailure f) when (options.RaceRounds > 1)
+                {
+                    throw new ConformanceFailure($"Round {round} of {options.RaceRounds}: {f.Message}");
+                }
+            }
+        });
+
+    /// <summary>
+    /// Opens <see cref="SlimConformanceOptions.Parallelism"/> connections at once before the first race, so the races
+    /// are not serialized by connections being opened one after another.
+    /// </summary>
+    public Task WarmUpAsync() =>
+        InParallelAsync(_ => access.UseAsync<ISlimUserStore, SlimUser?>(s => s.FindByIdAsync(Guid.NewGuid().ToString(), ct)));
+
     public SlimConformanceReport ToReport() => new(_results.ToArray());
 
     // ---------------------------------------------------------------- test data
