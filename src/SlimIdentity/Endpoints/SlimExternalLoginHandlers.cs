@@ -42,22 +42,22 @@ internal sealed class SlimExternalLoginHandlers(
     public async Task<IResult> ChallengeAsync(string provider, string? returnUrl, bool? useCookies, string? codeChallenge, string? codeChallengeMethod, bool link = false)
     {
         var scheme = await FindRemoteSchemeAsync(provider);
-        if (scheme is null) return SlimResults.Status("unknown_provider", $"Provider '{provider}' is not configured.", StatusCodes.Status404NotFound);
+        if (scheme is null) return SlimResults.Status(SlimErrorCodes.UnknownProvider, $"Provider '{provider}' is not configured.", StatusCodes.Status404NotFound);
         // the link flow signs nobody in – it hands a link code to the client that started it (PKCE), whatever its mode
         var cookies = false;
         if (!link && !SlimModes.TryResolve(O, useCookies, out cookies, out var modeError)) return modeError!;
 
         var target = ValidateReturnUrl(returnUrl);
-        if (target is null) return SlimResults.BadRequest("invalid_return_url", "The returnUrl is not allowed.");
+        if (target is null) return SlimResults.BadRequest(SlimErrorCodes.InvalidReturnUrl, "The returnUrl is not allowed.");
 
         // Bearer clients receive a one-time code in the redirect – an app that intercepts the redirect (custom URI
         // scheme, history, logs) must not be able to redeem it. PKCE (RFC 7636, S256) binds it to this client.
         if (!cookies || link)
         {
             if (string.IsNullOrEmpty(codeChallenge))
-                return SlimResults.BadRequest("code_challenge_required", "Bearer clients must send a PKCE code_challenge (S256).");
+                return SlimResults.BadRequest(SlimErrorCodes.CodeChallengeRequired, "Bearer clients must send a PKCE code_challenge (S256).");
             if (!string.Equals(codeChallengeMethod ?? "S256", "S256", StringComparison.Ordinal) || !IsS256Challenge(codeChallenge))
-                return SlimResults.BadRequest("invalid_code_challenge", "code_challenge must be BASE64URL(SHA256(code_verifier)) with code_challenge_method=S256.");
+                return SlimResults.BadRequest(SlimErrorCodes.InvalidCodeChallenge, "code_challenge must be BASE64URL(SHA256(code_verifier)) with code_challenge_method=S256.");
         }
 
         var properties = new AuthenticationProperties
@@ -81,25 +81,25 @@ internal sealed class SlimExternalLoginHandlers(
         await Http.SignOutAsync(SlimIdentityDefaults.ExternalScheme); // the temporary cookie is never reused
 
         if (!external.Succeeded || external.Principal is null || external.Properties is null)
-            return SlimResults.Status("external_login_failed", "External authentication failed.", StatusCodes.Status401Unauthorized);
+            return SlimResults.Status(SlimErrorCodes.ExternalLoginFailed, "External authentication failed.", StatusCodes.Status401Unauthorized);
 
         var items = external.Properties.Items;
         var returnUrl = items.TryGetValue(ItemReturnUrl, out var r) && r is not null ? r : O.ExternalLogin.DefaultReturnUrl;
         if (!items.TryGetValue(ItemProvider, out var storedProvider) || !string.Equals(storedProvider, provider, StringComparison.Ordinal))
-            return Redirect(returnUrl, "slim_error", "provider_mismatch");
+            return Redirect(returnUrl, "slim_error", SlimErrorCodes.ProviderMismatch);
         var cookies = items.TryGetValue(ItemUseCookies, out var c) && c == "true";
         var codeChallenge = items.TryGetValue(ItemCodeChallenge, out var cc) ? cc : null;
-        if (!cookies && string.IsNullOrEmpty(codeChallenge)) return Redirect(returnUrl, "slim_error", "code_challenge_required");
+        if (!cookies && string.IsNullOrEmpty(codeChallenge)) return Redirect(returnUrl, "slim_error", SlimErrorCodes.CodeChallengeRequired);
 
         var principal = external.Principal;
         var providerKey = principal.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? principal.FindFirst("sub")?.Value;
-        if (string.IsNullOrEmpty(providerKey)) return Redirect(returnUrl, "slim_error", "missing_provider_key");
+        if (string.IsNullOrEmpty(providerKey)) return Redirect(returnUrl, "slim_error", SlimErrorCodes.MissingProviderKey);
 
         // link flow: nobody is signed in here – the client that started the flow redeems the code with its verifier,
         // its session and its password (POST /link/external)
         if (items.TryGetValue(ItemLink, out var linkFlag) && linkFlag == "true")
         {
-            if (string.IsNullOrEmpty(codeChallenge)) return Redirect(returnUrl, "slim_error", "code_challenge_required");
+            if (string.IsNullOrEmpty(codeChallenge)) return Redirect(returnUrl, "slim_error", SlimErrorCodes.CodeChallengeRequired);
             var linkCode = workflow.Protect(SlimWorkflowTokens.ExternalLinkPurpose,
                 new SlimExternalLinkPayload(provider, providerKey, Convert.ToHexString(RandomNumberGenerator.GetBytes(16)), codeChallenge),
                 SlimIdentityDefaults.ExternalExchangeCodeLifetime);
@@ -117,7 +117,7 @@ internal sealed class SlimExternalLoginHandlers(
         var user = await externalStore.FindByExternalLoginAsync(provider, providerKey, ct);
         if (user is null)
         {
-            if (!SlimRegistrationService.IsValidEmail(email)) return Redirect(returnUrl, "slim_error", "email_required");
+            if (!SlimRegistrationService.IsValidEmail(email)) return Redirect(returnUrl, "slim_error", SlimErrorCodes.EmailRequired);
 
             var existing = await store.FindByEmailAsync(email, ct);
             if (existing is not null)
@@ -130,7 +130,7 @@ internal sealed class SlimExternalLoginHandlers(
                 {
                     Log.ExternalLoginConflict(logger, provider, existing.Id);
                     metrics.ExternalLogin(provider, "conflict");
-                    return Redirect(returnUrl, "slim_error", "account_conflict"); // 409 semantics
+                    return Redirect(returnUrl, "slim_error", SlimErrorCodes.AccountConflict); // 409 semantics
                 }
                 if (!existing.EmailConfirmed)
                 {
@@ -150,7 +150,7 @@ internal sealed class SlimExternalLoginHandlers(
                     {
                         // the account changed meanwhile (confirmed, password reset …): the next attempt follows the rules above
                         metrics.ExternalLogin(provider, "conflict");
-                        return Redirect(returnUrl, "slim_error", "account_conflict");
+                        return Redirect(returnUrl, "slim_error", SlimErrorCodes.AccountConflict);
                     }
                     await externalStore.RemoveExternalLoginsAsync(existing.Id, ct);
                     if (services.GetService<ISlimPasskeySignInMethods>() is { } passkeys)
@@ -173,14 +173,14 @@ internal sealed class SlimExternalLoginHandlers(
             }
             else
             {
-                if (!O.ExternalLogin.AllowAutoRegistration) return Redirect(returnUrl, "slim_error", "registration_disabled");
+                if (!O.ExternalLogin.AllowAutoRegistration) return Redirect(returnUrl, "slim_error", SlimErrorCodes.RegistrationDisabled);
 
                 // An account is only created for an address the provider has verified: otherwise anyone whose provider
                 // account merely *claims* an address would own an account for it (pre-account hijacking).
                 if (!emailVerified)
                 {
                     metrics.ExternalLogin(provider, "rejected");
-                    return Redirect(returnUrl, "slim_error", "email_not_verified");
+                    return Redirect(returnUrl, "slim_error", SlimErrorCodes.EmailNotVerified);
                 }
 
                 if (await hooks.CheckRegistrationAsync(email, provider, ct) is { } veto)
@@ -194,7 +194,7 @@ internal sealed class SlimExternalLoginHandlers(
                 {
                     // the address was registered concurrently – never link silently; the next attempt follows the rules above
                     metrics.ExternalLogin(provider, "conflict");
-                    return Redirect(returnUrl, "slim_error", "account_conflict");
+                    return Redirect(returnUrl, "slim_error", SlimErrorCodes.AccountConflict);
                 }
                 if (!user.EmailConfirmed)
                     await store.WriteSecurityStateAsync(user, u => u.EmailConfirmed = true, ct);
@@ -205,11 +205,11 @@ internal sealed class SlimExternalLoginHandlers(
             }
         }
 
-        // the provider proved the account – a lockout of the password or the second factor does not apply
-        var rejection = !user.IsActive ? "account_disabled"
-            : O.SignIn.RequireConfirmedEmail && !user.EmailConfirmed ? "email_not_confirmed"
-            : user.PasswordChangeRequired ? "password_change_required"   // the start password is replaced first
-            : null;
+        // the provider proved the account – a lockout of the password or the second factor does not apply. Bearer
+        // clients pass the second factor at the exchange; a start password is replaced first, with the password.
+        var decision = SlimSignInChain.Evaluate(user, SlimSignInProofs.None, O);
+        var rejection = decision.Refusal
+            ?? (decision.Next is { } next && next != SlimSignInActions.SecondFactor ? SlimSignInChain.ErrorCode(next) : null);
         if (rejection is not null)
         {
             metrics.ExternalLogin(provider, "rejected");
@@ -229,25 +229,25 @@ internal sealed class SlimExternalLoginHandlers(
         }
 
         // the browser may carry a "remember this device" cookie from an earlier second factor
-        var remembered = user.TwoFactorEnabled
+        var remembered = decision.Next == SlimSignInActions.SecondFactor
             && services.GetService<SlimTwoFactorService>() is { } twoFactor
             && twoFactor.IsRememberedDevice(user, Http, cookieMode: true, null);   // only cookie sign-ins get here
 
-        if (user.TwoFactorEnabled && !remembered)
+        if (decision.Next == SlimSignInActions.SecondFactor && !remembered)
         {
             var challenge = await login.BeginTwoFactorAsync(user, cookies, false, ct);
-            if (challenge is null) return Redirect(returnUrl, "slim_error", "two_factor_unavailable");
+            if (challenge is null) return Redirect(returnUrl, "slim_error", SlimErrorCodes.TwoFactorUnavailable);
             // the challenge stands for the passed first factor – fragment only, like the exchange code
             return RedirectWithFragment(returnUrl, new()
             {
-                ["slim_status"] = "requires_two_factor",
+                ["slim_status"] = SlimErrorCodes.RequiresTwoFactor,
                 ["preAuthToken"] = challenge.PreAuthToken!,
                 ["method"] = challenge.TwoFactorMethod!,
             });
         }
 
         var signedIn = await authManager.SignInCoreAsync(user, true, false, remembered ? SlimAuthManager.MethodRememberedDevice : SlimAuthManager.MethodExternal, null, null, false, ct);
-        return signedIn.Succeeded ? Results.Redirect(returnUrl) : Redirect(returnUrl, "slim_error", signedIn.Error ?? "sign_in_failed");
+        return signedIn.Succeeded ? Results.Redirect(returnUrl) : Redirect(returnUrl, "slim_error", signedIn.Error ?? SlimErrorCodes.SignInFailed);
     }
 
     // ------------------------------------------------------------------ POST /login/external/exchange
@@ -266,19 +266,25 @@ internal sealed class SlimExternalLoginHandlers(
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
 
         var user = await store.FindByIdAsync(payload.Uid, ct);
-        if (user is null || !user.IsActive || !SlimUser.IsSameSecurityState(user.SecurityStamp, payload.Stamp))
+        if (user is null || !SlimUser.IsSameSecurityState(user.SecurityStamp, payload.Stamp))
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
-        if (user.PasswordChangeRequired)
-            return SlimResults.Status("password_change_required",
+
+        // an inactive account makes the code invalid
+        var decision = SlimSignInChain.Evaluate(user, SlimSignInProofs.None, O);
+        if (decision.Refusal is not null) return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
+        if (decision.Next == SlimSignInActions.ChangePassword)
+            return SlimResults.Status(SlimErrorCodes.PasswordChangeRequired,
                 "The password was set by an administrator. Sign in with it once and choose your own password.", StatusCodes.Status403Forbidden);
+        if (decision.Next == SlimSignInActions.VerifyEmail)
+            return SlimResults.Status(SlimErrorCodes.EmailNotConfirmed, "The e-mail address has not been confirmed yet.", StatusCodes.Status403Forbidden);
 
         if (!SlimModes.TryResolve(O, false, out _, out var modeError)) return modeError!;
 
         // second factor, exactly like at /auth/login: a remembered device (token in the body) skips it
-        var remembered = user.TwoFactorEnabled
+        var remembered = decision.Next == SlimSignInActions.SecondFactor
             && services.GetService<SlimTwoFactorService>() is { } twoFactor
             && twoFactor.IsRememberedDevice(user, Http, cookieMode: false, request.TwoFactorRememberToken);
-        if (user.TwoFactorEnabled && !remembered)
+        if (decision.Next == SlimSignInActions.SecondFactor && !remembered)
         {
             var challenge = await login.BeginTwoFactorAsync(user, useCookies: false, rememberMe: false, ct);
             return challenge is null
@@ -304,7 +310,7 @@ internal sealed class SlimExternalLoginHandlers(
 
         // like a second factor: only on an account whose mailbox was proven (a registrant must not plant an identity)
         if (O.Email.Enabled && !user.EmailConfirmed)
-            return SlimResults.Status("email_not_confirmed", "Confirm your e-mail address before linking an external login.", StatusCodes.Status403Forbidden);
+            return SlimResults.Status(SlimErrorCodes.EmailNotConfirmed, "Confirm your e-mail address before linking an external login.", StatusCodes.Status403Forbidden);
 
         // a stolen session alone must not add a permanent way in: the password, or without one a fresh sign-in
         if (await credentials.ConfirmPasswordAsync(user, request.Password, Http, ct) is { } failure)
@@ -318,7 +324,7 @@ internal sealed class SlimExternalLoginHandlers(
         {
             return string.Equals(owner.Id, user.Id, StringComparison.Ordinal)
                 ? SlimResults.Status("external_login_linked")
-                : SlimResults.Status("external_login_taken", "This external account is linked to another account.", StatusCodes.Status409Conflict);
+                : SlimResults.Status(SlimErrorCodes.ExternalLoginTaken, "This external account is linked to another account.", StatusCodes.Status409Conflict);
         }
 
         await externalStore.LinkExternalLoginAsync(user.Id, payload.Provider, payload.ProviderKey, ct);
@@ -359,7 +365,7 @@ internal sealed class SlimExternalLoginHandlers(
         var started = properties?.Items.TryGetValue(ItemReturnUrl, out var url) == true ? url : null;
         var target = ValidateReturnUrl(started) ?? ValidateReturnUrl(null) ?? "/";
         Log.ExternalLoginRemoteFailure(logger, provider, error);
-        metrics.ExternalLogin(provider, error == "access_denied" ? "cancelled" : "failed");
+        metrics.ExternalLogin(provider, error == SlimErrorCodes.AccessDenied ? "cancelled" : "failed");
         await Redirect(target, "slim_error", error).ExecuteAsync(Http);
     }
 

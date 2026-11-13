@@ -46,10 +46,10 @@ internal sealed class SlimPasskeyHandlers(
         if (user is null) return error!;
         // like 2FA and linking: never on an unconfirmed account (the registrant may not own the address)
         if (O.Email.Enabled && !user.EmailConfirmed)
-            return SlimResults.Status("email_not_confirmed", "Confirm your e-mail address before adding a passkey.", StatusCodes.Status403Forbidden);
+            return SlimResults.Status(SlimErrorCodes.EmailNotConfirmed, "Confirm your e-mail address before adding a passkey.", StatusCodes.Status403Forbidden);
         // a passkey adds to a password, never replaces it: an SSO account gets no local sign-in method this way
         if (!await credentials.HasPasswordAsync(user, ct))
-            return SlimResults.Status("password_required", "The account needs a password before a passkey can be added.", StatusCodes.Status403Forbidden);
+            return SlimResults.Status(SlimErrorCodes.PasswordRequired, "The account needs a password before a passkey can be added.", StatusCodes.Status403Forbidden);
         // a new way in: a stolen session alone must not add one – the password
         if (await credentials.ConfirmPasswordAsync(user, request?.Password, Http, ct) is { } failure)
             return failure;
@@ -115,7 +115,7 @@ internal sealed class SlimPasskeyHandlers(
             CreatedUtc = time.GetUtcNow(),
         };
         if (!await passkeys.AddPasskeyAsync(passkey, ct))
-            return SlimResults.Status("passkey_exists", "This passkey is already registered.", StatusCodes.Status409Conflict);
+            return SlimResults.Status(SlimErrorCodes.PasskeyExists, "This passkey is already registered.", StatusCodes.Status409Conflict);
 
         Log.PasskeyAdded(logger, user.Id);
         await hooks.RaiseAsync(SlimEventTypes.PasskeyAdded, user.Id, SlimAuthManager.MethodPasskey, ct: ct);
@@ -178,24 +178,27 @@ internal sealed class SlimPasskeyHandlers(
             return Failed("counter");
         }
 
-        // the account before anything is recorded: an inactive or unconfirmed account leaves no trace on its passkey
+        // the account before anything is recorded: an inactive or unconfirmed account leaves no trace on its passkey.
+        // Possession and user verification are multi-factor on their own – no second factor follows.
         var user = await store.FindByIdAsync(passkey.UserId, ct);
-        if (user is not { IsActive: true }) return Failed("account");
-        if (O.SignIn.RequireConfirmedEmail && !user.EmailConfirmed)
-            return SlimResults.Status("email_not_confirmed", "The e-mail address has not been confirmed yet.", StatusCodes.Status403Forbidden);
-        // a start password set by an administrator is replaced first – no sign-in method gets around it
-        if (user.PasswordChangeRequired)
+        if (user is null) return Failed("account");
+        var decision = SlimSignInChain.Evaluate(user, SlimSignInProofs.SecondFactor, O);
+        if (decision.Refusal is not null) return Failed("account");
+        switch (decision.Next)
         {
-            metrics.Login("password_change_required", cookies);
-            return SlimResults.Status("password_change_required",
-                "The password was set by an administrator. Sign in with it once and choose your own password.", StatusCodes.Status403Forbidden);
+            case SlimSignInActions.VerifyEmail:
+                return SlimResults.Status(SlimErrorCodes.EmailNotConfirmed, "The e-mail address has not been confirmed yet.", StatusCodes.Status403Forbidden);
+            // a start password set by an administrator is replaced with the password – this entry cannot continue it
+            case SlimSignInActions.ChangePassword:
+                metrics.Login(SlimErrorCodes.PasswordChangeRequired, cookies);
+                return SlimResults.Status(SlimErrorCodes.PasswordChangeRequired,
+                    "The password was set by an administrator. Sign in with it once and choose your own password.", StatusCodes.Status403Forbidden);
         }
 
         // single use, atomically: this challenge must be newer than the last one used with this passkey
         if (!await passkeys.TryRecordUseAsync(credentialId, passkey.SignCount, authData.SignCount, state.IssuedAt, time.GetUtcNow(), authData.BackedUp, ct))
             return Failed("replay");
 
-        // possession + user verification: multi-factor on its own – no second factor follows
         var result = await authManager.SignInCoreAsync(user, cookies, request.RememberMe, SlimAuthManager.MethodPasskey, null, null, true, ct);
         metrics.Login(result.Succeeded ? "success" : "rejected", cookies);
         return SlimLoginHandlers.ToResult(result);
@@ -204,7 +207,7 @@ internal sealed class SlimPasskeyHandlers(
         {
             metrics.Login("passkey_rejected", cookies);
             Log.PasskeyRejected(logger, "sign-in", reason);
-            return SlimResults.Status("invalid_passkey", "The passkey could not be verified.", StatusCodes.Status401Unauthorized);
+            return SlimResults.Status(SlimErrorCodes.InvalidPasskey, "The passkey could not be verified.", StatusCodes.Status401Unauthorized);
         }
     }
 
@@ -215,7 +218,7 @@ internal sealed class SlimPasskeyHandlers(
         var (user, error) = await account.LoadCurrentUserAsync(forbidImpersonation: true, ct);
         if (user is null) return error!;
         if (CleanName(request?.Name) is not { } name)
-            return SlimResults.BadRequest("invalid_name", "The name must have 1–64 characters.");
+            return SlimResults.BadRequest(SlimErrorCodes.InvalidName, "The name must have 1–64 characters.");
         return SlimWebAuthn.FromBase64Url(request?.Id) is { } id && await passkeys.RenamePasskeyAsync(user.Id, id, name, ct)
             ? SlimResults.Status("passkey_renamed")
             : NotFound();
@@ -275,11 +278,11 @@ internal sealed class SlimPasskeyHandlers(
     }
 
     private static IResult NotFound() =>
-        SlimResults.Status("passkey_not_found", "This passkey is not registered for your account.", StatusCodes.Status404NotFound);
+        SlimResults.Status(SlimErrorCodes.PasskeyNotFound, "This passkey is not registered for your account.", StatusCodes.Status404NotFound);
 
     private IResult Rejected(string ceremony, string reason)
     {
         Log.PasskeyRejected(logger, ceremony, reason);
-        return SlimResults.BadRequest("invalid_passkey", "The passkey could not be verified.");
+        return SlimResults.BadRequest(SlimErrorCodes.InvalidPasskey, "The passkey could not be verified.");
     }
 }

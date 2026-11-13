@@ -321,7 +321,7 @@ public sealed class SlimAuthResponse
 public sealed class SlimLoginChallengeResponse
 {
     /// <summary><c>invalid_credentials</c>, <c>requires_two_factor</c> or <c>password_change_required</c>.</summary>
-    public string Status { get; init; } = "invalid_credentials";
+    public string Status { get; init; } = SlimErrorCodes.InvalidCredentials;
     /// <summary>Human-readable English description.</summary>
     public string? Message { get; init; }
     /// <summary>Short-lived token for <c>POST /auth/login/2fa</c>.</summary>

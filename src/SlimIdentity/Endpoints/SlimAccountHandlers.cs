@@ -155,7 +155,7 @@ internal sealed class SlimAccountHandlers(
         var newEmail = SlimEmailAddress.Normalize(request?.NewEmail);
         if (!IsValidEmail(newEmail)) return InvalidEmail("newEmail");
         if (string.Equals(newEmail, user.Email, StringComparison.OrdinalIgnoreCase))
-            return SlimResults.BadRequest("email_unchanged", "The new address equals the current one.");
+            return SlimResults.BadRequest(SlimErrorCodes.EmailUnchanged, "The new address equals the current one.");
 
         if (await credentials.ConfirmPasswordAsync(user, request!.Password, Http, ct) is { } failure)
             return failure;
@@ -200,7 +200,7 @@ internal sealed class SlimAccountHandlers(
             var outcome = await store.UpdateEmailAsync(user, payload.NewEmail, user.SecurityStamp ?? string.Empty, newStamp, ct);
             // the confirming person controls the new mailbox, so revealing that it is taken is fine here
             if (outcome == SlimEmailUpdateResult.EmailTaken)
-                return SlimResults.BadRequest("email_taken", "The address is already used by another account.");
+                return SlimResults.BadRequest(SlimErrorCodes.EmailTaken, "The address is already used by another account.");
             if (outcome == SlimEmailUpdateResult.Updated) break;
             // only the claims part changed in between: the link still stands for the current state
             var current = await store.FindByIdAsync(payload.Uid, ct);
@@ -240,7 +240,7 @@ internal sealed class SlimAccountHandlers(
         if (user is null) return SlimResults.InvalidToken();
 
         if (services.GetService<ISlimCustomPasswordValidator>() is not null)
-            return SlimResults.BadRequest("password_managed_externally",
+            return SlimResults.BadRequest(SlimErrorCodes.PasswordManagedExternally,
                 "Passwords are validated externally (LDAP / custom validator); invitations cannot set one.");
         if (await passwordPolicy.ValidateAsync(request!.Password, user.Email, ct) is { } errors)
             return SlimResults.Validation(errors);
@@ -256,8 +256,9 @@ internal sealed class SlimAccountHandlers(
         await hooks.RaiseAsync(SlimEventTypes.PasswordChanged, user.Id, reason: "invitation", ct: ct);
         metrics.Invitation("accepted");
 
-        // 2FA users (pre-provisioned by the host) sign in normally to pass the second factor
-        if (user.TwoFactorEnabled)
+        // the invitation proves the mailbox and sets an own password – only the second factor can follow; this entry
+        // does not continue it: 2FA users (pre-provisioned by the host) sign in normally
+        if (SlimSignInChain.Evaluate(user, SlimSignInProofs.None, O).Pending.Contains(SlimSignInActions.SecondFactor))
             return SlimResults.Status("invitation_accepted", "Password set. Please sign in.");
 
         var result = await authManager.SignInCoreAsync(user, cookies, false, SlimAuthManager.MethodPassword, null, null, true, ct);
@@ -308,7 +309,7 @@ internal sealed class SlimAccountHandlers(
         var sessions = services.GetRequiredService<ISlimSessionStore>();
         var session = await sessions.FindAsync(sessionId, ct);
         if (session is null || !string.Equals(session.UserId, user.Id, StringComparison.Ordinal))
-            return SlimResults.Status("session_not_found", "The session does not exist.", StatusCodes.Status404NotFound);
+            return SlimResults.Status(SlimErrorCodes.SessionNotFound, "The session does not exist.", StatusCodes.Status404NotFound);
 
         await sessions.RevokeAsync(sessionId, ct);
         metrics.SignOut("session");
@@ -327,9 +328,9 @@ internal sealed class SlimAccountHandlers(
 
         // changes an existing password only: an account without one (SSO, passkey) gets no local password this way
         if (!await credentials.HasPasswordAsync(user, ct))
-            return SlimResults.Status("password_not_set", "The account has no password to change.", StatusCodes.Status409Conflict);
+            return SlimResults.Status(SlimErrorCodes.PasswordNotSet, "The account has no password to change.", StatusCodes.Status409Conflict);
         if (request is null || string.IsNullOrEmpty(request.CurrentPassword))
-            return SlimResults.BadRequest("invalid_request", "currentPassword is required.");
+            return SlimResults.BadRequest(SlimErrorCodes.InvalidRequest, "currentPassword is required.");
         if (await passwordPolicy.ValidateAsync(request.NewPassword, user.Email, ct, "newPassword") is { } errors)
             return SlimResults.Validation(errors);
 
@@ -380,7 +381,7 @@ internal sealed class SlimAccountHandlers(
         && (await externalLogins.GetExternalLoginsAsync(user.Id, ct)).Count > 0;
 
     private static IResult ExternalSignInOnly() =>
-        SlimResults.Status("external_sign_in_only",
+        SlimResults.Status(SlimErrorCodes.ExternalSignInOnly,
             "The account signs in with an external provider and has no local password.", StatusCodes.Status409Conflict);
 
     internal async Task<(SlimUser? User, IResult? Error)> LoadCurrentUserAsync(bool forbidImpersonation, CancellationToken ct)
@@ -390,7 +391,7 @@ internal sealed class SlimAccountHandlers(
         if (id is null) return (null, Results.Unauthorized());
 
         if (forbidImpersonation && principal.IsImpersonating())
-            return (null, SlimResults.Status("not_allowed_while_impersonating",
+            return (null, SlimResults.Status(SlimErrorCodes.NotAllowedWhileImpersonating,
                 "This action is not allowed during an impersonation session.", StatusCodes.Status403Forbidden));
 
         // the session was validated when the request began; a security change since then (password, removed sign-in

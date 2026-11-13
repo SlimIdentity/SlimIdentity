@@ -40,7 +40,7 @@ internal sealed class SlimBackChannelLogoutHandler(
     public async Task<IResult> LogoutAsync(string provider, CancellationToken ct)
     {
         if (!providers.Names.Contains(provider))
-            return SlimResults.Status("unknown_provider", $"Provider '{provider}' has no back-channel logout.", StatusCodes.Status404NotFound);
+            return SlimResults.Status(SlimErrorCodes.UnknownProvider, $"Provider '{provider}' has no back-channel logout.", StatusCodes.Status404NotFound);
 
         var request = httpContextAccessor.HttpContext!.Request;
         if (!request.HasFormContentType) return Invalid(provider, "expected application/x-www-form-urlencoded");
@@ -106,7 +106,7 @@ internal sealed class SlimBackChannelLogoutHandler(
     private IResult Invalid(string provider, string reason)
     {
         Log.BackChannelTokenRejected(logger, provider, reason);
-        return SlimResults.BadRequest("invalid_request", "The logout token was rejected.");
+        return SlimResults.BadRequest(SlimErrorCodes.InvalidRequest, "The logout token was rejected.");
     }
 }
 

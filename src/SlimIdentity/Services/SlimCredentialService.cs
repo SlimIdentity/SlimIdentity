@@ -89,7 +89,7 @@ internal sealed class SlimCredentialService(
                 && long.TryParse(http.User.FindFirst(SlimClaimTypes.AuthTime)?.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var signedIn)
                 && now - DateTimeOffset.FromUnixTimeSeconds(signedIn) <= RecentSignInWindow
                 ? null
-                : Http.SlimResults.Status("reauthentication_required",
+                : Http.SlimResults.Status(SlimErrorCodes.ReauthenticationRequired,
                     "Sign in again to confirm this change – your account has no password.", StatusCodes.Status403Forbidden);
         }
 
@@ -97,7 +97,7 @@ internal sealed class SlimCredentialService(
         // the attempt is reserved before the check: parallel guesses cannot all pass the lockout check first
         var attempt = await BeginAttemptAsync(user, SlimAttemptFactor.Password, ct);
         if (attempt.Status == SlimAttemptStatus.LockedOut) return Http.SlimResults.Locked(http, attempt.LockoutEndUtc!.Value, now);
-        if (attempt.Status == SlimAttemptStatus.NotReserved) return Http.SlimResults.BadRequest("invalid_password", "The password is incorrect.");
+        if (attempt.Status == SlimAttemptStatus.NotReserved) return Http.SlimResults.BadRequest(SlimErrorCodes.InvalidPassword, "The password is incorrect.");
 
         var check = await VerifyPasswordAsync(user, password, ct);
         if (check != SlimPasswordCheck.Failed)
@@ -110,7 +110,7 @@ internal sealed class SlimCredentialService(
 
         return await FailAttemptAsync(user, attempt, ct) is { } lockedUntil
             ? Http.SlimResults.Locked(http, lockedUntil, now)
-            : Http.SlimResults.BadRequest("invalid_password", "The password is incorrect.");
+            : Http.SlimResults.BadRequest(SlimErrorCodes.InvalidPassword, "The password is incorrect.");
     }
 
 

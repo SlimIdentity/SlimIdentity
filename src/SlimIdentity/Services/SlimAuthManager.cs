@@ -54,22 +54,21 @@ internal sealed class SlimAuthManager(
 
         // the rules of /login after the first factor – a host endpoint must not be a way around them. A lockout guards
         // the password and the second factor against guessing; it does not apply here (the host checks its own factor).
-        var refusal = !user.IsActive ? "account_disabled"
-            : options.Value.SignIn.RequireConfirmedEmail && !user.EmailConfirmed ? "email_not_confirmed"
-            : user.PasswordChangeRequired ? "password_change_required"
-            : null;
+        var decision = SlimSignInChain.Evaluate(user, secondFactorVerified ? SlimSignInProofs.SecondFactor : SlimSignInProofs.None, options.Value);
+        if (decision.Next == SlimSignInActions.SecondFactor)
+        {
+            var challenge = await services.GetRequiredService<Endpoints.SlimLoginHandlers>().BeginTwoFactorAsync(user, useCookies, isPersistent, ct);
+            return challenge is null
+                ? SlimAuthResult.Failed(SlimErrorCodes.TwoFactorUnavailable)   // 2FA enabled, but no ISlimTwoFactorStore registered
+                : new SlimAuthResult { Succeeded = false, Error = SlimErrorCodes.RequiresTwoFactor, TwoFactorChallenge = challenge };
+        }
+
+        // the steps before the second factor cannot be continued here: they are refused with the code of their rule
+        var refusal = decision.Refusal ?? (decision.Next is { } next ? SlimSignInChain.ErrorCode(next) : null);
         if (refusal is not null)
         {
             await Hooks.RaiseAsync(SlimEventTypes.SignInFailed, user.Id, authenticationMethod, refusal, ct: ct);
             return SlimAuthResult.Failed(refusal);
-        }
-
-        if (user.TwoFactorEnabled && !secondFactorVerified)
-        {
-            var challenge = await services.GetRequiredService<Endpoints.SlimLoginHandlers>().BeginTwoFactorAsync(user, useCookies, isPersistent, ct);
-            return challenge is null
-                ? SlimAuthResult.Failed("two_factor_unavailable")   // 2FA enabled, but no ISlimTwoFactorStore registered
-                : new SlimAuthResult { Succeeded = false, Error = "requires_two_factor", TwoFactorChallenge = challenge };
         }
 
         return await SignInCoreAsync(user, useCookies, isPersistent, authenticationMethod, null, null, issueRefreshToken: true, ct);
@@ -98,15 +97,15 @@ internal sealed class SlimAuthManager(
         var useCookies = admin.IsSlimCookieSession();
 
         if (admin.IsImpersonating())
-            return SlimAuthResult.Failed("already_impersonating");
+            return SlimAuthResult.Failed(SlimErrorCodes.AlreadyImpersonating);
         if (string.Equals(targetUser.Id, impersonatorUserId, StringComparison.Ordinal))
-            return SlimAuthResult.Failed("cannot_impersonate_self");
+            return SlimAuthResult.Failed(SlimErrorCodes.CannotImpersonateSelf);
 
         // Bind the session to the impersonator's current security state: banning the admin or rotating
         // their stamp ends every impersonation session they started (see SlimSecurityStampValidator).
         var impersonator = await store.FindByIdAsync(impersonatorUserId, ct);
         if (impersonator is not { IsActive: true })
-            return SlimAuthResult.Failed("impersonator_invalid");
+            return SlimAuthResult.Failed(SlimErrorCodes.ImpersonatorInvalid);
 
         // ... and to the administrator's session it starts from: revoking that session (a stolen device) ends it, too
         var originSessionId = Sessions is null ? null : CurrentSessionId(admin);
@@ -127,7 +126,7 @@ internal sealed class SlimAuthManager(
     {
         var current = Http.User;
         var actor = SlimClaims.ParseActorClaim(current.FindFirst(SlimClaimTypes.Actor)?.Value);
-        if (actor is null) return SlimAuthResult.Failed("not_impersonating");
+        if (actor is null) return SlimAuthResult.Failed(SlimErrorCodes.NotImpersonating);
 
         var useCookies = current.IsSlimCookieSession();
         if (current.FindFirst(SlimClaimTypes.SessionId)?.Value is { } sid && Sessions is { } sessions)
@@ -141,7 +140,7 @@ internal sealed class SlimAuthManager(
             // revoked in the meantime: no way back, end the session.
             Log.ImpersonationReturnDenied(logger, actor.UserId);
             if (useCookies) await Http.SignOutAsync(SlimIdentityDefaults.CookieScheme);
-            return SlimAuthResult.Failed("impersonator_invalid");
+            return SlimAuthResult.Failed(SlimErrorCodes.ImpersonatorInvalid);
         }
 
         Log.ImpersonationEnded(logger, impersonator.Id, current.GetSlimUserId());
@@ -399,7 +398,7 @@ internal sealed class SlimAuthManager(
         // path checks it with its own answer, this keeps a forgotten one from issuing a session (impersonation is the
         // administrator's own act)
         if (signInStage == SlimSignInStage.SignIn && user.PasswordChangeRequired && authMethod != MethodImpersonation)
-            return SlimAuthResult.Failed("password_change_required");
+            return SlimAuthResult.Failed(SlimErrorCodes.PasswordChangeRequired);
         if (user.IsActive && checkGuards && await Hooks.CheckSignInAsync(user, authMethod, signInStage, impersonatorId, ct) is { } veto)
         {
             await Hooks.RaiseAsync(SlimEventTypes.SignInFailed, user.Id, authMethod, veto.Error, impersonatorId, ct);
@@ -424,7 +423,7 @@ internal sealed class SlimAuthManager(
         DateTimeOffset? authTime,
         CancellationToken ct)
     {
-        if (!user.IsActive) return SlimAuthResult.Failed("account_disabled");
+        if (!user.IsActive) return SlimAuthResult.Failed(SlimErrorCodes.AccountDisabled);
 
         // a user created outside SlimIdentity (seeding, import) may have no stamp – every session would fail its first
         // validation: give it one before anything is bound to it
@@ -485,7 +484,7 @@ internal sealed class SlimAuthManager(
         {
             // sliding lifetime, capped by the absolute lifetime of the whole chain
             var absoluteEnd = authStart + o.Tokens.RefreshTokenAbsoluteLifetime;
-            if (absoluteEnd <= now) return SlimAuthResult.Failed("session_expired");
+            if (absoluteEnd <= now) return SlimAuthResult.Failed(SlimErrorCodes.SessionExpired);
 
             refreshExpires = Min(now + o.Tokens.RefreshTokenLifetime, absoluteEnd);
             refreshToken = workflow.Protect(

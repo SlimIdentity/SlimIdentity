@@ -11,6 +11,7 @@ with a new major version.
 
 ### Added
 
+- `SlimErrorCodes`: all `status` codes of the JSON endpoints and `SlimAuthResult` as public constants.
 - Hardened JSON endpoints under `/auth`: login (cookie or JWT), 2FA, external login (OAuth/OIDC), refresh, logout,
   logout-all, sessions, register, e-mail verification, password reset/change, invitations, `/me`.
 - Database-agnostic stores: `ISlimUserStore` (required) and optional capabilities for refresh tokens, server-side

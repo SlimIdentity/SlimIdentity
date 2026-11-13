@@ -40,7 +40,7 @@ internal sealed class SlimCsrfEndpointFilter(IOptions<SlimIdentityOptions> optio
     internal static IResult? Validate(HttpRequest request, SlimIdentityOptions o, ILogger logger)
     {
         if (!request.Headers.ContainsKey(SlimIdentityDefaults.CsrfHeaderName))
-            return SlimResults.Status("csrf_validation_failed", $"Missing anti-forgery header '{SlimIdentityDefaults.CsrfHeaderName}'.", StatusCodes.Status403Forbidden);
+            return SlimResults.Status(SlimErrorCodes.CsrfValidationFailed, $"Missing anti-forgery header '{SlimIdentityDefaults.CsrfHeaderName}'.", StatusCodes.Status403Forbidden);
 
         var origin = request.Headers.Origin.ToString();
         if (!string.IsNullOrEmpty(origin) && !IsAllowedOrigin(origin, request, o))
@@ -56,7 +56,7 @@ internal sealed class SlimCsrfEndpointFilter(IOptions<SlimIdentityOptions> optio
             {
                 Log.CsrfOriginRejected(logger, origin, self);
             }
-            return SlimResults.Status("csrf_validation_failed", "Origin not allowed.", StatusCodes.Status403Forbidden);
+            return SlimResults.Status(SlimErrorCodes.CsrfValidationFailed, "Origin not allowed.", StatusCodes.Status403Forbidden);
         }
 
         return null;
@@ -176,7 +176,7 @@ internal static class SlimResults
         Results.Json(new SlimStatusResponse(status, message), SlimJsonContext.Default.SlimStatusResponse, statusCode: statusCode);
 
     public static IResult InvalidCredentials() =>
-        Results.Json(new SlimLoginChallengeResponse { Status = "invalid_credentials", Message = "Invalid e-mail or password." },
+        Results.Json(new SlimLoginChallengeResponse { Status = SlimErrorCodes.InvalidCredentials, Message = "Invalid e-mail or password." },
             SlimJsonContext.Default.SlimLoginChallengeResponse, statusCode: StatusCodes.Status401Unauthorized);
 
     public static IResult Challenge(SlimLoginChallengeResponse challenge) =>
@@ -186,16 +186,16 @@ internal static class SlimResults
     {
         var seconds = (int)Math.Max(1, Math.Ceiling((lockoutEnd - now).TotalSeconds));
         http.Response.Headers.RetryAfter = seconds.ToString(CultureInfo.InvariantCulture);
-        return Results.Json(new SlimLockedResponse("locked_out", lockoutEnd), SlimJsonContext.Default.SlimLockedResponse,
+        return Results.Json(new SlimLockedResponse(SlimErrorCodes.LockedOut, lockoutEnd), SlimJsonContext.Default.SlimLockedResponse,
             statusCode: StatusCodes.Status423Locked);
     }
 
     public static IResult InvalidToken(int statusCode = StatusCodes.Status400BadRequest) =>
-        Status("invalid_token", "The token is invalid or has expired.", statusCode);
+        Status(SlimErrorCodes.InvalidToken, "The token is invalid or has expired.", statusCode);
 
     /// <summary>A security change of the signed-in account failed: the account changed in the meantime.</summary>
     public static IResult ConcurrentChange() =>
-        Status("concurrent_change", "The account was changed at the same time; nothing was saved. Reload and try again.", StatusCodes.Status409Conflict);
+        Status(SlimErrorCodes.ConcurrentChange, "The account was changed at the same time; nothing was saved. Reload and try again.", StatusCodes.Status409Conflict);
 
     /// <summary>
     /// Answer after a change that re-issued the caller's session: the new session, or – if it could not be renewed (refresh
@@ -203,7 +203,7 @@ internal static class SlimResults
     /// </summary>
     public static IResult ReissuedSession(SlimAuthResult session) => session.Succeeded
         ? Results.Ok(session.ToResponse())
-        : Status(session.Error ?? "session_expired", "The change was saved, but this session could not be renewed; sign in again.", StatusCodes.Status401Unauthorized);
+        : Status(session.Error ?? SlimErrorCodes.SessionExpired, "The change was saved, but this session could not be renewed; sign in again.", StatusCodes.Status401Unauthorized);
 
     public static IResult BadRequest(string status, string? message = null) =>
         Status(status, message, StatusCodes.Status400BadRequest);
@@ -213,5 +213,5 @@ internal static class SlimResults
     /// machine-readable code every other SlimIdentity error carries in <c>status</c> is in <c>code</c>.
     /// </summary>
     public static IResult Validation(IDictionary<string, string[]> errors) =>
-        Results.ValidationProblem(errors, extensions: new Dictionary<string, object?> { ["code"] = "validation_failed" });
+        Results.ValidationProblem(errors, extensions: new Dictionary<string, object?> { ["code"] = SlimErrorCodes.ValidationFailed });
 }

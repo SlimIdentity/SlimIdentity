@@ -29,7 +29,7 @@ public static class SlimRemoteAuthenticationExtensions
         {
             await accessDenied(context);
             if (context.Result is not null) return;   // handled by the host
-            await SlimExternalLoginHandlers.RedirectRemoteFailureAsync(context.HttpContext, context.Properties, context.Scheme.Name, "access_denied");
+            await SlimExternalLoginHandlers.RedirectRemoteFailureAsync(context.HttpContext, context.Properties, context.Scheme.Name, SlimErrorCodes.AccessDenied);
             context.HandleResponse();
         };
 
@@ -38,7 +38,7 @@ public static class SlimRemoteAuthenticationExtensions
         {
             await remoteFailure(context);
             if (context.Result is not null) return;
-            await SlimExternalLoginHandlers.RedirectRemoteFailureAsync(context.HttpContext, context.Properties, context.Scheme.Name, "external_login_failed");
+            await SlimExternalLoginHandlers.RedirectRemoteFailureAsync(context.HttpContext, context.Properties, context.Scheme.Name, SlimErrorCodes.ExternalLoginFailed);
             context.HandleResponse();
         };
         return options;

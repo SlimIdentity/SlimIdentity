@@ -76,8 +76,8 @@ internal sealed class SlimSignInMethodHandlers(
         Passkeys is { } keys ? (await keys.GetPasskeysAsync(userId, ct)).Count : 0;
 
     private static IResult NotFound() =>
-        SlimResults.Status("external_login_not_found", "This external login is not linked to your account.", StatusCodes.Status404NotFound);
+        SlimResults.Status(SlimErrorCodes.ExternalLoginNotFound, "This external login is not linked to your account.", StatusCodes.Status404NotFound);
 
     internal static IResult LastMethod() =>
-        SlimResults.Status("last_sign_in_method", "This is the last way to sign in to the account – add another one first.", StatusCodes.Status409Conflict);
+        SlimResults.Status(SlimErrorCodes.LastSignInMethod, "This is the last way to sign in to the account – add another one first.", StatusCodes.Status409Conflict);
 }

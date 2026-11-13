@@ -68,7 +68,7 @@ internal sealed class SlimTwoFactorHandlers(
 
         // the first code is consumed as well – it cannot be replayed for a sign-in afterwards
         if (!await twoFactor.VerifyTotpAsync(user, payload.Secret, request!.Code, ct, newSecret: true))
-            return SlimResults.BadRequest("invalid_two_factor_code", "The code is invalid.");
+            return SlimResults.BadRequest(SlimErrorCodes.InvalidTwoFactorCode, "The code is invalid.");
 
         return await ActivateAsync(user, SlimLoginHandlers.MethodTotp, payload.Secret, ct);
     }
@@ -109,7 +109,7 @@ internal sealed class SlimTwoFactorHandlers(
     {
         var (user, error) = await ConfirmPasswordAsync(request, ct);
         if (user is null) return error!;
-        if (!user.TwoFactorEnabled) return SlimResults.BadRequest("two_factor_disabled", "Two-factor authentication is not enabled.");
+        if (!user.TwoFactorEnabled) return SlimResults.BadRequest(SlimErrorCodes.TwoFactorDisabled, "Two-factor authentication is not enabled.");
 
         var codes = await twoFactor.RegenerateRecoveryCodesAsync(user, ct);
         return Results.Ok(new SlimRecoveryCodesResponse(codes, null));
@@ -148,7 +148,7 @@ internal sealed class SlimTwoFactorHandlers(
     /// </summary>
     private IResult? UnconfirmedAddress(SlimUser user) =>
         O.Email.Enabled && !user.EmailConfirmed
-            ? SlimResults.Status("email_not_confirmed", "Confirm your e-mail address before setting up two-factor authentication.", StatusCodes.Status403Forbidden)
+            ? SlimResults.Status(SlimErrorCodes.EmailNotConfirmed, "Confirm your e-mail address before setting up two-factor authentication.", StatusCodes.Status403Forbidden)
             : null;
 
     private async Task<IResult> ActivateAsync(SlimUser user, string method, string? authenticatorSecret, CancellationToken ct)
