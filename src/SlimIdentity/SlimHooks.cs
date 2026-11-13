@@ -55,11 +55,54 @@ public interface ISlimSignInGuard
     ValueTask<SlimVeto?> CheckAsync(SlimSignInContext context, CancellationToken ct);
 }
 
+/// <summary>When <see cref="ISlimRegistrationGuard"/> is asked.</summary>
+public enum SlimRegistrationStage
+{
+    /// <summary>
+    /// <c>/register</c> starts: only the address and the request are known. Nothing has been looked up – decide from the
+    /// request alone, never from whether the address has an account, or the answer reveals it.
+    /// </summary>
+    Begin,
+    /// <summary>
+    /// The account is about to be created: the mailbox is proven (with mail), the profile is validated
+    /// (<see cref="SlimRegistrationContext.Profile"/>) and the first way to sign in is known
+    /// (<see cref="SlimRegistrationContext.CredentialKind"/>). A refusal stores nothing and keeps the flow open – a
+    /// corrected request with the same flow token can still complete it. Without mail, <c>/register</c> asks
+    /// <see cref="Begin"/> and then this stage, both before anything is looked up.
+    /// </summary>
+    Complete,
+    /// <summary>An automatic registration through an external login (<see cref="SlimRegistrationContext.Provider"/>), the provider verified the address.</summary>
+    External,
+}
+
+/// <summary>The first way to sign in of a new account (<see cref="SlimRegistrationContext.CredentialKind"/>).</summary>
+public static class SlimCredentialKinds
+{
+    /// <summary>A password.</summary>
+    public const string Password = "password";
+    /// <summary>A passkey (package <c>SlimIdentity.Passkeys</c>).</summary>
+    public const string Passkey = "passkey";
+    /// <summary>An external login; the provider is <see cref="SlimRegistrationContext.Provider"/>.</summary>
+    public const string External = "external";
+}
+
 /// <summary>What <see cref="ISlimRegistrationGuard"/> decides about.</summary>
 public sealed class SlimRegistrationContext
 {
     /// <summary>The normalized address of the new account.</summary>
     public required string Email { get; init; }
+    /// <summary>Start, completion or external auto-registration.</summary>
+    public required SlimRegistrationStage Stage { get; init; }
+    /// <summary>
+    /// The first way to sign in (<see cref="SlimCredentialKinds"/>) – from <see cref="SlimRegistrationStage.Complete"/>
+    /// on; <c>null</c> at <see cref="SlimRegistrationStage.Begin"/>.
+    /// </summary>
+    public string? CredentialKind { get; init; }
+    /// <summary>
+    /// The profile as validated by your <see cref="ISlimRegistrationProfile"/> (your typed object) – from
+    /// <see cref="SlimRegistrationStage.Complete"/> on; <c>null</c> before, or without a profile.
+    /// </summary>
+    public object? Profile { get; init; }
     /// <summary><c>null</c> for <c>/register</c>, the provider for an automatic registration through external login.</summary>
     public string? Provider { get; init; }
     /// <summary>
@@ -71,10 +114,11 @@ public sealed class SlimRegistrationContext
 }
 
 /// <summary>
-/// Optional veto against new accounts: company domains only, invitation codes, captcha checks. Asked before anything is
-/// looked up or stored – decide from the request only, never from whether the address already has an account, or the
-/// answer reveals it. A refused <c>/register</c> answers <c>403</c> with the veto's code; a refused external
-/// auto-registration redirects with <c>slim_error</c>. Register with <c>AddRegistrationGuard&lt;T&gt;()</c>.
+/// Optional veto against new accounts: company domains only, invitation codes, captcha checks, terms of business data
+/// in the profile. Asked at every <see cref="SlimRegistrationStage"/> of a registration – a guard that only cares about
+/// one stage returns <c>null</c> for the others. Nothing is stored before the last stage passed. A refusal answers
+/// <c>403</c> with the veto's code; a refused external auto-registration redirects with <c>slim_error</c>. Register
+/// with <c>AddRegistrationGuard&lt;T&gt;()</c>.
 /// </summary>
 public interface ISlimRegistrationGuard
 {

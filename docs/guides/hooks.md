@@ -7,7 +7,7 @@ No hook can skip a check, change the order of the flow or issue tokens itself.
 | Hook | Register | Can |
 | :--- | :--- | :--- |
 | `ISlimSignInGuard` | `AddSignInGuard<T>()` | refuse a new session, a renewal or a running session |
-| `ISlimRegistrationGuard` | `AddRegistrationGuard<T>()` | refuse a new account (`/register`, external auto-registration) |
+| `ISlimRegistrationGuard` | `AddRegistrationGuard<T>()` | refuse a new account at its start or completion (`/register`, external auto-registration) |
 | `ISlimRegistrationProfile` | `AddRegistrationProfile<T>()` | validate business data of `/register` – [guide](registration-profile.md) |
 | `ISlimEventObserver` | `AddEventObserver<T>()` | watch security events (audit trail, alerts) |
 | `ISlimPasswordRule` | `AddPasswordRule<T>()` | refuse a new password |
@@ -55,7 +55,16 @@ corporate network for impersonation" (`context.ImpersonatorId is not null`).
 
 ## Registration guard
 
-Asked before anything is looked up or stored:
+Asked at each stage of a registration, nothing is stored before the last one passed:
+
+| Stage | When | Known | A veto means |
+| :--- | :--- | :--- | :--- |
+| `Begin` | `/register`, before anything is looked up | `Email`, the request | `403` with your code; no mail is sent |
+| `Complete` | the account is about to be created – with mail after the mailbox proof (`/register/password`, `/register/passkey`) | also `CredentialKind` (`password`, `passkey`) and `Profile` (validated by your [profile hook](registration-profile.md)) | `403` with your code; nothing is stored and the flow stays open – a corrected request with the same flow token can complete it |
+| `External` | automatic registration through an external login, the provider verified the address | `Provider`, `CredentialKind` `external` | redirect with `slim_error=<code>` |
+
+Without mail, `/register` creates the account in one step and asks `Begin` and then `Complete`, both before anything
+is looked up. A guard that only cares about one stage returns `null` for the others:
 
 ```csharp
 public sealed class CompanyDomainGuard : ISlimRegistrationGuard
@@ -67,12 +76,20 @@ public sealed class CompanyDomainGuard : ISlimRegistrationGuard
 }
 ```
 
-`/register` answers a veto with `403` and your code; an external auto-registration redirects with
-`slim_error=<code>`. **Decide from the request only** (address, `Provider`, headers such as a captcha token or an
-invitation code) – never from whether the address already has an account, or the answer reveals it.
+At `Begin`, **decide from the request only** (address, headers such as a captcha token or an invitation code) –
+never from whether the address already has an account, or the answer reveals it. At `Complete` the mailbox is proven,
+so a decision on the validated profile or the kind of the first way in reveals nothing to a stranger:
 
-Business data for the new account (company, name, terms) is not a guard's job: `ISlimRegistrationProfile` validates
-it and your store writes it with the account – see [registration with business data](registration-profile.md).
+```csharp
+public ValueTask<SlimVeto?> CheckAsync(SlimRegistrationContext context, CancellationToken ct) =>
+    ValueTask.FromResult(context is { Stage: SlimRegistrationStage.Complete, Profile: SignUpProfile { Country: "XX" } }
+        ? new SlimVeto("country_not_served", "We cannot offer accounts in your country yet.")
+        : null);
+```
+
+Validating business data (company, name, terms) is not a guard's job: `ISlimRegistrationProfile` checks it and your
+store writes it with the account – see [registration with business data](registration-profile.md). A guard decides
+whether a valid registration is wanted.
 
 ## Calls without a request
 

@@ -183,7 +183,7 @@ internal sealed class SlimExternalLoginHandlers(
                     return Redirect(returnUrl, "slim_error", SlimErrorCodes.EmailNotVerified);
                 }
 
-                if (await hooks.CheckRegistrationAsync(email, provider, ct) is { } veto)
+                if (await hooks.CheckRegistrationAsync(email, SlimRegistrationStage.External, SlimCredentialKinds.External, null, provider, ct) is { } veto)
                 {
                     metrics.ExternalLogin(provider, "rejected");
                     return Redirect(returnUrl, "slim_error", veto.Error);

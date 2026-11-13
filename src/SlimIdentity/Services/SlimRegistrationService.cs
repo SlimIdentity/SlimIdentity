@@ -77,7 +77,8 @@ internal sealed class SlimRegistrationService(
     public async Task<SlimRegistrationResult> CreateAsync(string email, string password, object? profile, CancellationToken ct)
     {
         // the host's veto – decided from the request alone, before anything is looked up (no enumeration)
-        if (await hooks.CheckRegistrationAsync(email, null, ct) is { } veto)
+        if ((await hooks.CheckRegistrationAsync(email, SlimRegistrationStage.Begin, null, null, null, ct)
+             ?? await hooks.CheckRegistrationAsync(email, SlimRegistrationStage.Complete, SlimCredentialKinds.Password, profile, null, ct)) is { } veto)
         {
             var refused = SlimResults.Status(veto.Error, veto.Message ?? "Registration is not allowed.", StatusCodes.Status403Forbidden);
             return new SlimRegistrationResult(null, refused, refused);

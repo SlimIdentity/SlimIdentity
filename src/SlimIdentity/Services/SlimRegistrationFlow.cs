@@ -50,7 +50,7 @@ internal sealed class SlimRegistrationFlow(
         if (!SlimRegistrationService.IsValidEmail(email)) return SlimRegistrationService.InvalidEmail("email");
 
         // the host's veto – decided from the request alone, before anything is looked up (no enumeration)
-        if (await hooks.CheckRegistrationAsync(email, null, ct) is { } veto)
+        if (await hooks.CheckRegistrationAsync(email, SlimRegistrationStage.Begin, null, null, null, ct) is { } veto)
             return SlimResults.Status(veto.Error, veto.Message ?? "Registration is not allowed.", StatusCodes.Status403Forbidden);
 
         var now = time.GetUtcNow();
@@ -159,7 +159,7 @@ internal sealed class SlimRegistrationFlow(
         if (invalidProfile is not null) return invalidProfile;
 
         var hash = credentials.HashPassword(new SlimUser { Email = email }, request.Password);
-        var (user, taken) = await CreateAccountAsync(state, hash, profile, ct);
+        var (user, taken) = await CreateAccountAsync(state, SlimCredentialKinds.Password, hash, profile, ct);
         if (user is null) return taken!;
         return await SignInAsync(user, state, SlimSignInProofs.Password, SlimAuthManager.MethodPassword, ct);
     }
@@ -181,11 +181,14 @@ internal sealed class SlimRegistrationFlow(
         registration.ValidateProfileAsync(state.Email!, profile, ct);
 
     /// <summary>
-    /// Creates the account of the flow with its address confirmed – <c>409 email_taken</c> for a second completion, or
-    /// when the address got an account meanwhile.
+    /// The guards' last word (<see cref="SlimRegistrationStage.Complete"/>), then the account of the flow with its address
+    /// confirmed – <c>403</c> for a veto (the flow stays open), <c>409 email_taken</c> for a second completion, or when the
+    /// address got an account meanwhile.
     /// </summary>
-    internal async Task<(SlimUser? User, IResult? Taken)> CreateAccountAsync(SlimFlowPayload state, string? passwordHash, object? profile, CancellationToken ct)
+    internal async Task<(SlimUser? User, IResult? Failure)> CreateAccountAsync(SlimFlowPayload state, string credentialKind, string? passwordHash, object? profile, CancellationToken ct)
     {
+        if (await hooks.CheckRegistrationAsync(state.Email!, SlimRegistrationStage.Complete, credentialKind, profile, null, ct) is { } veto)
+            return (null, SlimResults.Status(veto.Error, veto.Message ?? "Registration is not allowed.", StatusCodes.Status403Forbidden));
         var user = await store.CreateAsync(new SlimNewUser { Email = state.Email!, PasswordHash = passwordHash ?? "", Profile = profile, EmailConfirmed = true }, ct);
         if (user is null)
         {
@@ -234,6 +237,6 @@ internal sealed class SlimRegistrationFlow(
     private SlimActionDetails? Details(SlimSignInDecision decision) =>
         decision.Next == SlimSignInActions.SetCredential
             ? new SlimActionDetails { SetCredential = new SlimSetCredentialDetails
-                { Kinds = isService.IsService(typeof(ISlimPasskeySignInMethods)) ? ["password", "passkey"] : ["password"] } }
+                { Kinds = isService.IsService(typeof(ISlimPasskeySignInMethods)) ? [SlimCredentialKinds.Password, SlimCredentialKinds.Passkey] : [SlimCredentialKinds.Password] } }
             : null;
 }

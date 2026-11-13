@@ -127,7 +127,7 @@ internal sealed class SlimPasskeyHandlers(
         // before the account exists: a known credential must not leave an account without a way in
         if (await passkeys.FindPasskeyAsync(authData.CredentialId!, ct) is not null) return PasskeyExists();
 
-        var (user, taken) = await registration.CreateAccountAsync(flow, null, profile, ct);
+        var (user, taken) = await registration.CreateAccountAsync(flow, SlimCredentialKinds.Passkey, null, profile, ct);
         if (user is null) return taken!;
         var passkey = NewPasskey(user.Id, state.UserHandle, authData, request.Name);
         if (!await passkeys.AddPasskeyAsync(passkey, ct))

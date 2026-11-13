@@ -359,6 +359,11 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
   ceremony is bound to the flow; a credential that is already registered is refused before the account exists. An
   account without a password adds further passkeys after a recent sign-in. TypeScript client:
   `completeRegistrationWithPasskey`.
+- **Breaking** (`ISlimRegistrationGuard`): a registration guard is asked at each `SlimRegistrationContext.Stage` –
+  `Begin` (`/register`, nothing looked up yet), `Complete` (the account is about to be created, with the validated
+  `Profile` and the `CredentialKind` of its first way in; a veto keeps the flow open) and `External` (automatic
+  registration through an external login). Without mail `/register` asks `Begin` and `Complete`. Constants for the
+  kinds: `SlimCredentialKinds`.
 - **Breaking** with `UseTenantKey`: the tenant of the request is part of the Data Protection purpose of every token
   (mail links, invitations, sign-in flows, refresh tokens, remembered devices, exchange and link codes, passkey
   ceremonies). A token of one tenant no longer decrypts in another; tokens issued before the update, or outside a

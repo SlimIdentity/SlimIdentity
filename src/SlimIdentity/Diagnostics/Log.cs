@@ -73,8 +73,8 @@ internal static partial class Log
     [LoggerMessage(3007, LogLevel.Information, "SlimIdentity: sign-in guard refused user {UserId} ({Error}, stage {Stage}).")]
     public static partial void SignInVetoed(ILogger logger, string userId, string error, string stage);
 
-    [LoggerMessage(3008, LogLevel.Information, "SlimIdentity: registration guard refused a registration ({Error}).")]
-    public static partial void RegistrationVetoed(ILogger logger, string error);
+    [LoggerMessage(3008, LogLevel.Information, "SlimIdentity: registration guard refused a registration ({Error}, stage {Stage}).")]
+    public static partial void RegistrationVetoed(ILogger logger, string error, string stage);
 
     [LoggerMessage(3009, LogLevel.Error, "SlimIdentity: event handler failed for {Type} – the event was not delivered to it.")]
     public static partial void EventHandlerFailed(ILogger logger, Exception exception, string type);

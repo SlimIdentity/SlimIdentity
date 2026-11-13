@@ -297,6 +297,36 @@ public sealed class PasskeyTests
     }
 
     [Fact]
+    public async Task A_guard_that_refuses_passkeys_stores_nothing_and_leaves_the_password()
+    {
+        await using var app = await TestApp.StartAsync(new TestAppOptions
+        {
+            Builder = b => b.AddPasskeyStore<TestPasskeyStore>(ServiceLifetime.Singleton).AddPasskeys(o => o.RelyingPartyId = "test.local")
+                .AddRegistrationGuard<PasswordsOnlyGuard>(),
+            Configure = o => o.Endpoints.DefaultUseCookies = false,
+        });
+        var client = app.CreateClient();
+        using var key = new SoftwarePasskey();
+        var verified = await MailboxProvenAsync(app, client);
+        var (options, state) = await NewAccountOptionsAsync(client, verified.Str("flowToken"));
+
+        var refused = await client.PostJsonAsync("/auth/register/passkey",
+            new { flowToken = verified.Str("flowToken"), state, credential = key.Create(options, Origin) }, HttpStatusCode.Forbidden);
+
+        Assert.Equal("passkeys_not_allowed", refused.Str("code"));
+        Assert.Null(await app.Users.FindByEmailAsync(NewEmail, default));
+        Assert.Null(await app.App.Services.GetRequiredService<ISlimPasskeyStore>().FindPasskeyAsync(key.CredentialId, default));
+        await client.PostJsonAsync("/auth/register/password", new { flowToken = verified.Str("flowToken"), password = "Some-Long-Pass-1" });
+        Assert.NotNull(await app.Users.FindByEmailAsync(NewEmail, default));
+    }
+
+    private sealed class PasswordsOnlyGuard : ISlimRegistrationGuard
+    {
+        public ValueTask<SlimVeto?> CheckAsync(SlimRegistrationContext context, CancellationToken ct) =>
+            ValueTask.FromResult(context.CredentialKind == SlimCredentialKinds.Passkey ? new SlimVeto("passkeys_not_allowed") : null);
+    }
+
+    [Fact]
     public async Task A_passkey_of_a_registration_belongs_to_its_flow()
     {
         await using var app = await RegistrationAppAsync();

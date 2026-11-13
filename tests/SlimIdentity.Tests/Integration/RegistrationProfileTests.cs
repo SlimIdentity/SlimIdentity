@@ -36,6 +36,15 @@ public sealed class RegistrationProfileTests
                 : new SlimVeto("registration_not_allowed"));
     }
 
+    /// <summary>Decides from the validated profile: no accounts for a competitor.</summary>
+    private sealed class CompetitorGuard : ISlimRegistrationGuard
+    {
+        public ValueTask<SlimVeto?> CheckAsync(SlimRegistrationContext context, CancellationToken ct) =>
+            ValueTask.FromResult(context is { Stage: SlimRegistrationStage.Complete, Profile: SignUpProfile { Company: "Competitor" } }
+                ? new SlimVeto("company_not_allowed")
+                : null);
+    }
+
     private static Task<TestApp> WithProfileAsync() =>
         TestApp.StartAsync(new TestAppOptions { Builder = b => b.AddRegistrationProfile<CompanyProfile>() });
 
@@ -53,6 +62,25 @@ public sealed class RegistrationProfileTests
         var user = app.Users.Get("new@test.local");
         Assert.Equal(new SignUpProfile("ACME"), app.Users.Profiles[user.Id]);   // what the hook returned, not the raw JSON
         Assert.True(user.EmailConfirmed);
+    }
+
+    [Fact]
+    public async Task A_veto_on_the_validated_profile_keeps_the_flow_open()
+    {
+        await using var app = await TestApp.StartAsync(new TestAppOptions
+        {
+            Builder = b => b.AddRegistrationProfile<CompanyProfile>().AddRegistrationGuard<CompetitorGuard>(),
+        });
+        var client = app.CreateClient();
+        var flowToken = await app.VerifyRegistrationAsync("new@test.local", client);
+
+        var refused = await client.PostJsonAsync("/auth/register/password",
+            new { flowToken, password = "Another123!", profile = new { company = " Competitor " } }, HttpStatusCode.Forbidden);
+        Assert.Equal("company_not_allowed", refused.Str("code"));
+        Assert.Null(await app.Users.FindByEmailAsync("new@test.local", default));
+
+        await client.PostJsonAsync("/auth/register/password", new { flowToken, password = "Another123!", profile = new { company = "ACME" } });
+        Assert.Equal(new SignUpProfile("ACME"), app.Users.Profiles[app.Users.Get("new@test.local").Id]);
     }
 
     [Fact]

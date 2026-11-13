@@ -200,6 +200,55 @@ public sealed class HookTests
         Assert.Equal("registration_not_allowed", refused.Str("code"));
     }
 
+    [Fact]
+    public async Task Registration_guards_are_asked_at_each_stage()
+    {
+        await using var app = await TestApp.StartAsync(With(b => b.AddRegistrationGuard<StageRecorder>(ServiceLifetime.Singleton),
+            new Claim(ClaimTypes.NameIdentifier, "ext-3"), new Claim(ClaimTypes.Email, "social@test.local"), new Claim("email_verified", "true")));
+        var seen = app.App.Services.GetServices<ISlimRegistrationGuard>().OfType<StageRecorder>().Single().Seen;
+
+        Assert.Equal(HttpStatusCode.OK, (await app.RegisterAsync("new@test.local", "Some-Long-Pass-1")).StatusCode);
+        await SignInExternallyAsync(app.CreateClient());
+
+        Assert.Equal(
+        [
+            ("new@test.local", SlimRegistrationStage.Begin, null, null),
+            ("new@test.local", SlimRegistrationStage.Complete, SlimCredentialKinds.Password, null),
+            ("social@test.local", SlimRegistrationStage.External, SlimCredentialKinds.External, "Fake"),
+        ], seen.ToArray());
+    }
+
+    [Fact]
+    public async Task Without_mail_both_stages_are_asked_before_the_account_exists()
+    {
+        await using var app = await TestApp.StartAsync(new TestAppOptions
+        {
+            EmailSender = false,
+            Builder = b => b.WithoutEmail(allowSelfRegistration: true).AddRegistrationGuard<StageRecorder>(ServiceLifetime.Singleton),
+        });
+        var recorder = app.App.Services.GetServices<ISlimRegistrationGuard>().OfType<StageRecorder>().Single();
+        recorder.Refuse = SlimRegistrationStage.Complete;
+
+        var refused = await app.CreateClient().PostJsonAsync("/auth/register",
+            new { email = "new-member", password = "Some-Long-Pass-1" }, HttpStatusCode.Forbidden);
+
+        Assert.Equal("registration_not_allowed", refused.Str("code"));
+        Assert.Equal([SlimRegistrationStage.Begin, SlimRegistrationStage.Complete], recorder.Seen.Select(s => s.Stage));
+        Assert.Null(await app.Users.FindByEmailAsync("new-member", default));
+    }
+
+    private sealed class StageRecorder : ISlimRegistrationGuard
+    {
+        public readonly ConcurrentQueue<(string Email, SlimRegistrationStage Stage, string? Kind, string? Provider)> Seen = new();
+        public SlimRegistrationStage? Refuse { get; set; }
+
+        public ValueTask<SlimVeto?> CheckAsync(SlimRegistrationContext context, CancellationToken ct)
+        {
+            Seen.Enqueue((context.Email, context.Stage, context.CredentialKind, context.Provider));
+            return ValueTask.FromResult(context.Stage == Refuse ? new SlimVeto("registration_not_allowed") : null);
+        }
+    }
+
     /// <summary>Self-service registration is closed; the host's own import (no request) is trusted.</summary>
     private sealed class RequestsOnlyGuard : ISlimRegistrationGuard
     {

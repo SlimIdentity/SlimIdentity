@@ -34,7 +34,7 @@ internal sealed class SlimHookRunner(IHttpContextAccessor httpContextAccessor, I
         }
     }
 
-    public async ValueTask<SlimVeto?> CheckRegistrationAsync(string email, string? provider, CancellationToken ct)
+    public async ValueTask<SlimVeto?> CheckRegistrationAsync(string email, SlimRegistrationStage stage, string? credentialKind, object? profile, string? provider, CancellationToken ct)
     {
         var http = httpContextAccessor.HttpContext;
         var scope = http is null ? rootServices.CreateAsyncScope() : (AsyncServiceScope?)null;
@@ -43,10 +43,13 @@ internal sealed class SlimHookRunner(IHttpContextAccessor httpContextAccessor, I
             SlimRegistrationContext? context = null;
             foreach (var guard in (http?.RequestServices ?? scope!.Value.ServiceProvider).GetServices<ISlimRegistrationGuard>())
             {
-                context ??= new SlimRegistrationContext { Email = email, Provider = provider, HttpContext = http };
+                context ??= new SlimRegistrationContext
+                {
+                    Email = email, Stage = stage, CredentialKind = credentialKind, Profile = profile, Provider = provider, HttpContext = http,
+                };
                 if (await guard.CheckAsync(context, ct) is { } veto)
                 {
-                    Log.RegistrationVetoed(logger, veto.Error);
+                    Log.RegistrationVetoed(logger, veto.Error, stage.ToString());
                     return veto;
                 }
             }
