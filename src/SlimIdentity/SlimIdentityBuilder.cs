@@ -309,8 +309,9 @@ public sealed class SlimIdentityBuilder
     /// host name) is written to the <see cref="SlimClaimTypes.Tenant"/> claim at sign-in and compared on every request –
     /// before any validation interval and also for access tokens with
     /// <see cref="SlimTokenOptions.ValidateSecurityStampOnEachRequest"/> = false. A cookie or token presented to another
-    /// tenant is rejected. Required with a store per tenant (see the multi-tenancy guide); keep the selector synchronous
-    /// and in memory.
+    /// tenant is rejected. Links, flow, refresh and other Data Protection tokens get the tenant in their purpose and do not
+    /// decrypt in another tenant. Required with a store per tenant (see the multi-tenancy guide); keep the selector
+    /// synchronous and in memory.
     /// </summary>
     /// <param name="keySelector">Returns the tenant of a request; <c>null</c> for requests outside any tenant.</param>
     public SlimIdentityBuilder UseTenantKey(Func<HttpContext, string?> keySelector)

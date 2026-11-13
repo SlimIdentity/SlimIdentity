@@ -339,6 +339,10 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
   24 hours `429 too_many_attempts`. Code mails share the limit of second-factor codes (5 per recipient in 15 minutes,
   `SlimMailThrottle.CodesPerRecipient`); a flow whose mail was held back accepts no code. The TypeScript client gets
   `verifyEmail`.
+- **Breaking** with `UseTenantKey`: the tenant of the request is part of the Data Protection purpose of every token
+  (mail links, invitations, sign-in flows, refresh tokens, remembered devices, exchange and link codes, passkey
+  ceremonies). A token of one tenant no longer decrypts in another; tokens issued before the update, or outside a
+  request, are only accepted outside every tenant.
 
 - **Breaking** (`ISlimUserStore`, user entity): password and second factor have separate attempt counters
   (`SlimUser.FailedSecondFactorAttempts`, `SecondFactorLockoutEndUtc`; new columns in the EF Core entity and the

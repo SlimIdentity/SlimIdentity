@@ -44,8 +44,12 @@ builder.Services.AddSlimIdentity(…)
 ```
 
 Every cookie and access token then carries the tenant (`slim_tenant` claim). A credential presented to another tenant
-is rejected on every request – before any interval or per-request switch applies – and a cookie is signed out. With
-`UseTenantKey` the tokens stay in their tenant regardless of id collisions, intervals or validation switches. Keep the
+is rejected on every request – before any interval or per-request switch applies – and a cookie is signed out. The
+tenant is also part of the Data Protection purpose of every other token – mail links, invitations, sign-in flows,
+refresh tokens, remembered devices, exchange codes, passkey ceremonies: one issued in tenant A does not decrypt in
+tenant B, whatever user it names. With `UseTenantKey` credentials stay in their tenant regardless of id collisions,
+intervals or validation switches. A token issued outside a request (a background job) carries no tenant and is only
+accepted by requests outside every tenant – create invitations and reset links within a request of the tenant. Keep the
 key stable (a tenant id rather than an alias host name), or a renamed host signs its users out.
 
 ## 3. Origins: `ISlimOriginPolicy`
@@ -104,11 +108,11 @@ domain's owner. Mails carry the tenant in their [context](../configuration.md#bu
 
 - **A store per tenant with colliding ids** (`1`, `2`, … in every tenant database) is supported: links, codes and
   refresh tokens carry the user's security stamp, so a reset link or token of tenant A is refused by user `1` of
-  tenant B (`TenantStoreTests`); cookies and access tokens are kept apart by `UseTenantKey` (section 2).
+  tenant B (`TenantStoreTests`); with `UseTenantKey` (section 2) every credential is bound to its tenant as well.
 - **The mail limit per recipient** (3 mails per kind and 15 minutes, 5 for sign-in codes) counts per address across tenants – it protects
   the mailbox, which is the same.
 - **Rate limiting** is per client IP. For a limit per tenant, use `.UseRateLimitPartitionKey(…)` with the tenant.
-- **Signing keys** (`JwtSecret`, Data Protection) are shared; credentials are kept apart by `UseTenantKey` and the
-  scoped stores, not by keys. Separate keys per tenant need separate deployments.
+- **Signing keys** (`JwtSecret`, Data Protection key ring) are shared; credentials are kept apart by `UseTenantKey`
+  (claim and purpose) and the scoped stores, not by keys. Separate keys per tenant need separate deployments.
 - **Options** (lockout, lifetimes, password rules) are the same for all tenants. A sign-in guard
   ([hooks](hooks.md)) can still refuse per tenant – e.g. a suspended tenant or an IP allow-list.

@@ -10,7 +10,12 @@ namespace SlimIdentity.Services;
 /// protected payload and checked against the injected <see cref="TimeProvider"/> – not the system clock the
 /// time-limited protector would use – so every expiry follows the same clock (and is testable).
 /// </summary>
-internal sealed class SlimWorkflowTokens(IDataProtectionProvider provider, TimeProvider time, ILogger<SlimWorkflowTokens> logger)
+internal sealed class SlimWorkflowTokens(
+    IDataProtectionProvider provider,
+    TimeProvider time,
+    IHttpContextAccessor httpContextAccessor,
+    IServiceProvider services,
+    ILogger<SlimWorkflowTokens> logger)
 {
     /// <summary>Format version of the protected plaintext: <c>v2.{expires unix ms}.{json}</c>.</summary>
     private const string FormatPrefix = "v2.";
@@ -31,6 +36,17 @@ internal sealed class SlimWorkflowTokens(IDataProtectionProvider provider, TimeP
         (JsonTypeInfo<T>?)SlimJsonContext.Default.GetTypeInfo(typeof(T))
         ?? throw new InvalidOperationException($"SlimIdentity: {typeof(T).Name} is missing in SlimJsonContext.");
 
+    /// <summary>
+    /// With <c>UseTenantKey</c>, the tenant of the request is part of the purpose: a token issued in one tenant does not
+    /// decrypt in another, whatever its payload. Outside a request or a tenant the plain purpose applies.
+    /// </summary>
+    private IDataProtector Protector(string purpose) =>
+        services.GetService<Authentication.SlimTenantBinding>() is { } binding
+        && httpContextAccessor.HttpContext is { } http
+        && binding.KeyOf(http) is { } tenant
+            ? provider.CreateProtector(purpose, "SlimIdentity.Tenant:" + tenant)
+            : provider.CreateProtector(purpose);
+
     /// <summary>Replaces <c>{token}</c> in the template, or returns the raw token if no template is configured.</summary>
     public static string BuildLink(string? template, string token) =>
         template is null ? token : template.Replace("{token}", Uri.EscapeDataString(token), StringComparison.Ordinal);
@@ -41,7 +57,7 @@ internal sealed class SlimWorkflowTokens(IDataProtectionProvider provider, TimeP
     public string Protect<T>(string purpose, T payload, TimeSpan lifetime, JsonTypeInfo<T> typeInfo)
     {
         var expires = (time.GetUtcNow() + lifetime).ToUnixTimeMilliseconds();
-        return provider.CreateProtector(purpose).Protect(
+        return Protector(purpose).Protect(
             string.Concat(FormatPrefix, expires.ToString(CultureInfo.InvariantCulture), ".", JsonSerializer.Serialize(payload, typeInfo)));
     }
 
@@ -61,7 +77,7 @@ internal sealed class SlimWorkflowTokens(IDataProtectionProvider provider, TimeP
         if (string.IsNullOrWhiteSpace(token) || token.Length > 8192) return false;
         try
         {
-            var plaintext = provider.CreateProtector(purpose).Unprotect(token);
+            var plaintext = Protector(purpose).Unprotect(token);
             var separator = plaintext.IndexOf('.', FormatPrefix.Length);
             if (!plaintext.StartsWith(FormatPrefix, StringComparison.Ordinal) || separator < 0
                 || !long.TryParse(plaintext.AsSpan(FormatPrefix.Length, separator - FormatPrefix.Length), NumberStyles.None, CultureInfo.InvariantCulture, out var expires))

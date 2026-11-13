@@ -5,6 +5,8 @@ using FsCheck;
 using FsCheck.Fluent;
 using FsCheck.Xunit;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using SlimIdentity.Http;
 using SlimIdentity.Security;
@@ -110,7 +112,8 @@ public sealed class PropertyTests
     // ------------------------------------------------------------------ workflow tokens
 
     private static readonly SlimWorkflowTokens Tokens =
-        new(new EphemeralDataProtectionProvider(), TimeProvider.System, NullLogger<SlimWorkflowTokens>.Instance);
+        new(new EphemeralDataProtectionProvider(), TimeProvider.System, new HttpContextAccessor(), new ServiceCollection().BuildServiceProvider(),
+            NullLogger<SlimWorkflowTokens>.Instance);
 
     [Property(MaxTest = Many)]
     public Property Arbitrary_strings_are_never_accepted_as_tokens() =>

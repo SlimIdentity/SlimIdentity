@@ -37,10 +37,11 @@ public sealed class TenantTests
                 : null;   // no tenant: the configured Links.* apply
     }
 
-    private static TestAppOptions Tenants(bool cors = false) => new()
+    private static TestAppOptions Tenants(bool cors = false, bool tenantKey = false) => new()
     {
         Builder = b =>
         {
+            if (tenantKey) b.UseTenantKey(TenantOf);
             b.AddOriginPolicy<TenantOriginPolicy>();
             b.AddLinkBuilder<TenantLinkBuilder>();
             b.AddExternalLoginStore<TestExternalLoginStore>(ServiceLifetime.Singleton);
@@ -91,6 +92,29 @@ public sealed class TenantTests
         await app.CreateClient().PostAsync("/auth/forgot-password", new { email = TestApp.AdminEmail });   // no tenant
         var defaultMail = await app.Mail.WaitForAsync("password-reset", TestApp.AdminEmail);
         Assert.StartsWith("https://default.app.test/reset-password?token=", defaultMail.Payload);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]   // shared keys: without a tenant key the tokens are valid in every tenant
+    public async Task Links_and_tokens_of_one_tenant_do_not_decrypt_in_another(bool tenantKey)
+    {
+        await using var app = await TestApp.StartAsync(Tenants(tenantKey: tenantKey));
+        var homeApi = Browser(app, "a.api.test", "https://a.app.test");
+        var foreignApi = Browser(app, "b.api.test", "https://b.app.test");
+        var expected = tenantKey ? HttpStatusCode.BadRequest : HttpStatusCode.OK;
+
+        await homeApi.PostAsync("/auth/forgot-password", new { email = TestApp.UserEmail });
+        var link = (await app.Mail.WaitForAsync("password-reset", TestApp.UserEmail)).Payload;
+        var token = Uri.UnescapeDataString(link[(link.IndexOf("#token=", StringComparison.Ordinal) + 7)..]);
+        var reset = await foreignApi.PostAsync("/auth/reset-password", new { token, newPassword = "Brand-New-Pass-1" });
+        Assert.Equal(expected, reset.StatusCode);
+        if (tenantKey) Assert.Equal(HttpStatusCode.OK, (await homeApi.PostAsync("/auth/reset-password", new { token, newPassword = "Brand-New-Pass-1" })).StatusCode);
+
+        var login = await homeApi.PostJsonAsync("/auth/login", new { email = TestApp.AdminEmail, password = TestApp.AdminPassword });
+        var refresh = await foreignApi.PostAsync("/auth/refresh", new { refreshToken = login.Str("refreshToken") });
+        Assert.Equal(tenantKey ? HttpStatusCode.Unauthorized : HttpStatusCode.OK, refresh.StatusCode);
+        if (tenantKey) Assert.Equal(HttpStatusCode.OK, (await homeApi.PostAsync("/auth/refresh", new { refreshToken = login.Str("refreshToken") })).StatusCode);
     }
 
     [Fact]
