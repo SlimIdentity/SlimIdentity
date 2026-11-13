@@ -32,8 +32,7 @@ with a new major version.
   stable event ids.
 - Race and replay hardening: sign-in challenges (`preAuthToken`) complete at most one sign-in
   (`ISlimTwoFactorStore.TryMarkChallengeUsedAsync`); atomic, narrow sign-in bookkeeping in `ISlimUserStore`
-  (`IncrementFailedLoginAttemptsAsync`, `SetLockoutEndAsync`, `ResetFailedLoginAttemptsAsync`,
-  `UpdatePasswordHashAsync`) so parallel failures are all counted and never undo a password change; `CreateAsync`
+  (`TryBeginAttemptAsync`, `ResetFailedAttemptsAsync`, `UpdatePasswordHashAsync`) so parallel failures are all counted and never undo a password change; `CreateAsync`
   returns `null` for a taken address (uniform answer for concurrent registrations); CSRF check for the 2FA step of a
   cookie sign-in.
 - Lean configuration: most apps set only `Tokens.JwtSecret` (enables bearer tokens), `Links.BaseUrl` (all mail links)
@@ -310,6 +309,22 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
 - Docs: getting-started starts with the null mail sender and without a refresh-token store; minimal-setup installs
   the EF provider and tooling and creates the database; hooks.md states that the session renewal after a password or
   2FA change skips the guards.
+
+### Changed
+
+- **Breaking** (`ISlimUserStore`, user entity): password and second factor have separate attempt counters
+  (`SlimUser.FailedSecondFactorAttempts`, `SecondFactorLockoutEndUtc`; new columns in the EF Core entity and the
+  templates). An attempt is reserved in the store before it is evaluated: `TryBeginAttemptAsync` counts and, at the
+  threshold, sets the lockout end in one atomic step, so the lockout also holds across instances; on success the
+  factor starts over. `ResetFailedAttemptsAsync(user, factor)` replaces `IncrementFailedLoginAttemptsAsync`,
+  `SetLockoutEndAsync` and `ResetFailedLoginAttemptsAsync`; `UpdateSecurityStateAsync` no longer writes the counters.
+  `/login` and `/login/2fa` no longer use the per-instance attempt gate.
+- A correct password no longer resets the second-factor counter; while the second factor is locked, `/login` answers
+  `423` after a correct password instead of sending a new code. A remembered device still signs in.
+- A lockout no longer blocks external logins or `ISlimAuthManager.SignInAsync` (`locked_out` is no longer returned
+  there), as for passkeys: there is nothing to guess. Block an account with `IsActive`.
+- Resetting the password by mail and `SetPasswordAsync` reset the password counter; `ResetTwoFactorAsync` resets the
+  second-factor counter; `UnlockAsync` resets both.
 
 ### Fixed
 

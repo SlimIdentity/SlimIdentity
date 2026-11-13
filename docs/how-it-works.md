@@ -38,7 +38,8 @@ silently gone:
 | :--- | :--- |
 | `FindByEmailAsync` compares case-insensitively; the address column has a **unique index** | `Me@x.com` and `me@x.com` become two accounts; duplicate registrations |
 | `CreateAsync` returns `null` when the address is taken (let the unique index decide) | concurrent registrations end in an error that reveals the account |
-| `IncrementFailedLoginAttemptsAsync` is **one atomic statement** (`SET n = n + 1 … RETURNING n`) | parallel password guesses are not counted – the lockout can be bypassed |
+| `TryBeginAttemptAsync` reads and writes counter and lockout end in **one atomic step** (row lock or compare-and-set) | parallel guesses are not all counted or all see the old counter – the lockout can be bypassed |
+| `UpdateSecurityStateAsync` never writes the attempt counters | a request with an outdated copy of the user lifts a lockout |
 | The sign-in bookkeeping methods touch **only their own columns** | a failed login can restore an old password hash after a password change |
 | `UpdatePasswordHashAsync` writes only if the hash is unchanged | a rehash can undo a password change |
 | Refresh tokens, recovery codes, 2FA codes and challenges are consumed **atomically** (`DELETE … RETURNING`, compare-and-set) | a stolen token or code can be used twice in parallel |

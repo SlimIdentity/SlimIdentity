@@ -39,7 +39,7 @@ All on `ISlimAuthManager` – **you** decide who may call them (role, [sudo mode
 | `SetPasswordAsync(user, password, mustChange: true)` | A start password, e.g. read out on the phone. With `mustChange` (default) the next sign-in yields no session until the user has chosen an own password. |
 | `CreateInvitationAsync(user, lifetime?)` | For accounts without a password: the link sets the first password. |
 | `ResetTwoFactorAsync(user)` | Phone and recovery codes lost: removes authenticator, recovery codes and remembered devices; all sessions end. |
-| `UnlockAsync(user)` | Ends a lockout. |
+| `UnlockAsync(user)` | Ends the lockout of password and second factor. |
 | `SignOutEverywhereAsync(user)` | Ends every session (ban, suspected compromise). |
 
 The administrator calls are logged without passwords or links: 4007 password set, 4008 reset link created, 4009 2FA

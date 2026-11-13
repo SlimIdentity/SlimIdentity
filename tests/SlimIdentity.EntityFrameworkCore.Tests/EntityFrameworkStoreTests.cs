@@ -27,6 +27,8 @@ public class GuidUser : ISlimUserEntity<Guid>
     public bool EmailConfirmed { get; set; }
     public int FailedLoginAttempts { get; set; }
     public DateTimeOffset? LockoutEndUtc { get; set; }
+    public int FailedSecondFactorAttempts { get; set; }
+    public DateTimeOffset? SecondFactorLockoutEndUtc { get; set; }
     public bool TwoFactorEnabled { get; set; }
     public bool PasswordChangeRequired { get; set; }
     public string? TotpSecret { get; set; }
@@ -58,6 +60,8 @@ public class IntUser : ISlimUserEntity<int>
     public bool EmailConfirmed { get; set; }
     public int FailedLoginAttempts { get; set; }
     public DateTimeOffset? LockoutEndUtc { get; set; }
+    public int FailedSecondFactorAttempts { get; set; }
+    public DateTimeOffset? SecondFactorLockoutEndUtc { get; set; }
     public bool TwoFactorEnabled { get; set; }
     public bool PasswordChangeRequired { get; set; }
     public string? TotpSecret { get; set; }
@@ -78,6 +82,8 @@ public abstract class KeyedUser<TKey> : ISlimUserEntity<TKey>
     public bool EmailConfirmed { get; set; }
     public int FailedLoginAttempts { get; set; }
     public DateTimeOffset? LockoutEndUtc { get; set; }
+    public int FailedSecondFactorAttempts { get; set; }
+    public DateTimeOffset? SecondFactorLockoutEndUtc { get; set; }
     public bool TwoFactorEnabled { get; set; }
     public bool PasswordChangeRequired { get; set; }
     public string? TotpSecret { get; set; }
@@ -195,7 +201,7 @@ public sealed class EntityFrameworkStoreTests
     }
 
     [Fact]
-    public async Task Counting_a_failure_of_a_user_deleted_meanwhile_is_no_error()
+    public async Task Reserving_an_attempt_for_a_user_deleted_meanwhile_returns_null()
     {
         var file = SqliteFile();
         await using var sp = await BuildAsync<GuidContext, GuidUser, Guid>(o => o.UseSqlite(file));
@@ -204,7 +210,7 @@ public sealed class EntityFrameworkStoreTests
         var user = (await store.CreateAsync(new SlimNewUser { Email = "gone@test.local" }, default))!;
         await scope.ServiceProvider.GetRequiredService<GuidContext>().Users.ExecuteDeleteAsync();   // deleted during the sign-in
 
-        Assert.Equal(0, await store.IncrementFailedLoginAttemptsAsync(user, default));
+        Assert.Null(await store.TryBeginAttemptAsync(user, new SlimAttemptRequest(SlimAttemptFactor.Password, DateTimeOffset.UtcNow, new SlimLockoutOptions()), default));
     }
 
     [Fact]

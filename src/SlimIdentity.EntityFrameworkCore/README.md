@@ -22,6 +22,8 @@ public class AppUser : ISlimUserEntity<Guid>
     public bool EmailConfirmed { get; set; }
     public int FailedLoginAttempts { get; set; }
     public DateTimeOffset? LockoutEndUtc { get; set; }
+    public int FailedSecondFactorAttempts { get; set; }
+    public DateTimeOffset? SecondFactorLockoutEndUtc { get; set; }
     public bool TwoFactorEnabled { get; set; }
     public bool PasswordChangeRequired { get; set; }
     public string? TotpSecret { get; set; }

@@ -75,6 +75,23 @@ public sealed class AccountTests
     }
 
     [Fact]
+    public async Task Reset_password_ends_only_the_password_lockout()
+    {
+        await using var app = await TestApp.StartAsync();
+        var id = app.Users.Get(TestApp.UserEmail).Id;
+        app.Users.SetAttempts(id, SlimAttemptFactor.Password, 5, app.Time.GetUtcNow().AddMinutes(5));
+        app.Users.SetAttempts(id, SlimAttemptFactor.SecondFactor, 5, app.Time.GetUtcNow().AddMinutes(5));
+        var client = app.CreateClient();
+        await client.PostAsync("/auth/forgot-password", new { email = TestApp.UserEmail });
+        var token = (await app.Mail.WaitForAsync("password-reset", TestApp.UserEmail)).Payload;
+
+        await client.PostJsonAsync("/auth/reset-password", new { token, newPassword = "Reset1234!" });
+
+        var user = app.Users.Get(TestApp.UserEmail);
+        Assert.Equal((0, null), (user.FailedLoginAttempts, user.LockoutEndUtc));
+        Assert.True(user.IsSecondFactorLockedOut(app.Time.GetUtcNow()));   // the mailbox proves no second factor
+    }
+    [Fact]
     public async Task Me_returns_the_user_without_internal_claims()
     {
         await using var app = await TestApp.StartAsync();

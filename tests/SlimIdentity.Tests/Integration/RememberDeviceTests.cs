@@ -47,6 +47,25 @@ public sealed class RememberDeviceTests
     }
 
     [Fact]
+    public async Task A_remembered_device_skips_a_locked_second_factor_but_not_a_locked_password()
+    {
+        await using var app = await TestApp.StartAsync(Enabled());
+        await EnableEmailTwoFactorAsync(app, TestApp.UserEmail, TestApp.UserPassword);
+        var rememberToken = (await SignInWithSecondFactorAsync(app, app.CreateClient(), TestApp.UserEmail, TestApp.UserPassword, rememberDevice: true))
+            .Str("twoFactorRememberToken");
+        var id = app.Users.Get(TestApp.UserEmail).Id;
+        app.Users.SetAttempts(id, SlimAttemptFactor.SecondFactor, 5, app.Time.GetUtcNow().AddMinutes(5));
+
+        var remembered = await app.CreateClient().PostJsonAsync("/auth/login",
+            new { email = TestApp.UserEmail, password = TestApp.UserPassword, twoFactorRememberToken = rememberToken });
+        Assert.False(string.IsNullOrEmpty(remembered.Str("accessToken")));
+        Assert.True(app.Users.Get(TestApp.UserEmail).IsSecondFactorLockedOut(app.Time.GetUtcNow()));   // not reset by the password
+
+        app.Users.SetAttempts(id, SlimAttemptFactor.Password, 5, app.Time.GetUtcNow().AddMinutes(5));
+        await app.CreateClient().PostJsonAsync("/auth/login",
+            new { email = TestApp.UserEmail, password = TestApp.UserPassword, twoFactorRememberToken = rememberToken }, HttpStatusCode.Unauthorized);   // no hint by default
+    }
+    [Fact]
     public async Task Browsers_remember_the_device_with_a_cookie()
     {
         await using var app = await TestApp.StartAsync(Enabled());

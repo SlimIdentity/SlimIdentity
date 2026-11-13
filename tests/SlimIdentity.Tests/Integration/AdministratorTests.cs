@@ -193,4 +193,56 @@ public sealed class AdministratorTests
 
         await app.LoginBearerAsync(TestApp.UserEmail, TestApp.UserPassword);
     }
+
+    // ------------------------------------------------------------------ attempt counters per factor
+
+    private static void LockBothFactors(TestApp app)
+    {
+        var id = app.Users.Get(TestApp.UserEmail).Id;
+        app.Users.SetAttempts(id, SlimAttemptFactor.Password, 5, app.Time.GetUtcNow().AddMinutes(5));
+        app.Users.SetAttempts(id, SlimAttemptFactor.SecondFactor, 5, app.Time.GetUtcNow().AddMinutes(5));
+    }
+
+    [Fact]
+    public async Task Unlocking_resets_both_factors()
+    {
+        await using var app = await TestApp.StartAsync(WithAdminEndpoints());
+        var admin = await AdminAsync(app);
+        LockBothFactors(app);
+
+        await admin.PostJsonAsync($"/api/admin/unlock/{TestApp.UserEmail}");
+
+        var user = app.Users.Get(TestApp.UserEmail);
+        Assert.Equal((0, null, 0, null), (user.FailedLoginAttempts, user.LockoutEndUtc, user.FailedSecondFactorAttempts, user.SecondFactorLockoutEndUtc));
+    }
+
+    [Fact]
+    public async Task Setting_a_password_resets_only_the_password_counter()
+    {
+        await using var app = await TestApp.StartAsync(WithAdminEndpoints());
+        var admin = await AdminAsync(app);
+        LockBothFactors(app);
+
+        await admin.PostJsonAsync("/api/admin/set-password", new { email = TestApp.UserEmail, password = "Set-By-Admin-2026", mustChange = false });
+
+        var user = app.Users.Get(TestApp.UserEmail);
+        Assert.Equal((0, null), (user.FailedLoginAttempts, user.LockoutEndUtc));
+        Assert.Equal(5, user.FailedSecondFactorAttempts);
+        Assert.True(user.IsSecondFactorLockedOut(app.Time.GetUtcNow()));
+    }
+
+    [Fact]
+    public async Task Resetting_the_second_factor_resets_only_its_counter()
+    {
+        await using var app = await TestApp.StartAsync(WithAdminEndpoints());
+        var admin = await AdminAsync(app);
+        LockBothFactors(app);
+
+        await admin.PostJsonAsync($"/api/admin/reset-2fa/{TestApp.UserEmail}");
+
+        var user = app.Users.Get(TestApp.UserEmail);
+        Assert.Equal((0, null), (user.FailedSecondFactorAttempts, user.SecondFactorLockoutEndUtc));
+        Assert.Equal(5, user.FailedLoginAttempts);
+        Assert.True(user.IsLockedOut(app.Time.GetUtcNow()));
+    }
 }

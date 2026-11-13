@@ -146,7 +146,7 @@ public sealed class ReviewRound1Tests
             app.CreateClient().PostAsync("/auth/login/2fa", new { preAuthToken = preAuth, code = g }))));
 
         // every evaluated wrong guess is counted – more than five means guesses slipped past the lockout
-        Assert.Equal(5, app.Users.Get(TestApp.UserEmail).FailedLoginAttempts);
+        Assert.Equal(5, app.Users.Get(TestApp.UserEmail).FailedSecondFactorAttempts);
     }
 
     // ------------------------------------------------------------------ R5

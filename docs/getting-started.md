@@ -33,10 +33,9 @@ public interface ISlimUserStore
     Task<bool> UpdateEmailAsync(SlimUser user, string newEmail, CancellationToken ct); // false if the address is taken
     Task<IReadOnlyCollection<Claim>> GetClaimsAsync(SlimUser user, CancellationToken ct); // roles, tenant id, …
 
-    // sign-in bookkeeping – narrow, atomic statements (one UPDATE each)
-    Task<int> IncrementFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct);  // returns the new count
-    Task SetLockoutEndAsync(SlimUser user, DateTimeOffset? lockoutEndUtc, CancellationToken ct);
-    Task ResetFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct);
+    // sign-in bookkeeping – narrow, atomic operations on their own columns
+    Task<SlimAttemptReservation?> TryBeginAttemptAsync(SlimUser user, SlimAttemptRequest attempt, CancellationToken ct); // count before the check
+    Task ResetFailedAttemptsAsync(SlimUser user, SlimAttemptFactor factor, CancellationToken ct);
     Task UpdatePasswordHashAsync(SlimUser user, string currentHash, string newHash, CancellationToken ct); // only if unchanged
 }
 ```
@@ -47,7 +46,8 @@ Copy the store from the samples rather than writing it from scratch – the rule
 [How SlimIdentity works](how-it-works.md#your-part-the-stores).
 
 `SlimUser` is a plain transfer object with the security fields only (`Id`, `Email`, `PasswordHash`, `SecurityStamp`,
-`IsActive`, `EmailConfirmed`, `FailedLoginAttempts`, `LockoutEndUtc`, `TwoFactorEnabled`, `PasswordChangeRequired`). Your own user entity stays
+`IsActive`, `EmailConfirmed`, `FailedLoginAttempts`, `LockoutEndUtc`, `FailedSecondFactorAttempts`, `SecondFactorLockoutEndUtc`,
+`TwoFactorEnabled`, `PasswordChangeRequired`). Your own user entity stays
 yours – map it in the store.
 
 ## 3. Implement (or stub) the e-mail sender

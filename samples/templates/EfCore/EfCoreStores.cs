@@ -72,32 +72,41 @@ public sealed class EfCoreUserStore(IdentityDb identity) : ISlimUserStore
 
     // ---- sign-in bookkeeping: narrow, atomic updates (never write back a whole, possibly outdated user)
 
-    public async Task<int> IncrementFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct)
+    // Reserves an attempt before it is checked. Portable compare-and-set loop: of parallel attempts at the threshold exactly
+    // one reaches it (with raw SQL a row lock does the same: SELECT … FOR UPDATE, see the Dapper template).
+    public async Task<SlimAttemptReservation?> TryBeginAttemptAsync(SlimUser user, SlimAttemptRequest attempt, CancellationToken ct)
     {
         var id = Guid.Parse(user.Id);
-        // portable compare-and-set loop (with raw SQL: UPDATE … SET failed = failed + 1 … RETURNING failed)
-        while (true)
+        var password = attempt.Factor == SlimAttemptFactor.Password;
+        for (var i = 0; i < 20; i++)
         {
-            if (await db.Users.AsNoTracking().Where(u => u.Id == id).Select(u => (int?)u.FailedLoginAttempts).FirstOrDefaultAsync(ct) is not { } current)
-                return 0;   // deleted during the sign-in
-            var updated = await db.Users.Where(u => u.Id == id && u.FailedLoginAttempts == current)
-                .ExecuteUpdateAsync(s => s.SetProperty(u => u.FailedLoginAttempts, current + 1), ct);
-            if (updated == 1) return current + 1;
+            var state = await db.Users.AsNoTracking().Where(u => u.Id == id)
+                .Select(u => password
+                    ? new { Count = u.FailedLoginAttempts, End = u.LockoutEndUtc }
+                    : new { Count = u.FailedSecondFactorAttempts, End = u.SecondFactorLockoutEndUtc })
+                .FirstOrDefaultAsync(ct);
+            if (state is null) return null;   // deleted during the sign-in
+            if (attempt.IsLockedOut(state.End)) return SlimAttemptReservation.LockedOut(state.End!.Value);
+
+            int oldCount = state.Count, newCount = oldCount + 1;
+            DateTimeOffset? oldEnd = state.End, newEnd = attempt.NextLockoutEnd(newCount, oldEnd);
+            var updated = password
+                ? await db.Users.Where(u => u.Id == id && u.FailedLoginAttempts == oldCount && u.LockoutEndUtc == oldEnd)
+                    .ExecuteUpdateAsync(s => s.SetProperty(u => u.FailedLoginAttempts, newCount).SetProperty(u => u.LockoutEndUtc, newEnd), ct)
+                : await db.Users.Where(u => u.Id == id && u.FailedSecondFactorAttempts == oldCount && u.SecondFactorLockoutEndUtc == oldEnd)
+                    .ExecuteUpdateAsync(s => s.SetProperty(u => u.FailedSecondFactorAttempts, newCount).SetProperty(u => u.SecondFactorLockoutEndUtc, newEnd), ct);
+            if (updated == 1) return SlimAttemptReservation.Reserved(newCount);
         }
+        return null;   // permanent contention: the attempt is not checked
     }
 
-    public Task SetLockoutEndAsync(SlimUser user, DateTimeOffset? lockoutEndUtc, CancellationToken ct)
+    public Task ResetFailedAttemptsAsync(SlimUser user, SlimAttemptFactor factor, CancellationToken ct)
     {
         var id = Guid.Parse(user.Id);
-        return db.Users.Where(u => u.Id == id).ExecuteUpdateAsync(s => s.SetProperty(u => u.LockoutEndUtc, lockoutEndUtc), ct);
-    }
-
-    public Task ResetFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct)
-    {
-        var id = Guid.Parse(user.Id);
-        return db.Users.Where(u => u.Id == id).ExecuteUpdateAsync(s => s
-            .SetProperty(u => u.FailedLoginAttempts, 0)
-            .SetProperty(u => u.LockoutEndUtc, (DateTimeOffset?)null), ct);
+        var row = db.Users.Where(u => u.Id == id);
+        return factor == SlimAttemptFactor.Password
+            ? row.ExecuteUpdateAsync(s => s.SetProperty(u => u.FailedLoginAttempts, 0).SetProperty(u => u.LockoutEndUtc, (DateTimeOffset?)null), ct)
+            : row.ExecuteUpdateAsync(s => s.SetProperty(u => u.FailedSecondFactorAttempts, 0).SetProperty(u => u.SecondFactorLockoutEndUtc, (DateTimeOffset?)null), ct);
     }
 
     // conditional: a password change in the meantime wins over the transparent rehash
@@ -116,8 +125,6 @@ public sealed class EfCoreUserStore(IdentityDb identity) : ISlimUserStore
             .SetProperty(u => u.PasswordHash, user.PasswordHash)
             .SetProperty(u => u.SecurityStamp, user.SecurityStamp)
             .SetProperty(u => u.EmailConfirmed, user.EmailConfirmed)
-            .SetProperty(u => u.FailedLoginAttempts, user.FailedLoginAttempts)
-            .SetProperty(u => u.LockoutEndUtc, user.LockoutEndUtc)
             .SetProperty(u => u.TwoFactorEnabled, user.TwoFactorEnabled)
             .SetProperty(u => u.PasswordChangeRequired, user.PasswordChangeRequired), ct);
     }
@@ -182,6 +189,8 @@ public sealed class EfCoreUserStore(IdentityDb identity) : ISlimUserStore
         EmailConfirmed = u.EmailConfirmed,
         FailedLoginAttempts = u.FailedLoginAttempts,
         LockoutEndUtc = u.LockoutEndUtc,
+        FailedSecondFactorAttempts = u.FailedSecondFactorAttempts,
+        SecondFactorLockoutEndUtc = u.SecondFactorLockoutEndUtc,
         TwoFactorEnabled = u.TwoFactorEnabled,
         PasswordChangeRequired = u.PasswordChangeRequired,
     };

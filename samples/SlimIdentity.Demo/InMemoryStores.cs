@@ -53,24 +53,31 @@ public sealed class InMemoryUserStore : ISlimUserStore
         }
     }
 
-    // sign-in bookkeeping: narrow, atomic updates (never write back a whole, possibly outdated user)
-    public Task<int> IncrementFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct)
+    // sign-in bookkeeping: reserve an attempt atomically before it is checked (never write back a whole, possibly outdated user)
+    public Task<SlimAttemptReservation?> TryBeginAttemptAsync(SlimUser user, SlimAttemptRequest attempt, CancellationToken ct)
     {
-        var stored = _users[user.Id];
-        lock (stored) return Task.FromResult(++stored.FailedLoginAttempts);
+        if (!_users.TryGetValue(user.Id, out var stored)) return Task.FromResult<SlimAttemptReservation?>(null);
+        lock (stored)
+        {
+            var password = attempt.Factor == SlimAttemptFactor.Password;
+            var end = password ? stored.LockoutEndUtc : stored.SecondFactorLockoutEndUtc;
+            if (attempt.IsLockedOut(end)) return Task.FromResult<SlimAttemptReservation?>(SlimAttemptReservation.LockedOut(end!.Value));
+            var count = (password ? stored.FailedLoginAttempts : stored.FailedSecondFactorAttempts) + 1;
+            var newEnd = attempt.NextLockoutEnd(count, end);
+            if (password) (stored.FailedLoginAttempts, stored.LockoutEndUtc) = (count, newEnd);
+            else (stored.FailedSecondFactorAttempts, stored.SecondFactorLockoutEndUtc) = (count, newEnd);
+            return Task.FromResult<SlimAttemptReservation?>(SlimAttemptReservation.Reserved(count));
+        }
     }
 
-    public Task SetLockoutEndAsync(SlimUser user, DateTimeOffset? lockoutEndUtc, CancellationToken ct)
+    public Task ResetFailedAttemptsAsync(SlimUser user, SlimAttemptFactor factor, CancellationToken ct)
     {
         var stored = _users[user.Id];
-        lock (stored) stored.LockoutEndUtc = lockoutEndUtc;
-        return Task.CompletedTask;
-    }
-
-    public Task ResetFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct)
-    {
-        var stored = _users[user.Id];
-        lock (stored) { stored.FailedLoginAttempts = 0; stored.LockoutEndUtc = null; }
+        lock (stored)
+        {
+            if (factor == SlimAttemptFactor.Password) (stored.FailedLoginAttempts, stored.LockoutEndUtc) = (0, null);
+            else (stored.FailedSecondFactorAttempts, stored.SecondFactorLockoutEndUtc) = (0, null);
+        }
         return Task.CompletedTask;
     }
 
@@ -88,8 +95,6 @@ public sealed class InMemoryUserStore : ISlimUserStore
         stored.PasswordHash = user.PasswordHash;
         stored.SecurityStamp = user.SecurityStamp;
         stored.EmailConfirmed = user.EmailConfirmed;
-        stored.FailedLoginAttempts = user.FailedLoginAttempts;
-        stored.LockoutEndUtc = user.LockoutEndUtc;
         stored.TwoFactorEnabled = user.TwoFactorEnabled;
         stored.PasswordChangeRequired = user.PasswordChangeRequired;
         return Task.CompletedTask;
@@ -136,7 +141,9 @@ public sealed class InMemoryUserStore : ISlimUserStore
     {
         Id = u.Id, Email = u.Email, PasswordHash = u.PasswordHash, SecurityStamp = u.SecurityStamp,
         IsActive = u.IsActive, EmailConfirmed = u.EmailConfirmed, FailedLoginAttempts = u.FailedLoginAttempts,
-        LockoutEndUtc = u.LockoutEndUtc, TwoFactorEnabled = u.TwoFactorEnabled, PasswordChangeRequired = u.PasswordChangeRequired,
+        LockoutEndUtc = u.LockoutEndUtc, FailedSecondFactorAttempts = u.FailedSecondFactorAttempts,
+        SecondFactorLockoutEndUtc = u.SecondFactorLockoutEndUtc,
+        TwoFactorEnabled = u.TwoFactorEnabled, PasswordChangeRequired = u.PasswordChangeRequired,
     };
 }
 

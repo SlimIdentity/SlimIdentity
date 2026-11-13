@@ -40,7 +40,9 @@ public sealed class StoreConformanceTests
         Assert.Contains(failed, r => r.Contains("case-insensitively"));
         Assert.Contains(failed, r => r.Contains("taken address"));
         Assert.Contains(failed, r => r.Contains("parallel registrations"));
-        Assert.Contains(failed, r => r.Contains("counts parallel failures atomically"));
+        Assert.Contains(failed, r => r.Contains("reserves parallel attempts atomically"));
+        Assert.Contains(failed, r => r.Contains("separate attempt counters"));
+        Assert.Contains(failed, r => r.Contains("never writes the attempt counters"));
         Assert.Contains(failed, r => r.Contains("never overwrites the password hash"));
         Assert.Contains(failed, r => r.Contains("only if the hash is unchanged"));
         Assert.Contains(failed, r => r.Contains("only the stamp and only if it is unchanged"));
@@ -94,22 +96,18 @@ public sealed class StoreConformanceTests
             return Task.FromResult(true);
         }
 
-        public async Task<int> IncrementFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct)
+        public async Task<SlimAttemptReservation?> TryBeginAttemptAsync(SlimUser user, SlimAttemptRequest attempt, CancellationToken ct)
         {
-            var current = (await FindByIdAsync(user.Id, ct))!.FailedLoginAttempts;
+            var current = (await FindByIdAsync(user.Id, ct))!;
+            if (attempt.IsLockedOut(current.LockoutEndUtc)) return SlimAttemptReservation.LockedOut(current.LockoutEndUtc!.Value);
             await Task.Delay(5, ct);
-            user.FailedLoginAttempts = current + 1;
+            user.FailedLoginAttempts = current.FailedLoginAttempts + 1;   // one counter for every factor
+            user.LockoutEndUtc = attempt.NextLockoutEnd(user.FailedLoginAttempts, current.LockoutEndUtc);
             await UpdateSecurityStateAsync(user, ct);   // writes back the whole (outdated) user
-            return user.FailedLoginAttempts;
+            return SlimAttemptReservation.Reserved(user.FailedLoginAttempts);
         }
 
-        public Task SetLockoutEndAsync(SlimUser user, DateTimeOffset? lockoutEndUtc, CancellationToken ct)
-        {
-            user.LockoutEndUtc = lockoutEndUtc;
-            return UpdateSecurityStateAsync(user, ct);
-        }
-
-        public Task ResetFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct)
+        public Task ResetFailedAttemptsAsync(SlimUser user, SlimAttemptFactor factor, CancellationToken ct)
         {
             user.FailedLoginAttempts = 0;
             user.LockoutEndUtc = null;

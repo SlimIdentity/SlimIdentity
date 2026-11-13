@@ -11,6 +11,8 @@ CREATE TABLE users (
     email_confirmed       boolean      NOT NULL DEFAULT false,
     failed_login_attempts int          NOT NULL DEFAULT 0,
     lockout_end_utc       timestamptz  NULL,
+    failed_second_factor_attempts int  NOT NULL DEFAULT 0,
+    second_factor_lockout_end_utc timestamptz NULL,
     two_factor_enabled    boolean      NOT NULL DEFAULT false,
     password_change_required boolean   NOT NULL DEFAULT false,
     totp_secret           text         NULL,   -- ISlimTwoFactorStore; already encrypted by SlimIdentity

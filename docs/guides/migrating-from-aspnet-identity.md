@@ -15,6 +15,7 @@ working – users do not have to reset their passwords. The migration is mostly 
 | `EmailConfirmed` | `EmailConfirmed` | |
 | `AccessFailedCount` | `FailedLoginAttempts` | |
 | `LockoutEnd` | `LockoutEndUtc` | ignore it if `LockoutEnabled` is false for a user |
+| – | `FailedSecondFactorAttempts`, `SecondFactorLockoutEndUtc` | new columns, start with `0` / `null` (ASP.NET Core Identity counts 2FA failures on `AccessFailedCount`) |
 | `TwoFactorEnabled` | `TwoFactorEnabled` | |
 | – | `PasswordChangeRequired` | new; `false` for migrated users |
 | – | `IsActive` | new; map from your own flag (e.g. not deleted) or always `true` |

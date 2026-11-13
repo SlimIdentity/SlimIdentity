@@ -21,14 +21,15 @@ public interface ISlimUserStore
     Task<SlimUser?> CreateAsync(SlimNewUser newUser, CancellationToken ct);
 
     /// <summary>
-    /// Persists all security fields of <paramref name="user"/>:
-    /// PasswordHash, SecurityStamp, EmailConfirmed, FailedLoginAttempts, LockoutEndUtc, TwoFactorEnabled,
-    /// PasswordChangeRequired.
+    /// Persists the security fields of <paramref name="user"/>:
+    /// PasswordHash, SecurityStamp, EmailConfirmed, TwoFactorEnabled, PasswordChangeRequired.
+    /// Must <b>not</b> write the failed-attempt counters or lockout ends – those change only through
+    /// <see cref="TryBeginAttemptAsync"/> and <see cref="ResetFailedAttemptsAsync"/>.
     /// </summary>
     /// <remarks>
     /// Used for deliberate state changes (password change, 2FA, e-mail confirmation, …). The high-frequency sign-in
-    /// bookkeeping uses the narrow methods below instead, so that a failed login can never write back an outdated
-    /// password hash or security stamp.
+    /// bookkeeping uses the narrow methods below instead, so that a failed attempt can never write back an outdated
+    /// password hash or security stamp, and an outdated copy of the user can never undo a counted attempt.
     /// </remarks>
     Task UpdateSecurityStateAsync(SlimUser user, CancellationToken ct);
 
@@ -46,19 +47,32 @@ public interface ISlimUserStore
     Task<bool> UpdateSecurityStampAsync(SlimUser user, string expectedStamp, string newStamp, CancellationToken ct);
 
     /// <summary>
-    /// Adds one failed sign-in attempt <b>atomically</b> and returns the new count; touches no other field, e.g.
-    /// <c>UPDATE users SET failed_login_attempts = failed_login_attempts + 1 WHERE id = @id RETURNING failed_login_attempts</c>.
+    /// Reserves one attempt of <see cref="SlimAttemptRequest.Factor"/> <b>before</b> it is checked, as one atomic step
+    /// on the stored counter and lockout end of that factor (password: <see cref="SlimUser.FailedLoginAttempts"/> and
+    /// <see cref="SlimUser.LockoutEndUtc"/>; second factor: <see cref="SlimUser.FailedSecondFactorAttempts"/> and
+    /// <see cref="SlimUser.SecondFactorLockoutEndUtc"/>). Touches no other field.
+    /// <list type="number">
+    /// <item>If <see cref="SlimAttemptRequest.IsLockedOut"/> holds for the stored end: change nothing, return
+    /// <see cref="SlimAttemptReservation.LockedOut"/> with that end.</item>
+    /// <item>Otherwise store counter + 1 and <see cref="SlimAttemptRequest.NextLockoutEnd"/> as the new end, and return
+    /// <see cref="SlimAttemptReservation.Reserved"/> with the new counter.</item>
+    /// </list>
+    /// Return <c>null</c> if the user no longer exists, or if the attempt could not be reserved (e.g. under heavy
+    /// contention) – it is then not checked.
     /// </summary>
-    Task<int> IncrementFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct);
-
-    /// <summary>Sets <b>only</b> the lockout end (<see cref="SlimUser.LockoutEndUtc"/>).</summary>
-    Task SetLockoutEndAsync(SlimUser user, DateTimeOffset? lockoutEndUtc, CancellationToken ct);
+    /// <remarks>
+    /// Must be atomic across all instances: of parallel attempts at the threshold exactly one may reach it, every later
+    /// one must see the lockout. Typical implementations: a row lock (<c>SELECT … FOR UPDATE</c>) in a transaction, or a
+    /// compare-and-set loop (<c>UPDATE … SET counter = @new, end = @newEnd WHERE id = @id AND counter = @old AND
+    /// end IS NOT DISTINCT FROM @oldEnd</c>, retried on 0 affected rows).
+    /// </remarks>
+    Task<SlimAttemptReservation?> TryBeginAttemptAsync(SlimUser user, SlimAttemptRequest attempt, CancellationToken ct);
 
     /// <summary>
-    /// After a successful sign-in: sets <b>only</b> <see cref="SlimUser.FailedLoginAttempts"/> to 0 and
-    /// <see cref="SlimUser.LockoutEndUtc"/> to <c>null</c>.
+    /// Sets <b>only</b> the counter of <paramref name="factor"/> to 0 and its lockout end to <c>null</c> (after a
+    /// successful check, an unlock, a new password, …). The other factor is left alone.
     /// </summary>
-    Task ResetFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct);
+    Task ResetFailedAttemptsAsync(SlimUser user, SlimAttemptFactor factor, CancellationToken ct);
 
     /// <summary>
     /// Transparent rehash after a successful sign-in (outdated hash parameters): replaces the password hash with
@@ -107,4 +121,83 @@ public sealed class SlimNewUser
 
     /// <summary>The external provider an account is created for (automatic registration), else <c>null</c>.</summary>
     public string? Provider { get; init; }
+}
+
+/// <summary>The factor a failed-attempt counter belongs to. Each factor has its own counter and lockout.</summary>
+public enum SlimAttemptFactor
+{
+    /// <summary>The password (<see cref="SlimUser.FailedLoginAttempts"/>, <see cref="SlimUser.LockoutEndUtc"/>).</summary>
+    Password,
+
+    /// <summary>
+    /// The second factor – authenticator, e-mail or recovery code (<see cref="SlimUser.FailedSecondFactorAttempts"/>,
+    /// <see cref="SlimUser.SecondFactorLockoutEndUtc"/>).
+    /// </summary>
+    SecondFactor,
+}
+
+/// <summary>
+/// One attempt to reserve with <see cref="ISlimUserStore.TryBeginAttemptAsync"/>. Carries the lockout policy, so a
+/// store only reads, compares and writes.
+/// </summary>
+public sealed class SlimAttemptRequest
+{
+    private readonly SlimLockoutOptions _lockout;
+
+    /// <summary>Creates a request; <paramref name="lockout"/> must have <c>MaxFailedAttempts</c> &gt; 0.</summary>
+    public SlimAttemptRequest(SlimAttemptFactor factor, DateTimeOffset utcNow, SlimLockoutOptions lockout)
+    {
+        ArgumentNullException.ThrowIfNull(lockout);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(lockout.MaxFailedAttempts);
+        Factor = factor;
+        UtcNow = utcNow;
+        _lockout = lockout;
+    }
+
+    /// <summary>The counter to reserve on.</summary>
+    public SlimAttemptFactor Factor { get; }
+
+    /// <summary>The point in time of the attempt.</summary>
+    public DateTimeOffset UtcNow { get; }
+
+    /// <summary>Whether the stored lockout end of the factor still blocks the attempt.</summary>
+    public bool IsLockedOut(DateTimeOffset? lockoutEndUtc) => lockoutEndUtc is { } end && end > UtcNow;
+
+    /// <summary>
+    /// The lockout end to store together with the new counter: a new end if <paramref name="newFailedAttempts"/>
+    /// reaches the next multiple of <c>MaxFailedAttempts</c>, else <paramref name="currentLockoutEndUtc"/> unchanged.
+    /// </summary>
+    public DateTimeOffset? NextLockoutEnd(int newFailedAttempts, DateTimeOffset? currentLockoutEndUtc) =>
+        LockoutNumber(newFailedAttempts) is var n and > 0
+            ? UtcNow + Services.SlimCredentialService.LockoutDuration(_lockout, n)
+            : currentLockoutEndUtc;
+
+    /// <summary>1, 2, 3, … if this counter value locks the factor (the n-th lockout of the series), else 0.</summary>
+    internal int LockoutNumber(int failedAttempts) =>
+        failedAttempts > 0 && failedAttempts % _lockout.MaxFailedAttempts == 0 ? failedAttempts / _lockout.MaxFailedAttempts : 0;
+}
+
+/// <summary>The answer of <see cref="ISlimUserStore.TryBeginAttemptAsync"/>.</summary>
+public sealed class SlimAttemptReservation
+{
+    private SlimAttemptReservation(int failedAttempts, DateTimeOffset? lockoutEndUtc)
+    {
+        FailedAttempts = failedAttempts;
+        LockoutEndUtc = lockoutEndUtc;
+    }
+
+    /// <summary>The attempt was counted; <paramref name="failedAttempts"/> is the new counter value.</summary>
+    public static SlimAttemptReservation Reserved(int failedAttempts) => new(failedAttempts, null);
+
+    /// <summary>The factor is locked until <paramref name="lockoutEndUtc"/>; nothing was counted.</summary>
+    public static SlimAttemptReservation LockedOut(DateTimeOffset lockoutEndUtc) => new(0, lockoutEndUtc);
+
+    /// <summary>Whether the factor was locked and the attempt was not counted.</summary>
+    public bool IsLockedOut => LockoutEndUtc is not null;
+
+    /// <summary>The new counter value of a reserved attempt.</summary>
+    public int FailedAttempts { get; }
+
+    /// <summary>The end of the lockout that refused the attempt.</summary>
+    public DateTimeOffset? LockoutEndUtc { get; }
 }

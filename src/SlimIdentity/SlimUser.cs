@@ -29,11 +29,20 @@ public sealed class SlimUser
     /// <summary>Whether the e-mail address has been verified.</summary>
     public bool EmailConfirmed { get; set; }
 
-    /// <summary>Consecutive failed login attempts (account lockout).</summary>
+    /// <summary>Consecutive failed password attempts (account lockout of the password).</summary>
     public int FailedLoginAttempts { get; set; }
 
-    /// <summary>Point in time until which the account is locked because of brute force.</summary>
+    /// <summary>
+    /// Point in time until which the password is locked because of brute force. Passkeys, external providers and host
+    /// sign-ins are not affected; to block an account, use <see cref="IsActive"/>.
+    /// </summary>
     public DateTimeOffset? LockoutEndUtc { get; set; }
+
+    /// <summary>Consecutive failed second-factor attempts (authenticator, e-mail or recovery code).</summary>
+    public int FailedSecondFactorAttempts { get; set; }
+
+    /// <summary>Point in time until which the second factor is locked because of brute force.</summary>
+    public DateTimeOffset? SecondFactorLockoutEndUtc { get; set; }
 
     /// <summary>Whether the 2FA state machine kicks in after a successful password check.</summary>
     public bool TwoFactorEnabled { get; set; }
@@ -44,8 +53,22 @@ public sealed class SlimUser
     /// </summary>
     public bool PasswordChangeRequired { get; set; }
 
-    /// <summary>True while <see cref="LockoutEndUtc"/> lies in the future.</summary>
+    /// <summary>True while <see cref="LockoutEndUtc"/> (the password lockout) lies in the future.</summary>
     public bool IsLockedOut(DateTimeOffset utcNow) => LockoutEndUtc is { } end && end > utcNow;
+
+    /// <summary>True while <see cref="SecondFactorLockoutEndUtc"/> lies in the future.</summary>
+    public bool IsSecondFactorLockedOut(DateTimeOffset utcNow) => SecondFactorLockoutEndUtc is { } end && end > utcNow;
+
+    /// <summary>The lockout end of <paramref name="factor"/>.</summary>
+    internal DateTimeOffset? LockoutEndOf(SlimAttemptFactor factor) =>
+        factor == SlimAttemptFactor.Password ? LockoutEndUtc : SecondFactorLockoutEndUtc;
+
+    /// <summary>Sets counter and lockout end of <paramref name="factor"/> on this copy.</summary>
+    internal void SetAttempts(SlimAttemptFactor factor, int failedAttempts, DateTimeOffset? lockoutEndUtc)
+    {
+        if (factor == SlimAttemptFactor.Password) (FailedLoginAttempts, LockoutEndUtc) = (failedAttempts, lockoutEndUtc);
+        else (FailedSecondFactorAttempts, SecondFactorLockoutEndUtc) = (failedAttempts, lockoutEndUtc);
+    }
 
     /// <summary>Creates a new cryptographically random security stamp (no claims part).</summary>
     public static string NewSecurityStamp() => Convert.ToHexString(RandomNumberGenerator.GetBytes(16));

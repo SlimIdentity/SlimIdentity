@@ -56,7 +56,7 @@ POST /auth/passkeys/login?useCookies=true|false   { "state", "credential", "reme
 
 The session has `amr: passkey`. Sign-in guards, inactive accounts, `RequireConfirmedEmail` and a forced password
 change (`403 password_change_required` – sign in with the start password once) apply as for every
-sign-in; a running password lockout does not block passkeys (there is nothing to guess).
+sign-in; a running password or second-factor lockout does not block passkeys (there is nothing to guess).
 
 **Autofill** (conditional UI) – the browser offers the passkeys of the site right in the e-mail field, no extra button:
 mark the input `autocomplete="username webauthn"` and start `loginWithPasskeyAutofill(signal)` of the TypeScript client

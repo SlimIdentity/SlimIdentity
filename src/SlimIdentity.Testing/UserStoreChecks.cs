@@ -92,7 +92,7 @@ internal static class UserStoreChecks
             });
 
         await run.CheckAsync(Store, "a new user starts unconfirmed, unlocked and without 2FA",
-            "Insert the given PasswordHash and a fresh SecurityStamp; EmailConfirmed = false, FailedLoginAttempts = 0, LockoutEndUtc = null, TwoFactorEnabled = false, PasswordChangeRequired = false – no column defaults that grant more.",
+            "Insert the given PasswordHash and a fresh SecurityStamp; EmailConfirmed = false, both attempt counters 0, both lockout ends null, TwoFactorEnabled = false, PasswordChangeRequired = false – no column defaults that grant more.",
             async () =>
             {
                 var hash = ConformanceRun.NewHash();
@@ -103,6 +103,8 @@ internal static class UserStoreChecks
                 Expect.Equal(false, saved.EmailConfirmed, "EmailConfirmed");
                 Expect.Equal(0, saved.FailedLoginAttempts, "FailedLoginAttempts");
                 Expect.SameInstant(null, saved.LockoutEndUtc, "LockoutEndUtc");
+                Expect.Equal(0, saved.FailedSecondFactorAttempts, "FailedSecondFactorAttempts");
+                Expect.SameInstant(null, saved.SecondFactorLockoutEndUtc, "SecondFactorLockoutEndUtc");
                 Expect.Equal(false, saved.TwoFactorEnabled, "TwoFactorEnabled");
                 Expect.Equal(false, saved.PasswordChangeRequired, "PasswordChangeRequired");
 
@@ -112,16 +114,13 @@ internal static class UserStoreChecks
             });
 
         await run.CheckAsync(Store, "UpdateSecurityStateAsync persists all security fields",
-            "Write PasswordHash, SecurityStamp, EmailConfirmed, FailedLoginAttempts, LockoutEndUtc, TwoFactorEnabled and PasswordChangeRequired.",
+            "Write PasswordHash, SecurityStamp, EmailConfirmed, TwoFactorEnabled and PasswordChangeRequired.",
             async () =>
             {
                 var user = await run.NewUserAsync();
-                var lockoutEnd = ConformanceRun.WholeSeconds(DateTimeOffset.UtcNow.AddHours(1));
                 user.PasswordHash = ConformanceRun.NewHash();
                 user.SecurityStamp = SlimUser.NewSecurityStamp();
                 user.EmailConfirmed = true;
-                user.FailedLoginAttempts = 3;
-                user.LockoutEndUtc = lockoutEnd;
                 user.TwoFactorEnabled = true;
                 user.PasswordChangeRequired = true;
                 await stores.UseAsync<ISlimUserStore>(s => s.UpdateSecurityStateAsync(user, ct));
@@ -130,15 +129,11 @@ internal static class UserStoreChecks
                 Expect.Equal(user.PasswordHash, saved.PasswordHash, "PasswordHash");
                 Expect.Equal(user.SecurityStamp, saved.SecurityStamp, "SecurityStamp");
                 Expect.Equal(true, saved.EmailConfirmed, "EmailConfirmed");
-                Expect.Equal(3, saved.FailedLoginAttempts, "FailedLoginAttempts");
-                Expect.SameInstant(lockoutEnd, saved.LockoutEndUtc, "LockoutEndUtc");
                 Expect.Equal(true, saved.TwoFactorEnabled, "TwoFactorEnabled");
                 Expect.Equal(true, saved.PasswordChangeRequired, "PasswordChangeRequired");
 
                 // and back: cleared values must be written, too (no "only if not null" updates)
                 user.EmailConfirmed = false;
-                user.FailedLoginAttempts = 0;
-                user.LockoutEndUtc = null;
                 user.TwoFactorEnabled = false;
                 user.PasswordChangeRequired = false;
                 user.PasswordHash = string.Empty;
@@ -146,8 +141,6 @@ internal static class UserStoreChecks
 
                 var cleared = await run.ReloadAsync(user);
                 Expect.Equal(false, cleared.EmailConfirmed, "EmailConfirmed after clearing");
-                Expect.Equal(0, cleared.FailedLoginAttempts, "FailedLoginAttempts after clearing");
-                Expect.SameInstant(null, cleared.LockoutEndUtc, "LockoutEndUtc after clearing");
                 Expect.Equal(false, cleared.TwoFactorEnabled, "TwoFactorEnabled after clearing");
                 Expect.Equal(false, cleared.PasswordChangeRequired, "PasswordChangeRequired after clearing");
                 Expect.True(string.IsNullOrEmpty(cleared.PasswordHash), "PasswordHash after removing the password (empty) – the old hash is still stored.");
@@ -181,21 +174,93 @@ internal static class UserStoreChecks
                 Expect.Equal(1, parallel.Count(r => r), "parallel rotations from the same stamp that succeeded");
             });
 
-        await run.CheckAsync(Store, "IncrementFailedLoginAttemptsAsync counts parallel failures atomically",
-            "One statement: UPDATE users SET failed_login_attempts = failed_login_attempts + 1 WHERE id = @id RETURNING failed_login_attempts (or a compare-and-set loop). Never read, add and write back.",
+        await run.CheckAsync(Store, "UpdateSecurityStateAsync never writes the attempt counters",
+            "Leave FailedLoginAttempts, LockoutEndUtc, FailedSecondFactorAttempts and SecondFactorLockoutEndUtc out of the UPDATE – an outdated copy of the user must not undo counted attempts or lift a lockout.",
+            async () =>
+            {
+                var stale = await run.NewUserAsync();
+                var now = ConformanceRun.WholeSeconds(DateTimeOffset.UtcNow);
+                await ReserveAsync(stale, SlimAttemptFactor.Password, now, 1);              // locks the password
+                await ReserveAsync(stale, SlimAttemptFactor.SecondFactor, now, 100);        // counts one second-factor attempt
+
+                stale.EmailConfirmed = true;   // a deliberate change from a copy read before the attempts
+                await stores.UseAsync<ISlimUserStore>(s => s.UpdateSecurityStateAsync(stale, ct));
+
+                var saved = await run.ReloadAsync(stale);
+                Expect.Equal(true, saved.EmailConfirmed, "EmailConfirmed");
+                Expect.Equal(1, saved.FailedLoginAttempts, "FailedLoginAttempts after UpdateSecurityStateAsync with an outdated copy (must stay)");
+                Expect.True(saved.LockoutEndUtc is not null, "UpdateSecurityStateAsync with an outdated copy lifted the password lockout.");
+                Expect.Equal(1, saved.FailedSecondFactorAttempts, "FailedSecondFactorAttempts after UpdateSecurityStateAsync with an outdated copy (must stay)");
+            });
+
+        await run.CheckAsync(Store, "TryBeginAttemptAsync reserves parallel attempts atomically",
+            "Read and write counter and lockout end in one atomic step: a row lock (SELECT … FOR UPDATE) in a transaction, or a compare-and-set UPDATE … WHERE counter = @old AND lockout_end IS NOT DISTINCT FROM @oldEnd, retried on 0 rows. Never read, add and write back.",
             async () =>
             {
                 var user = await run.NewUserAsync();
                 var n = run.Options.Parallelism;
-                var counts = await run.InParallelAsync(_ =>
-                    stores.UseAsync<ISlimUserStore, int>(s => s.IncrementFailedLoginAttemptsAsync(user, ct)));
-                Expect.Equal(n, (await run.ReloadAsync(user)).FailedLoginAttempts, $"FailedLoginAttempts after {n} parallel increments");
-                Expect.True(counts.Order().SequenceEqual(Enumerable.Range(1, n)),
-                    $"The returned counts must be 1…{n}, each exactly once (got {string.Join(", ", counts.Order())}) – otherwise no single request sees the lockout threshold.");
+                var now = ConformanceRun.WholeSeconds(DateTimeOffset.UtcNow);
+                var results = await run.InParallelAsync(_ => ReserveAsync(user, SlimAttemptFactor.Password, now, 1000));
+                var counts = results.Where(r => r is { IsLockedOut: false }).Select(r => r!.FailedAttempts).Order().ToList();
+                var saved = await run.ReloadAsync(user);
+                Expect.Equal(counts.Count, saved.FailedLoginAttempts, $"FailedLoginAttempts after {counts.Count} reserved parallel attempts");
+                Expect.True(counts.SequenceEqual(Enumerable.Range(1, counts.Count)),
+                    $"The returned counts must be 1…{counts.Count}, each exactly once (got {string.Join(", ", counts)}) – otherwise no single request sees the lockout threshold.");
+                Expect.True(counts.Count >= n / 2, $"Only {counts.Count} of {n} parallel attempts were reserved – retry a failed compare-and-set instead of giving up.");
+            });
+
+        await run.CheckAsync(Store, "of parallel attempts at the threshold exactly one locks the factor",
+            "Store the new lockout end (SlimAttemptRequest.NextLockoutEnd) in the same atomic step as the counter, and refuse every attempt while the stored end lies in the future (SlimAttemptReservation.LockedOut) without counting it.",
+            async () =>
+            {
+                var user = await run.NewUserAsync();
+                var threshold = run.Options.Parallelism - 1;
+                var now = ConformanceRun.WholeSeconds(DateTimeOffset.UtcNow);
+                var results = await run.InParallelAsync(_ => ReserveAsync(user, SlimAttemptFactor.Password, now, threshold));
+                Expect.Equal(threshold, results.Count(r => r is { IsLockedOut: false }), $"reserved attempts of {run.Options.Parallelism} parallel ones with the threshold {threshold}");
+                Expect.Equal(1, results.Count(r => r is { IsLockedOut: false } && r.FailedAttempts == threshold), "attempts that reached the threshold");
+                var saved = await run.ReloadAsync(user);
+                Expect.Equal(threshold, saved.FailedLoginAttempts, "FailedLoginAttempts (a refused attempt must not be counted)");
+                Expect.True(saved.LockoutEndUtc > now, "The attempt that reached the threshold did not store a lockout end.");
+                Expect.True(results.Where(r => r is { IsLockedOut: true }).All(r => r!.LockoutEndUtc == saved.LockoutEndUtc),
+                    "A refused attempt must report the stored lockout end.");
+
+                // after the lockout: counted on, the old end stays until the next multiple of the threshold
+                var later = await ReserveAsync(user, SlimAttemptFactor.Password, saved.LockoutEndUtc!.Value.AddSeconds(1), threshold);
+                Expect.Equal(threshold + 1, later?.FailedAttempts, "FailedAttempts of the first attempt after the lockout");
+                Expect.SameInstant(saved.LockoutEndUtc, (await run.ReloadAsync(user)).LockoutEndUtc, "LockoutEndUtc after an attempt below the next threshold (must stay)");
+            });
+
+        await run.CheckAsync(Store, "password and second factor have separate attempt counters",
+            "TryBeginAttemptAsync and ResetFailedAttemptsAsync touch only the counter and lockout end of the requested factor.",
+            async () =>
+            {
+                var user = await run.NewUserAsync();
+                var now = ConformanceRun.WholeSeconds(DateTimeOffset.UtcNow);
+                await ReserveAsync(user, SlimAttemptFactor.Password, now, 100);
+                await ReserveAsync(user, SlimAttemptFactor.Password, now, 100);
+                await ReserveAsync(user, SlimAttemptFactor.SecondFactor, now, 1);   // locks the second factor only
+
+                var counted = await run.ReloadAsync(user);
+                Expect.Equal(2, counted.FailedLoginAttempts, "FailedLoginAttempts");
+                Expect.SameInstant(null, counted.LockoutEndUtc, "LockoutEndUtc (the second factor was locked, not the password)");
+                Expect.Equal(1, counted.FailedSecondFactorAttempts, "FailedSecondFactorAttempts");
+                Expect.True(counted.SecondFactorLockoutEndUtc > now, "SecondFactorLockoutEndUtc was not stored.");
+
+                await stores.UseAsync<ISlimUserStore>(s => s.ResetFailedAttemptsAsync(user, SlimAttemptFactor.Password, ct));
+                var reset = await run.ReloadAsync(user);
+                Expect.Equal(0, reset.FailedLoginAttempts, "FailedLoginAttempts after resetting the password");
+                Expect.Equal(1, reset.FailedSecondFactorAttempts, "FailedSecondFactorAttempts after resetting the password (must stay)");
+                Expect.SameInstant(counted.SecondFactorLockoutEndUtc, reset.SecondFactorLockoutEndUtc, "SecondFactorLockoutEndUtc after resetting the password (must stay)");
+
+                await stores.UseAsync<ISlimUserStore>(s => s.ResetFailedAttemptsAsync(user, SlimAttemptFactor.SecondFactor, ct));
+                var cleared = await run.ReloadAsync(user);
+                Expect.Equal(0, cleared.FailedSecondFactorAttempts, "FailedSecondFactorAttempts after resetting the second factor");
+                Expect.SameInstant(null, cleared.SecondFactorLockoutEndUtc, "SecondFactorLockoutEndUtc after resetting the second factor");
             });
 
         await run.CheckAsync(Store, "sign-in bookkeeping never overwrites the password hash or security stamp",
-            "IncrementFailedLoginAttemptsAsync, SetLockoutEndAsync and ResetFailedLoginAttemptsAsync update only their own columns – never write back the (possibly outdated) SlimUser.",
+            "TryBeginAttemptAsync and ResetFailedAttemptsAsync update only the attempt columns – never write back the (possibly outdated) SlimUser.",
             async () =>
             {
                 var stale = await run.NewUserAsync();
@@ -205,12 +270,10 @@ internal static class UserStoreChecks
                 fresh.SecurityStamp = SlimUser.NewSecurityStamp();
                 await stores.UseAsync<ISlimUserStore>(s => s.UpdateSecurityStateAsync(fresh, ct));
 
-                await stores.UseAsync<ISlimUserStore, int>(s => s.IncrementFailedLoginAttemptsAsync(stale, ct));
-                await AssertCredentialsAsync("IncrementFailedLoginAttemptsAsync");
-                await stores.UseAsync<ISlimUserStore>(s => s.SetLockoutEndAsync(stale, DateTimeOffset.UtcNow.AddMinutes(1), ct));
-                await AssertCredentialsAsync("SetLockoutEndAsync");
-                await stores.UseAsync<ISlimUserStore>(s => s.ResetFailedLoginAttemptsAsync(stale, ct));
-                await AssertCredentialsAsync("ResetFailedLoginAttemptsAsync");
+                await ReserveAsync(stale, SlimAttemptFactor.Password, DateTimeOffset.UtcNow, 100);
+                await AssertCredentialsAsync("TryBeginAttemptAsync");
+                await stores.UseAsync<ISlimUserStore>(s => s.ResetFailedAttemptsAsync(stale, SlimAttemptFactor.Password, ct));
+                await AssertCredentialsAsync("ResetFailedAttemptsAsync");
 
                 async Task AssertCredentialsAsync(string method)
                 {
@@ -218,26 +281,6 @@ internal static class UserStoreChecks
                     Expect.True(saved.PasswordHash == fresh.PasswordHash && saved.SecurityStamp == fresh.SecurityStamp,
                         $"{method} restored the old password hash / security stamp of an outdated SlimUser – a failed login could undo a password change.");
                 }
-            });
-
-        await run.CheckAsync(Store, "SetLockoutEndAsync and ResetFailedLoginAttemptsAsync change only the lockout state",
-            "SetLockoutEndAsync writes LockoutEndUtc only; ResetFailedLoginAttemptsAsync sets FailedLoginAttempts = 0 and LockoutEndUtc = null.",
-            async () =>
-            {
-                var user = await run.NewUserAsync();
-                await stores.UseAsync<ISlimUserStore, int>(s => s.IncrementFailedLoginAttemptsAsync(user, ct));
-                await stores.UseAsync<ISlimUserStore, int>(s => s.IncrementFailedLoginAttemptsAsync(user, ct));
-
-                var end = ConformanceRun.WholeSeconds(DateTimeOffset.UtcNow.AddMinutes(5));
-                await stores.UseAsync<ISlimUserStore>(s => s.SetLockoutEndAsync(user, end, ct));
-                var locked = await run.ReloadAsync(user);
-                Expect.SameInstant(end, locked.LockoutEndUtc, "LockoutEndUtc after SetLockoutEndAsync");
-                Expect.Equal(2, locked.FailedLoginAttempts, "FailedLoginAttempts after SetLockoutEndAsync (must stay unchanged)");
-
-                await stores.UseAsync<ISlimUserStore>(s => s.ResetFailedLoginAttemptsAsync(user, ct));
-                var reset = await run.ReloadAsync(user);
-                Expect.Equal(0, reset.FailedLoginAttempts, "FailedLoginAttempts after ResetFailedLoginAttemptsAsync");
-                Expect.SameInstant(null, reset.LockoutEndUtc, "LockoutEndUtc after ResetFailedLoginAttemptsAsync");
             });
 
         await run.CheckAsync(Store, "UpdatePasswordHashAsync writes only if the hash is unchanged",
@@ -281,5 +324,9 @@ internal static class UserStoreChecks
                 var claims = await stores.UseAsync<ISlimUserStore, IReadOnlyCollection<System.Security.Claims.Claim>>(s => s.GetClaimsAsync(user, ct));
                 Expect.True(claims is not null, "GetClaimsAsync returned null.");
             });
+
+        Task<SlimAttemptReservation?> ReserveAsync(SlimUser user, SlimAttemptFactor factor, DateTimeOffset now, int maxFailedAttempts) =>
+            stores.UseAsync<ISlimUserStore, SlimAttemptReservation?>(s => s.TryBeginAttemptAsync(user,
+                new SlimAttemptRequest(factor, now, new SlimLockoutOptions { MaxFailedAttempts = maxFailedAttempts }), ct));
     }
 }

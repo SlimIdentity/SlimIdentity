@@ -48,9 +48,8 @@ public sealed class ReviewRound5Tests
         public Task<SlimUser?> CreateAsync(SlimNewUser newUser, CancellationToken ct) => Current.CreateAsync(newUser, ct);
         public Task UpdateSecurityStateAsync(SlimUser user, CancellationToken ct) => Current.UpdateSecurityStateAsync(user, ct);
         public Task<bool> UpdateSecurityStampAsync(SlimUser user, string expectedStamp, string newStamp, CancellationToken ct) => Current.UpdateSecurityStampAsync(user, expectedStamp, newStamp, ct);
-        public Task<int> IncrementFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct) => Current.IncrementFailedLoginAttemptsAsync(user, ct);
-        public Task SetLockoutEndAsync(SlimUser user, DateTimeOffset? lockoutEndUtc, CancellationToken ct) => Current.SetLockoutEndAsync(user, lockoutEndUtc, ct);
-        public Task ResetFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct) => Current.ResetFailedLoginAttemptsAsync(user, ct);
+        public Task<SlimAttemptReservation?> TryBeginAttemptAsync(SlimUser user, SlimAttemptRequest attempt, CancellationToken ct) => Current.TryBeginAttemptAsync(user, attempt, ct);
+        public Task ResetFailedAttemptsAsync(SlimUser user, SlimAttemptFactor factor, CancellationToken ct) => Current.ResetFailedAttemptsAsync(user, factor, ct);
         public Task UpdatePasswordHashAsync(SlimUser user, string currentHash, string newHash, CancellationToken ct) => Current.UpdatePasswordHashAsync(user, currentHash, newHash, ct);
         public Task<bool> UpdateEmailAsync(SlimUser user, string newEmail, CancellationToken ct) => Current.UpdateEmailAsync(user, newEmail, ct);
         public Task<IReadOnlyCollection<Claim>> GetClaimsAsync(SlimUser user, CancellationToken ct) => Current.GetClaimsAsync(user, ct);
@@ -184,6 +183,17 @@ public sealed class ReviewRound5Tests
         Assert.Equal(0, app.Users.Get(SocialEmail).FailedLoginAttempts);
     }
 
+    [Fact]
+    public async Task A_lockout_does_not_block_the_external_sign_in()
+    {
+        await using var app = await TestApp.StartAsync(WithProvider());
+        await ExternalSignInAsync(app.CreateClient());
+        var id = app.Users.Get(SocialEmail).Id;
+        app.Users.SetAttempts(id, SlimAttemptFactor.Password, 5, app.Time.GetUtcNow().AddMinutes(5));
+        app.Users.SetAttempts(id, SlimAttemptFactor.SecondFactor, 5, app.Time.GetUtcNow().AddMinutes(5));
+
+        Assert.DoesNotContain("locked_out", await ExternalSignInAsync(app.CreateClient()));
+    }
     // ---------------------------------------------------------------- S-4: start password + unconfirmed + external login
 
     [Fact]

@@ -101,6 +101,8 @@ public class AppUser : ISlimUserEntity<Guid>
     public bool EmailConfirmed { get; set; }
     public int FailedLoginAttempts { get; set; }
     public DateTimeOffset? LockoutEndUtc { get; set; }
+    public int FailedSecondFactorAttempts { get; set; }
+    public DateTimeOffset? SecondFactorLockoutEndUtc { get; set; }
     public bool TwoFactorEnabled { get; set; }
     public bool PasswordChangeRequired { get; set; }
     public string? TotpSecret { get; set; }
@@ -189,7 +191,7 @@ out with `AddEntityFrameworkStores<…>(o => o.TwoFactor = false)`). What remain
 
 Dapper, another ORM or a REST service: implement `ISlimUserStore` yourself – start from the ready-made
 [Dapper](../samples/templates/Dapper) or [EF Core](../samples/templates/EfCore) templates rather than from scratch,
-because several methods must be **atomic single statements** (e.g. `IncrementFailedLoginAttemptsAsync`) and the
+because several methods must be **atomic** (e.g. `TryBeginAttemptAsync`) and the
 security guarantees depend on that ([why](how-it-works.md#your-part-the-stores)). Register it with
 `.AddUserStore<MyUserStore>()` and verify it against your database with one call from `SlimIdentity.Testing`
 ([how](how-it-works.md#verify-your-stores)). The optional stores (`AddSessionStore`, `AddTwoFactorStore`,

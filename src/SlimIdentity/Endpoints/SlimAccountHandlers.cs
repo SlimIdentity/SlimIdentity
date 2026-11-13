@@ -131,6 +131,7 @@ internal sealed class SlimAccountHandlers(
             user.EmailConfirmed = true;
         }
         await store.UpdateSecurityStateAsync(user, ct);
+        await credentials.ResetAttemptsAsync(user, SlimAttemptFactor.Password, ct);   // the mailbox proved the account
         await authManager.RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
 
         Log.PasswordReset(logger, user.Id);

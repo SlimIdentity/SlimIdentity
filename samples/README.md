@@ -36,11 +36,12 @@ against your real database checks all of the following, including the parallel c
   `SlimNewUser.Profile` (your [registration profile](../docs/guides/registration-profile.md)) is written in the same
   transaction – nothing of it when the address is taken.
 - `UpdateSecurityStateAsync` persists only the security fields of `SlimUser`
-  (PasswordHash, SecurityStamp, EmailConfirmed, FailedLoginAttempts, LockoutEndUtc, TwoFactorEnabled, PasswordChangeRequired).
-- The sign-in bookkeeping methods touch **only their own columns**, in a single statement:
-  `IncrementFailedLoginAttemptsAsync` (`SET failed = failed + 1 … RETURNING failed`), `SetLockoutEndAsync`,
-  `ResetFailedLoginAttemptsAsync` and `UpdatePasswordHashAsync` (`… WHERE password_hash = @currentHash`). Never
-  implement them by writing back the whole user – a concurrent password change could be undone.
+  (PasswordHash, SecurityStamp, EmailConfirmed, TwoFactorEnabled, PasswordChangeRequired) – never the attempt counters.
+- The sign-in bookkeeping methods touch **only their own columns**: `TryBeginAttemptAsync` reads and writes the
+  counter and lockout end of one factor in one atomic step (`SELECT … FOR UPDATE` in a transaction, or a
+  compare-and-set `UPDATE` retried on 0 rows), `ResetFailedAttemptsAsync` clears one factor, and
+  `UpdatePasswordHashAsync` writes only `… WHERE password_hash = @currentHash`. Never implement them by writing back
+  the whole user – a concurrent password change could be undone.
 - `UpdateEmailAsync` changes the address and its normalized column and returns `false` if it is already taken – let
   the unique constraint decide instead of checking first.
 - `ValidateAndConsumeRefreshTokenAsync` / `ValidateAndConsumeRecoveryCodeAsync` must delete **atomically**

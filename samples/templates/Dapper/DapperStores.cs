@@ -29,6 +29,8 @@ public sealed class DapperUserStore(NpgsqlDataSource db) : ISlimUserStore
         email_confirmed        AS EmailConfirmed,
         failed_login_attempts  AS FailedLoginAttempts,
         lockout_end_utc        AS LockoutEndUtc,
+        failed_second_factor_attempts AS FailedSecondFactorAttempts,
+        second_factor_lockout_end_utc AS SecondFactorLockoutEndUtc,
         two_factor_enabled     AS TwoFactorEnabled,
         password_change_required AS PasswordChangeRequired
         """;
@@ -67,31 +69,42 @@ public sealed class DapperUserStore(NpgsqlDataSource db) : ISlimUserStore
 
     // ---- sign-in bookkeeping: narrow, atomic statements (never write back a whole, possibly outdated user)
 
-    public async Task<int> IncrementFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct)
+    // Reserves an attempt before it is checked. The row lock serializes parallel attempts across all instances:
+    // exactly one reaches the threshold, every later one sees the lockout.
+    public async Task<SlimAttemptReservation?> TryBeginAttemptAsync(SlimUser user, SlimAttemptRequest attempt, CancellationToken ct)
     {
+        var (counter, end) = AttemptColumns(attempt.Factor);
         await using var c = await db.OpenConnectionAsync(ct);
-        return await c.ExecuteScalarAsync<int>(new CommandDefinition("""
-            UPDATE users SET failed_login_attempts = failed_login_attempts + 1
-            WHERE id = @id::uuid
-            RETURNING failed_login_attempts
-            """, new { id = user.Id }, cancellationToken: ct));
+        await using var tx = await c.BeginTransactionAsync(ct);
+        var current = await c.QuerySingleOrDefaultAsync<AttemptState>(new CommandDefinition(
+            $"SELECT {counter} AS Count, {end} AS LockoutEnd FROM users WHERE id = @id::uuid FOR UPDATE",
+            new { id = user.Id }, tx, cancellationToken: ct));
+        if (current is null) return null;   // deleted during the sign-in
+        if (attempt.IsLockedOut(current.LockoutEnd)) return SlimAttemptReservation.LockedOut(current.LockoutEnd!.Value);
+
+        var count = current.Count + 1;
+        await c.ExecuteAsync(new CommandDefinition(
+            $"UPDATE users SET {counter} = @count, {end} = @newEnd WHERE id = @id::uuid",
+            new { id = user.Id, count, newEnd = attempt.NextLockoutEnd(count, current.LockoutEnd) }, tx, cancellationToken: ct));
+        await tx.CommitAsync(ct);
+        return SlimAttemptReservation.Reserved(count);
     }
 
-    public async Task SetLockoutEndAsync(SlimUser user, DateTimeOffset? lockoutEndUtc, CancellationToken ct)
-    {
-        await using var c = await db.OpenConnectionAsync(ct);
-        await c.ExecuteAsync(new CommandDefinition(
-            "UPDATE users SET lockout_end_utc = @lockoutEndUtc WHERE id = @id::uuid",
-            new { id = user.Id, lockoutEndUtc }, cancellationToken: ct));
-    }
+    private sealed record AttemptState(int Count, DateTimeOffset? LockoutEnd);
 
-    public async Task ResetFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct)
+    public async Task ResetFailedAttemptsAsync(SlimUser user, SlimAttemptFactor factor, CancellationToken ct)
     {
+        var (counter, end) = AttemptColumns(factor);
         await using var c = await db.OpenConnectionAsync(ct);
         await c.ExecuteAsync(new CommandDefinition(
-            "UPDATE users SET failed_login_attempts = 0, lockout_end_utc = NULL WHERE id = @id::uuid",
+            $"UPDATE users SET {counter} = 0, {end} = NULL WHERE id = @id::uuid",
             new { id = user.Id }, cancellationToken: ct));
     }
+
+    private static (string Counter, string End) AttemptColumns(SlimAttemptFactor factor) =>
+        factor == SlimAttemptFactor.Password
+            ? ("failed_login_attempts", "lockout_end_utc")
+            : ("failed_second_factor_attempts", "second_factor_lockout_end_utc");
 
     // conditional: a password change in the meantime wins over the transparent rehash
     public async Task UpdatePasswordHashAsync(SlimUser user, string currentHash, string newHash, CancellationToken ct)
@@ -110,8 +123,6 @@ public sealed class DapperUserStore(NpgsqlDataSource db) : ISlimUserStore
                 password_hash = @PasswordHash,
                 security_stamp = @SecurityStamp,
                 email_confirmed = @EmailConfirmed,
-                failed_login_attempts = @FailedLoginAttempts,
-                lockout_end_utc = @LockoutEndUtc,
                 two_factor_enabled = @TwoFactorEnabled,
                 password_change_required = @PasswordChangeRequired
             WHERE id = @Id::uuid

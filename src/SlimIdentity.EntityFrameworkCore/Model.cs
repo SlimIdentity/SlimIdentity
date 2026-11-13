@@ -26,10 +26,14 @@ public interface ISlimUserEntity<TKey> where TKey : IEquatable<TKey>, IParsable<
     bool IsActive { get; set; }
     /// <summary>The address has been proven.</summary>
     bool EmailConfirmed { get; set; }
-    /// <summary>Consecutive failed sign-ins.</summary>
+    /// <summary>Failed password attempts since the last success or reset.</summary>
     int FailedLoginAttempts { get; set; }
-    /// <summary>End of the current lockout.</summary>
+    /// <summary>End of the current password lockout.</summary>
     DateTimeOffset? LockoutEndUtc { get; set; }
+    /// <summary>Failed second-factor attempts since the last success or reset.</summary>
+    int FailedSecondFactorAttempts { get; set; }
+    /// <summary>End of the current second-factor lockout.</summary>
+    DateTimeOffset? SecondFactorLockoutEndUtc { get; set; }
     /// <summary>Second factor required.</summary>
     bool TwoFactorEnabled { get; set; }
     /// <summary>The password was set by an administrator and must be changed at the next sign-in.</summary>

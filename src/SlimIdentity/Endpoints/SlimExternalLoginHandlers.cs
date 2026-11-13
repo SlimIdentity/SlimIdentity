@@ -145,11 +145,11 @@ internal sealed class SlimExternalLoginHandlers(
                     existing.EmailConfirmed = true;
                     existing.PasswordHash = string.Empty;
                     existing.PasswordChangeRequired = false;   // the start password is gone – nothing left to change
-                    existing.FailedLoginAttempts = 0;          // guesses against the removed password must not lock the owner out
-                    existing.LockoutEndUtc = null;
                     existing.SecurityStamp = SlimUser.NewSecurityStamp();
                     existing.TwoFactorEnabled = false;   // a 2FA set up by the registrant must not lock out the owner
                     await store.UpdateSecurityStateAsync(existing, ct);
+                    // guesses against the removed password must not lock the owner out of a password set later
+                    await services.GetRequiredService<SlimCredentialService>().ResetAttemptsAsync(existing, SlimAttemptFactor.Password, ct);
                     await authManager.RevokeSessionsAsync(existing.Id, null, ct);
                     if (services.GetService<ISlimTwoFactorStore>() is { } twoFactorStore)
                     {
@@ -201,9 +201,8 @@ internal sealed class SlimExternalLoginHandlers(
             }
         }
 
-        var now = time.GetUtcNow();
+        // the provider proved the account – a lockout of the password or the second factor does not apply
         var rejection = !user.IsActive ? "account_disabled"
-            : user.IsLockedOut(now) ? "locked_out"
             : O.SignIn.RequireConfirmedEmail && !user.EmailConfirmed ? "email_not_confirmed"
             : user.PasswordChangeRequired ? "password_change_required"   // the start password is replaced first
             : null;

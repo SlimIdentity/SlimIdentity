@@ -83,12 +83,12 @@ public sealed class SharedContextTests
         await using (var tx = await db.Database.BeginTransactionAsync())
         {
             Assert.NotNull(await users.FindByIdAsync(user!.Id, default));   // reading is fine
-            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => users.ResetFailedLoginAttemptsAsync(user, default));
+            var error = await Assert.ThrowsAsync<InvalidOperationException>(() => users.ResetFailedAttemptsAsync(user, SlimAttemptFactor.Password, default));
             Assert.Contains("Commit your transaction first", error.Message, StringComparison.Ordinal);
             await tx.CommitAsync();
         }
 
-        await users.ResetFailedLoginAttemptsAsync(user, default);   // committed: works again
+        await users.ResetFailedAttemptsAsync(user, SlimAttemptFactor.Password, default);   // committed: works again
     }
 
     [Fact]
@@ -100,6 +100,6 @@ public sealed class SharedContextTests
         var user = await users.FindByEmailAsync("a@test.local", default);
 
         using var ambient = new System.Transactions.TransactionScope(System.Transactions.TransactionScopeAsyncFlowOption.Enabled);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => users.ResetFailedLoginAttemptsAsync(user!, default));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => users.ResetFailedAttemptsAsync(user!, SlimAttemptFactor.Password, default));
     }
 }

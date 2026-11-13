@@ -120,8 +120,10 @@ public sealed class SlimSignInOptions
 
 /// <summary>
 /// Progressive lockout (NIST SP 800-63B: throttle rather than lock hard): every <see cref="MaxFailedAttempts"/>
-/// consecutive failures lock the account, starting with <see cref="Duration"/> and doubling each time up to
-/// <see cref="MaxDuration"/>. The counter is only reset by a successful sign-in.
+/// consecutive failures lock the factor, starting with <see cref="Duration"/> and doubling each time up to
+/// <see cref="MaxDuration"/>. Password and second factor have separate counters with the same policy; each is reset
+/// by a success of its own factor. Passkeys, external logins and <c>ISlimAuthManager.SignInAsync</c> are not affected
+/// (nothing to guess) – block an account with <c>IsActive</c>.
 /// </summary>
 public sealed class SlimLockoutOptions
 {

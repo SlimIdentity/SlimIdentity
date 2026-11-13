@@ -50,7 +50,7 @@ app.MapDelete("/api/account", DeleteAccount).RequireAuthorization(SlimIdentityDe
 ```
 
 `ConfirmPasswordAsync` applies the rules of the built-in endpoints: an active lockout is honoured, wrong passwords
-count towards it (with the lockout notification), parallel guesses are serialized and an
+count towards it (with the lockout notification), parallel guesses beyond the threshold are not evaluated and an
 `ISlimCustomPasswordValidator` (LDAP, legacy hashes) is used. Never verify the password with `IPasswordHasher`
 yourself – a stolen session could then guess it without limit. `ElevateSessionAsync` only accepts the signed-in user
 of the request.

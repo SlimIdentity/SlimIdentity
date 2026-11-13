@@ -42,8 +42,10 @@ mobile apps, while leaving databases, ORMs (EF Core, Dapper) and domain models e
 | `SecurityStamp` | `string` | Random value (≤ 64 characters, opaque); rotating it invalidates all sessions, tokens and outstanding links. A claims part after a dot (`RefreshClaimsAsync`) only makes sessions reload their claims. |
 | `IsActive` | `bool` | Login blocker (ban, soft delete, pending approval). |
 | `EmailConfirmed` | `bool` | E-mail verified. |
-| `FailedLoginAttempts` | `int` | Consecutive failures since the last successful sign-in (progressive lockout). |
-| `LockoutEndUtc` | `DateTimeOffset?` | End of the current lockout. |
+| `FailedLoginAttempts` | `int` | Password attempts since the last correct password (progressive lockout). |
+| `LockoutEndUtc` | `DateTimeOffset?` | End of the current password lockout. |
+| `FailedSecondFactorAttempts` | `int` | Second-factor attempts since the last correct code (own lockout). |
+| `SecondFactorLockoutEndUtc` | `DateTimeOffset?` | End of the current second-factor lockout. |
 | `TwoFactorEnabled` | `bool` | The 2FA state machine applies after a correct password. |
 | `PasswordChangeRequired` | `bool` | Set by an administrator: the next sign-in must choose an own password first. |
 

@@ -116,7 +116,7 @@ public sealed class ConcurrencyTests
         var before = app.Users.Get(TestApp.UserEmail);
 
         // the password is changed while the failed attempt is being verified / recorded
-        app.Users.BeforeFailedAttempt = id => { app.Users.BeforeFailedAttempt = null; app.Users.ChangePassword(id, "Changed123!"); };
+        app.Users.BeforeAttempt = id => { app.Users.BeforeAttempt = null; app.Users.ChangePassword(id, "Changed123!"); };
         await app.CreateClient().PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = "wrong-password" }, HttpStatusCode.Unauthorized);
 
         var after = app.Users.Get(TestApp.UserEmail);

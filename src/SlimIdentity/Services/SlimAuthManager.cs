@@ -52,9 +52,9 @@ internal sealed class SlimAuthManager(
             throw new ArgumentException("SlimIdentity: the authentication method must be 1–32 lowercase letters, digits or '_' and not one " +
                 "SlimIdentity issues itself for special sessions (impersonation, api_key).", nameof(authenticationMethod));
 
-        // the rules of /login after the first factor – a host endpoint must not be a way around them
+        // the rules of /login after the first factor – a host endpoint must not be a way around them. A lockout guards
+        // the password and the second factor against guessing; it does not apply here (the host checks its own factor).
         var refusal = !user.IsActive ? "account_disabled"
-            : user.IsLockedOut(time.GetUtcNow()) ? "locked_out"
             : options.Value.SignIn.RequireConfirmedEmail && !user.EmailConfirmed ? "email_not_confirmed"
             : user.PasswordChangeRequired ? "password_change_required"
             : null;
@@ -173,9 +173,11 @@ internal sealed class SlimAuthManager(
         if (await services.GetRequiredService<SlimPasswordPolicy>().ValidateAsync(password, user.Email, ct) is { } errors)
             return SlimIdentity.Http.SlimResults.Validation(errors);
 
-        services.GetRequiredService<SlimCredentialService>().ApplyNewPassword(user, password);   // new stamp, lockout cleared
+        var credentials = services.GetRequiredService<SlimCredentialService>();
+        credentials.ApplyNewPassword(user, password);   // new stamp
         user.PasswordChangeRequired = mustChange;
         await store.UpdateSecurityStateAsync(user, ct);
+        await credentials.ResetAttemptsAsync(user, SlimAttemptFactor.Password, ct);   // guesses against the old password end
         await RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
         Log.AdminPasswordSet(logger, user.Id, mustChange);
         await Hooks.RaiseAsync(SlimEventTypes.PasswordChanged, user.Id, reason: "set_by_administrator", ct: ct);
@@ -208,6 +210,7 @@ internal sealed class SlimAuthManager(
         user.TwoFactorEnabled = false;
         user.SecurityStamp = SlimUser.NewSecurityStamp();   // remembered devices and all sessions end
         await store.UpdateSecurityStateAsync(user, ct);
+        await services.GetRequiredService<SlimCredentialService>().ResetAttemptsAsync(user, SlimAttemptFactor.SecondFactor, ct);
         await RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
         Log.AdminTwoFactorReset(logger, user.Id);
         await Hooks.RaiseAsync(SlimEventTypes.TwoFactorDisabled, user.Id, reason: "administrator", ct: ct);
@@ -245,9 +248,9 @@ internal sealed class SlimAuthManager(
     public async Task UnlockAsync(SlimUser user, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(user);
-        user.FailedLoginAttempts = 0;
-        user.LockoutEndUtc = null;
-        await store.ResetFailedLoginAttemptsAsync(user, ct);
+        var credentials = services.GetRequiredService<SlimCredentialService>();
+        await credentials.ResetAttemptsAsync(user, SlimAttemptFactor.Password, ct);
+        await credentials.ResetAttemptsAsync(user, SlimAttemptFactor.SecondFactor, ct);
         Log.AdminUnlocked(logger, user.Id);
         await Hooks.RaiseAsync(SlimEventTypes.Unlocked, user.Id, ct: ct);
     }

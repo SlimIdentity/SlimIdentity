@@ -94,72 +94,91 @@ internal sealed class SlimCredentialService(
                     "Sign in again to confirm this change – your account has no password.", StatusCodes.Status403Forbidden);
         }
 
-        using var attempt = await gate.TryEnterAsync(user.Id, ct);
-        if (attempt is null) return Http.SlimResults.BadRequest("invalid_password", "The password is incorrect.");   // queue full: not evaluated
-        // re-read inside the gate: a queued predecessor may just have locked the account
-        var current = await store.FindByIdAsync(user.Id, ct) ?? user;
 
-        if (current.IsLockedOut(now)) return Http.SlimResults.Locked(http, current.LockoutEndUtc!.Value, now);
+        // the attempt is reserved before the check: parallel guesses cannot all pass the lockout check first
+        var attempt = await BeginAttemptAsync(user, SlimAttemptFactor.Password, ct);
+        if (attempt.Status == SlimAttemptStatus.LockedOut) return Http.SlimResults.Locked(http, attempt.LockoutEndUtc!.Value, now);
+        if (attempt.Status == SlimAttemptStatus.NotReserved) return Http.SlimResults.BadRequest("invalid_password", "The password is incorrect.");
 
-        var check = await VerifyPasswordAsync(current, password, ct);
+        var check = await VerifyPasswordAsync(user, password, ct);
         if (check != SlimPasswordCheck.Failed)
         {
-            // like a successful sign-in: the counter starts over and an outdated hash is upgraded. The session already
-            // passed the second factor, so the reset opens no way to guess codes.
-            await RegisterSuccessAsync(current, password, rehash: check == SlimPasswordCheck.SuccessRehashNeeded, resetLockout: true, ct);
-            if (!ReferenceEquals(user, current))
-            {
-                // the caller continues with its own copy and may write the whole security state afterwards
-                // (e.g. /2fa/disable) – it must not write the old counter or hash back
-                user.FailedLoginAttempts = current.FailedLoginAttempts;
-                user.LockoutEndUtc = current.LockoutEndUtc;
-                user.PasswordHash = current.PasswordHash;
-            }
+            // like a successful sign-in: the counter starts over and an outdated hash is upgraded
+            await SucceedAttemptAsync(user, attempt, ct);
+            await RehashAsync(user, password, check, ct);
             return null;
         }
 
-        var locked = await RegisterFailureAsync(current, ct);
-        return locked
-            ? Http.SlimResults.Locked(http, current.LockoutEndUtc!.Value, now)
+        return await FailAttemptAsync(user, attempt, ct) is { } lockedUntil
+            ? Http.SlimResults.Locked(http, lockedUntil, now)
             : Http.SlimResults.BadRequest("invalid_password", "The password is incorrect.");
     }
 
     /// <summary>
-    /// Serializes the credential attempts of one account in this instance (see <see cref="SlimAttemptGate"/>);
-    /// <c>null</c> when too many attempts are queued - answer as for a failed attempt without evaluating it.
+    /// Serializes some security steps of one account in this instance (see <see cref="SlimAttemptGate"/>);
+    /// <c>null</c> when too many are queued - answer as for a failed attempt without evaluating it.
     /// </summary>
     public Task<SlimAttemptGate.Lease?> TryEnterAttemptAsync(string userId, CancellationToken ct) => gate.TryEnterAsync(userId, ct);
 
     /// <summary>
-    /// Counts a failed attempt. Every <c>MaxFailedAttempts</c> consecutive failures lock the account; the duration
-    /// doubles with each lockout (<c>Duration</c>, 2×, 4×, … up to <c>MaxDuration</c>). The counter is only reset by
-    /// a successful sign-in. Returns true if the account is now locked.
+    /// Reserves one attempt of <paramref name="factor"/> in the store before it is checked (see
+    /// <see cref="ISlimUserStore.TryBeginAttemptAsync"/>). Every <c>MaxFailedAttempts</c> consecutive failures lock the
+    /// factor; the duration doubles with each lockout (<c>Duration</c>, 2×, 4×, … up to <c>MaxDuration</c>). With the
+    /// lockout disabled nothing is counted, an existing lockout end still holds.
     /// </summary>
-    public async Task<bool> RegisterFailureAsync(SlimUser user, CancellationToken ct)
+    public async Task<SlimAttempt> BeginAttemptAsync(SlimUser user, SlimAttemptFactor factor, CancellationToken ct)
     {
         var lockout = options.Value.Lockout;
-        if (lockout.MaxFailedAttempts == 0) return false;   // lockout disabled
+        var now = time.GetUtcNow();
+        if (lockout.MaxFailedAttempts == 0)
+        {
+            return user.LockoutEndOf(factor) is { } end && end > now
+                ? new SlimAttempt(SlimAttemptStatus.LockedOut, factor, 0, end, 0)
+                : new SlimAttempt(SlimAttemptStatus.Reserved, factor, 0, null, 0);
+        }
 
-        // atomic in the store: parallel failures are all counted, and exactly one of them reaches the next multiple
-        user.FailedLoginAttempts = await store.IncrementFailedLoginAttemptsAsync(user, ct);
-        if (user.FailedLoginAttempts <= 0 || user.FailedLoginAttempts % lockout.MaxFailedAttempts != 0) return false;
+        var request = new SlimAttemptRequest(factor, now, lockout);
+        var reservation = await store.TryBeginAttemptAsync(user, request, ct);
+        if (reservation is null) return new SlimAttempt(SlimAttemptStatus.NotReserved, factor, 0, null, 0);
+        if (reservation.IsLockedOut) return new SlimAttempt(SlimAttemptStatus.LockedOut, factor, 0, reservation.LockoutEndUtc, 0);
 
-        var lockoutNumber = user.FailedLoginAttempts / lockout.MaxFailedAttempts; // 1, 2, 3, …
-        var duration = LockoutDuration(lockout, lockoutNumber);
-        user.LockoutEndUtc = time.GetUtcNow() + duration;
-        await store.SetLockoutEndAsync(user, user.LockoutEndUtc, ct);
-        Log.LockedOut(logger, user.Id, user.LockoutEndUtc, lockoutNumber);
+        var lockoutNumber = request.LockoutNumber(reservation.FailedAttempts);
+        var setEnd = lockoutNumber > 0 ? request.NextLockoutEnd(reservation.FailedAttempts, null) : null;
+        user.SetAttempts(factor, reservation.FailedAttempts, setEnd ?? user.LockoutEndOf(factor));
+        return new SlimAttempt(SlimAttemptStatus.Reserved, factor, reservation.FailedAttempts, setEnd, lockoutNumber);
+    }
+
+    /// <summary>
+    /// The reserved attempt failed. If it was the one that locked the factor, the lockout is reported (log, metric, event
+    /// and – once per series – a mail to the owner) and its end returned; otherwise <c>null</c>.
+    /// </summary>
+    public async Task<DateTimeOffset?> FailAttemptAsync(SlimUser user, SlimAttempt attempt, CancellationToken ct)
+    {
+        if (attempt.LockoutNumber == 0 || attempt.LockoutEndUtc is not { } end) return null;
+
+        Log.LockedOut(logger, user.Id, end, attempt.LockoutNumber);
         metrics.Lockout();
-        await hooks.RaiseAsync(SlimEventTypes.LockedOut, user.Id, ct: ct);
+        await hooks.RaiseAsync(SlimEventTypes.LockedOut, user.Id,
+            reason: attempt.Factor == SlimAttemptFactor.Password ? "password" : "second_factor", ct: ct);
 
-        // inform the owner once per attack (first lockout since the last successful sign-in)
-        if (lockoutNumber == 1)
+        // inform the owner once per attack (first lockout since the counter was last reset)
+        if (attempt.LockoutNumber == 1)
         {
             var email = user.Email;
-            var end = user.LockoutEndUtc.Value;
             await mail.SendAsync(SlimEmailKinds.LockoutNotification, email, user.Id, (s, x, c) => s.SendLockoutNotificationEmailAsync(x, email, end, c), ct);
         }
-        return true;
+        return end;
+    }
+
+    /// <summary>The reserved attempt succeeded: the counter of its factor starts over, a lockout it set ends.</summary>
+    public Task SucceedAttemptAsync(SlimUser user, SlimAttempt attempt, CancellationToken ct) =>
+        attempt.FailedAttempts == 0 ? Task.CompletedTask : ResetAttemptsAsync(user, attempt.Factor, ct);   // 0: nothing counted
+
+    /// <summary>Sets the counter of <paramref name="factor"/> to 0 and ends its lockout (store and this copy).</summary>
+    public async Task ResetAttemptsAsync(SlimUser user, SlimAttemptFactor factor, CancellationToken ct)
+    {
+        await store.ResetFailedAttemptsAsync(user, factor, ct);
+        user.SetAttempts(factor, 0, null);
     }
 
     internal static TimeSpan LockoutDuration(SlimLockoutOptions lockout, int lockoutNumber)
@@ -171,34 +190,35 @@ internal sealed class SlimCredentialService(
     }
 
     /// <summary>
-    /// Resets lockout counters (unless <paramref name="resetLockout"/> is false) and rehashes outdated hashes.
-    /// Uses the narrow store methods only – <paramref name="user"/> may be outdated by the time the (slow) password
-    /// verification finished, and writing it back as a whole could undo a concurrent password change.
+    /// Rehashes an outdated hash after a successful check. Uses the narrow store method only – <paramref name="user"/>
+    /// may be outdated by the time the (slow) password verification finished, and writing it back as a whole could undo
+    /// a concurrent password change.
     /// </summary>
-    public async Task RegisterSuccessAsync(SlimUser user, string? password, bool rehash, bool resetLockout, CancellationToken ct)
+    public async Task RehashAsync(SlimUser user, string? password, SlimPasswordCheck check, CancellationToken ct)
     {
-        if (resetLockout && (user.FailedLoginAttempts != 0 || user.LockoutEndUtc is not null))
-        {
-            user.FailedLoginAttempts = 0;
-            user.LockoutEndUtc = null;
-            await store.ResetFailedLoginAttemptsAsync(user, ct);
-        }
-        if (rehash && !string.IsNullOrEmpty(password) && !string.IsNullOrEmpty(user.PasswordHash))
-        {
-            var newHash = hasher.HashPassword(user, password);
-            await store.UpdatePasswordHashAsync(user, user.PasswordHash, newHash, ct);
-            user.PasswordHash = newHash;
-            Log.PasswordRehashed(logger, user.Id);
-        }
+        if (check != SlimPasswordCheck.SuccessRehashNeeded || string.IsNullOrEmpty(password) || string.IsNullOrEmpty(user.PasswordHash)) return;
+        var newHash = hasher.HashPassword(user, password);
+        await store.UpdatePasswordHashAsync(user, user.PasswordHash, newHash, ct);
+        user.PasswordHash = newHash;
+        Log.PasswordRehashed(logger, user.Id);
     }
 
-    /// <summary>Sets a new password, rotates the stamp, clears lockout state and a pending forced change (does not persist).</summary>
+    /// <summary>
+    /// Sets a new password, rotates the stamp and clears a pending forced change (does not persist). The failed-attempt
+    /// counters are not part of the security state – reset them explicitly where a new password lifts the lockout.
+    /// </summary>
     public void ApplyNewPassword(SlimUser user, string newPassword)
     {
         user.PasswordHash = hasher.HashPassword(user, newPassword);
         user.SecurityStamp = SlimUser.NewSecurityStamp();
-        user.FailedLoginAttempts = 0;
-        user.LockoutEndUtc = null;
         user.PasswordChangeRequired = false;
     }
 }
+
+internal enum SlimAttemptStatus { Reserved, LockedOut, NotReserved }
+
+/// <summary>
+/// A reserved or refused attempt. <c>LockoutEndUtc</c>: the end of the lockout that refused it, or of the lockout this
+/// attempt set (<c>LockoutNumber</c> &gt; 0) – reported only if the check then fails.
+/// </summary>
+internal sealed record SlimAttempt(SlimAttemptStatus Status, SlimAttemptFactor Factor, int FailedAttempts, DateTimeOffset? LockoutEndUtc, int LockoutNumber);

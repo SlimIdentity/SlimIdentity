@@ -49,8 +49,8 @@ public sealed class TestUserStore : ISlimUserStore
     /// <summary>Called between the "exists?" lookup and the insert of <see cref="CreateAsync"/> (race simulation).</summary>
     public Action<string>? BeforeCreate { get; set; }
 
-    /// <summary>Called by <see cref="IncrementFailedLoginAttemptsAsync"/> before it counts (race simulation).</summary>
-    public Action<string>? BeforeFailedAttempt { get; set; }
+    /// <summary>Called by <see cref="TryBeginAttemptAsync"/> before it reserves (race simulation).</summary>
+    public Action<string>? BeforeAttempt { get; set; }
 
     /// <summary>The profiles passed to <see cref="CreateAsync"/>, by user id.</summary>
     public ConcurrentDictionary<string, object?> Profiles { get; } = new();
@@ -72,25 +72,32 @@ public sealed class TestUserStore : ISlimUserStore
         }
     }
 
-    public Task<int> IncrementFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct)
+    public Task<SlimAttemptReservation?> TryBeginAttemptAsync(SlimUser user, SlimAttemptRequest attempt, CancellationToken ct)
     {
-        BeforeFailedAttempt?.Invoke(user.Id);
-        var stored = _users[user.Id];
-        lock (stored) return Task.FromResult(++stored.FailedLoginAttempts);
+        BeforeAttempt?.Invoke(user.Id);
+        if (!_users.TryGetValue(user.Id, out var stored)) return Task.FromResult<SlimAttemptReservation?>(null);
+        lock (stored)
+        {
+            var end = stored.LockoutEndOf(attempt.Factor);
+            if (attempt.IsLockedOut(end)) return Task.FromResult<SlimAttemptReservation?>(SlimAttemptReservation.LockedOut(end!.Value));
+            var count = (attempt.Factor == SlimAttemptFactor.Password ? stored.FailedLoginAttempts : stored.FailedSecondFactorAttempts) + 1;
+            stored.SetAttempts(attempt.Factor, count, attempt.NextLockoutEnd(count, end));
+            return Task.FromResult<SlimAttemptReservation?>(SlimAttemptReservation.Reserved(count));
+        }
     }
 
-    public Task SetLockoutEndAsync(SlimUser user, DateTimeOffset? lockoutEndUtc, CancellationToken ct)
+    public Task ResetFailedAttemptsAsync(SlimUser user, SlimAttemptFactor factor, CancellationToken ct)
     {
         var stored = _users[user.Id];
-        lock (stored) stored.LockoutEndUtc = lockoutEndUtc;
+        lock (stored) stored.SetAttempts(factor, 0, null);
         return Task.CompletedTask;
     }
 
-    public Task ResetFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct)
+    /// <summary>Test setup: sets counter and lockout end of a factor directly.</summary>
+    public void SetAttempts(string userId, SlimAttemptFactor factor, int failedAttempts, DateTimeOffset? lockoutEndUtc)
     {
-        var stored = _users[user.Id];
-        lock (stored) { stored.FailedLoginAttempts = 0; stored.LockoutEndUtc = null; }
-        return Task.CompletedTask;
+        var stored = _users[userId];
+        lock (stored) stored.SetAttempts(factor, failedAttempts, lockoutEndUtc);
     }
 
     public Task UpdatePasswordHashAsync(SlimUser user, string currentHash, string newHash, CancellationToken ct)
@@ -106,8 +113,6 @@ public sealed class TestUserStore : ISlimUserStore
         stored.PasswordHash = user.PasswordHash;
         stored.SecurityStamp = user.SecurityStamp;
         stored.EmailConfirmed = user.EmailConfirmed;
-        stored.FailedLoginAttempts = user.FailedLoginAttempts;
-        stored.LockoutEndUtc = user.LockoutEndUtc;
         stored.TwoFactorEnabled = user.TwoFactorEnabled;
         stored.PasswordChangeRequired = user.PasswordChangeRequired;
         return Task.CompletedTask;
@@ -157,7 +162,9 @@ public sealed class TestUserStore : ISlimUserStore
     {
         Id = u.Id, Email = u.Email, PasswordHash = u.PasswordHash, SecurityStamp = u.SecurityStamp,
         IsActive = u.IsActive, EmailConfirmed = u.EmailConfirmed, FailedLoginAttempts = u.FailedLoginAttempts,
-        LockoutEndUtc = u.LockoutEndUtc, TwoFactorEnabled = u.TwoFactorEnabled, PasswordChangeRequired = u.PasswordChangeRequired,
+        LockoutEndUtc = u.LockoutEndUtc, FailedSecondFactorAttempts = u.FailedSecondFactorAttempts,
+        SecondFactorLockoutEndUtc = u.SecondFactorLockoutEndUtc,
+        TwoFactorEnabled = u.TwoFactorEnabled, PasswordChangeRequired = u.PasswordChangeRequired,
     };
 }
 

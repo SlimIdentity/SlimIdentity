@@ -22,7 +22,7 @@ public sealed class TimingTests(ITestOutputHelper output)
         var inactive = app.Users.Seed("inactive@test.local", "Inactive-123");
         app.Users.SetActive(inactive.Id, false);
         var locked = app.Users.Seed("locked@test.local", "Locked-123");
-        await app.Users.SetLockoutEndAsync(locked, DateTimeOffset.UtcNow.AddYears(1), default);
+        app.Users.SetAttempts(locked.Id, SlimAttemptFactor.Password, 0, DateTimeOffset.UtcNow.AddYears(1));
 
         var groups = new Dictionary<string, (string Email, string Password)>
         {

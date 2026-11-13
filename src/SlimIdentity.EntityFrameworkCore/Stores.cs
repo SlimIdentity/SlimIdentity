@@ -78,7 +78,14 @@ public class SlimEfUserStore<TContext, TUser, TKey>(SlimEfContext<TContext> cont
 {
     private readonly TContext db = context.Db;
 
-    private const string Failed = nameof(ISlimUserEntity<TKey>.FailedLoginAttempts);
+    private const int MaxAttemptRetries = 20;
+
+    private static (string Counter, string End) AttemptColumns(SlimAttemptFactor factor) => factor switch
+    {
+        SlimAttemptFactor.Password => (nameof(ISlimUserEntity<TKey>.FailedLoginAttempts), nameof(ISlimUserEntity<TKey>.LockoutEndUtc)),
+        SlimAttemptFactor.SecondFactor => (nameof(ISlimUserEntity<TKey>.FailedSecondFactorAttempts), nameof(ISlimUserEntity<TKey>.SecondFactorLockoutEndUtc)),
+        _ => throw new ArgumentOutOfRangeException(nameof(factor)),
+    };
 
     /// <summary>The users of the context.</summary>
     protected DbSet<TUser> Users => db.Set<TUser>();
@@ -148,38 +155,45 @@ public class SlimEfUserStore<TContext, TUser, TKey>(SlimEfContext<TContext> cont
             .SetProperty(u => EF.Property<string>(u, nameof(ISlimUserEntity<TKey>.PasswordHash)), user.PasswordHash)
             .SetProperty(u => EF.Property<string>(u, nameof(ISlimUserEntity<TKey>.SecurityStamp)), user.SecurityStamp)
             .SetProperty(u => EF.Property<bool>(u, nameof(ISlimUserEntity<TKey>.EmailConfirmed)), user.EmailConfirmed)
-            .SetProperty(u => EF.Property<int>(u, Failed), user.FailedLoginAttempts)
-            .SetProperty(u => EF.Property<DateTimeOffset?>(u, nameof(ISlimUserEntity<TKey>.LockoutEndUtc)), user.LockoutEndUtc)
             .SetProperty(u => EF.Property<bool>(u, nameof(ISlimUserEntity<TKey>.TwoFactorEnabled)), user.TwoFactorEnabled)
             .SetProperty(u => EF.Property<bool>(u, nameof(ISlimUserEntity<TKey>.PasswordChangeRequired)), user.PasswordChangeRequired), ct);
     }
 
     /// <inheritdoc />
-    public async Task<int> IncrementFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct)
+    public async Task<SlimAttemptReservation?> TryBeginAttemptAsync(SlimUser user, SlimAttemptRequest attempt, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(user);
-        // portable compare-and-set loop: no lost update, on every provider
-        while (true)
+        ArgumentNullException.ThrowIfNull(attempt);
+        var (counter, end) = AttemptColumns(attempt.Factor);
+        // portable compare-and-set loop: no lost update and exactly one attempt reaches the threshold, on every provider
+        for (var i = 0; i < MaxAttemptRetries; i++)
         {
-            // the user may have been deleted during the sign-in: nothing to count (and no exception)
-            if (await Update(user).Select(u => (int?)EF.Property<int>(u, Failed)).FirstOrDefaultAsync(ct).ConfigureAwait(false) is not { } current)
-                return 0;
-            var updated = await Update(user).Where(u => EF.Property<int>(u, Failed) == current)
-                .ExecuteUpdateAsync(s => s.SetProperty(u => EF.Property<int>(u, Failed), current + 1), ct).ConfigureAwait(false);
-            if (updated == 1) return current + 1;
+            var state = await Update(user)
+                .Select(u => new { Count = EF.Property<int>(u, counter), End = EF.Property<DateTimeOffset?>(u, end) })
+                .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+            if (state is null) return null;   // deleted during the sign-in
+            if (attempt.IsLockedOut(state.End)) return SlimAttemptReservation.LockedOut(state.End!.Value);
+
+            int oldCount = state.Count, newCount = oldCount + 1;
+            DateTimeOffset? oldEnd = state.End, newEnd = attempt.NextLockoutEnd(newCount, oldEnd);
+            var updated = await Update(user)
+                .Where(u => EF.Property<int>(u, counter) == oldCount && EF.Property<DateTimeOffset?>(u, end) == oldEnd)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(u => EF.Property<int>(u, counter), newCount)
+                    .SetProperty(u => EF.Property<DateTimeOffset?>(u, end), newEnd), ct).ConfigureAwait(false);
+            if (updated == 1) return SlimAttemptReservation.Reserved(newCount);
         }
+        return null;   // permanent contention: the attempt is not checked
     }
 
     /// <inheritdoc />
-    public Task SetLockoutEndAsync(SlimUser user, DateTimeOffset? lockoutEndUtc, CancellationToken ct) =>
-        Update(user).ExecuteUpdateAsync(s => s
-            .SetProperty(u => EF.Property<DateTimeOffset?>(u, nameof(ISlimUserEntity<TKey>.LockoutEndUtc)), lockoutEndUtc), ct);
-
-    /// <inheritdoc />
-    public Task ResetFailedLoginAttemptsAsync(SlimUser user, CancellationToken ct) =>
-        Update(user).ExecuteUpdateAsync(s => s
-            .SetProperty(u => EF.Property<int>(u, Failed), 0)
-            .SetProperty(u => EF.Property<DateTimeOffset?>(u, nameof(ISlimUserEntity<TKey>.LockoutEndUtc)), (DateTimeOffset?)null), ct);
+    public Task ResetFailedAttemptsAsync(SlimUser user, SlimAttemptFactor factor, CancellationToken ct)
+    {
+        var (counter, end) = AttemptColumns(factor);
+        return Update(user).ExecuteUpdateAsync(s => s
+            .SetProperty(u => EF.Property<int>(u, counter), 0)
+            .SetProperty(u => EF.Property<DateTimeOffset?>(u, end), (DateTimeOffset?)null), ct);
+    }
 
     /// <inheritdoc />
     public Task UpdatePasswordHashAsync(SlimUser user, string currentHash, string newHash, CancellationToken ct) =>
@@ -229,7 +243,9 @@ public class SlimEfUserStore<TContext, TUser, TKey>(SlimEfContext<TContext> cont
         {
             Id = SlimEf.KeyToString(u.Id), Email = u.Email, PasswordHash = u.PasswordHash, SecurityStamp = u.SecurityStamp,
             IsActive = u.IsActive, EmailConfirmed = u.EmailConfirmed, FailedLoginAttempts = u.FailedLoginAttempts,
-            LockoutEndUtc = u.LockoutEndUtc, TwoFactorEnabled = u.TwoFactorEnabled, PasswordChangeRequired = u.PasswordChangeRequired,
+            LockoutEndUtc = u.LockoutEndUtc, FailedSecondFactorAttempts = u.FailedSecondFactorAttempts,
+            SecondFactorLockoutEndUtc = u.SecondFactorLockoutEndUtc,
+            TwoFactorEnabled = u.TwoFactorEnabled, PasswordChangeRequired = u.PasswordChangeRequired,
         };
     }
 

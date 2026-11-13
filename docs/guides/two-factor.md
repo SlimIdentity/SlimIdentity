@@ -92,8 +92,9 @@ SlimIdentity offers "forget this device" and "forget all devices".
 
 - **Replay protection:** each TOTP time step and each e-mail code is accepted only once – also the code used to
   enable the authenticator. A code captured by a phishing proxy cannot be used a second time.
-- **Lockout:** wrong codes count towards the account lockout; the failure counter is reset only after the second
-  factor succeeded, so a known password does not allow unlimited code guessing.
+- **Lockout:** wrong codes count towards a lockout of their own (`FailedSecondFactorAttempts`); it is reset only after
+  the second factor succeeded, so a known password does not allow unlimited code guessing. While it lasts, a correct
+  password gets `423` instead of a new challenge; a remembered device still signs in.
 - **At rest:** encrypted TOTP secrets and salted recovery-code hashes – a database dump does not allow generating codes.
 
 ## Notes

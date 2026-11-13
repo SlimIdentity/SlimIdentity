@@ -33,7 +33,7 @@ Works with xUnit, NUnit, MSTest or a console app – the package has no test-fra
 
 | Store | Rules |
 | :--- | :--- |
-| `ISlimUserStore` | create / find; case-insensitive lookup; `CreateAsync` returns `null` for a taken address – also for parallel registrations; all security fields persisted; **parallel** `IncrementFailedLoginAttemptsAsync` counts every failure; bookkeeping never overwrites hash or stamp; conditional rehash; e-mail change refuses taken addresses |
+| `ISlimUserStore` | create / find; case-insensitive lookup; `CreateAsync` returns `null` for a taken address – also for parallel registrations; all security fields persisted; **parallel** `TryBeginAttemptAsync` reserves every attempt exactly once and exactly one locks at the threshold; separate counters for password and second factor; `UpdateSecurityStateAsync` never writes the counters; bookkeeping never overwrites hash or stamp; conditional rehash; e-mail change refuses taken addresses |
 | `ISlimTwoFactorStore` | TOTP secret stored unchanged (length!); recovery codes single use, per user, **also in parallel**; code and challenge markers monotonic, per user, **also in parallel**, on separate columns |
 | `ISlimRefreshTokenStore` | single use, **also in parallel**; expired tokens rejected |
 | `ISlimSessionStore` | round trip; touch; revoke one / all / all but current |
@@ -45,9 +45,9 @@ A failed run reads like this:
 ```
 SlimIdentity store conformance: 21 of 22 checks passed.
   ...
-  FAIL  ISlimUserStore: IncrementFailedLoginAttemptsAsync counts parallel failures atomically
-          FailedLoginAttempts after 8 parallel increments: expected 8, got 3.
-          fix: One statement: UPDATE users SET failed_login_attempts = failed_login_attempts + 1 …
+  FAIL  ISlimUserStore: TryBeginAttemptAsync reserves parallel attempts atomically
+          FailedLoginAttempts after 8 reserved parallel attempts: expected 8, got 3.
+          fix: Read and write counter and lockout end in one atomic step: a row lock (SELECT … FOR UPDATE) …
 ```
 
 ## Important

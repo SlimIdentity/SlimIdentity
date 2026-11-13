@@ -122,7 +122,7 @@ public sealed class TwoFactorTests
     }
 
     [Fact]
-    public async Task Failed_second_factors_count_towards_the_lockout()
+    public async Task Failed_second_factors_lock_only_the_second_factor()
     {
         await using var app = await TestApp.StartAsync();
         await EnableTotpAsync(app);
@@ -132,6 +132,11 @@ public sealed class TwoFactorTests
         for (var i = 0; i < 5; i++)
             await client.PostAsync("/auth/login/2fa", new { preAuthToken = preAuth, code = "000000" });
 
-        Assert.True(app.Users.Get(TestApp.UserEmail).IsLockedOut(app.Time.GetUtcNow()));
+        var user = app.Users.Get(TestApp.UserEmail);
+        Assert.True(user.IsSecondFactorLockedOut(app.Time.GetUtcNow()));
+        Assert.False(user.IsLockedOut(app.Time.GetUtcNow()));
+
+        // the password step still works, but no new challenge is issued while the second factor is locked
+        await client.PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = TestApp.UserPassword }, HttpStatusCode.Locked);
     }
 }

@@ -56,7 +56,6 @@ public sealed class ReviewRound3Tests
     }
 
     [Theory]
-    [InlineData("locked", "locked_out")]
     [InlineData("unconfirmed", "email_not_confirmed")]
     [InlineData("password_change", "password_change_required")]
     public async Task S2_SignInAsync_refuses_accounts_that_may_not_sign_in(string state, string expected)
@@ -64,7 +63,6 @@ public sealed class ReviewRound3Tests
         await using var app = await TestApp.StartAsync(WithHostSignIn(o => o.SignIn.RequireConfirmedEmail = true));
         await SaveAsync(app, u =>
         {
-            if (state == "locked") u.LockoutEndUtc = app.Time.GetUtcNow().AddMinutes(5);
             if (state == "unconfirmed") u.EmailConfirmed = false;
             if (state == "password_change") u.PasswordChangeRequired = true;
         });
@@ -72,6 +70,20 @@ public sealed class ReviewRound3Tests
         var refused = await app.CreateClient().PostJsonAsync($"/api/cert-login/{TestApp.UserEmail}", expected: HttpStatusCode.Forbidden);
 
         Assert.Equal(expected, refused.Str("status"));
+    }
+
+    [Fact]
+    public async Task SignInAsync_ignores_a_lockout_of_the_password()
+    {
+        await using var app = await TestApp.StartAsync(WithHostSignIn());
+        var user = app.Users.Get(TestApp.UserEmail);
+        app.Users.SetAttempts(user.Id, SlimAttemptFactor.Password, 5, app.Time.GetUtcNow().AddMinutes(5));
+        app.Users.SetAttempts(user.Id, SlimAttemptFactor.SecondFactor, 5, app.Time.GetUtcNow().AddMinutes(5));
+
+        // the lockout guards guessable factors; the host vouches for its own proof (block an account with IsActive)
+        var session = await app.CreateClient().PostJsonAsync($"/api/cert-login/{TestApp.UserEmail}");
+
+        Assert.Equal("success", session.Str("status"));
     }
 
     [Fact]
