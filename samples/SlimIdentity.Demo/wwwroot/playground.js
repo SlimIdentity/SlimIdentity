@@ -195,7 +195,6 @@ const actions = {
 
   async completeLink() {
     const { kind, token } = state.link ?? {};
-    if (kind === "reset-password") await call("POST", "/auth/reset-password", { token, newPassword: $("linkPassword").value });
     if (kind === "accept-invitation") { const r = await call("POST", "/auth/invitation/accept", { token, password: $("linkPassword").value }); if (r.ok) storeSession(r.json); }
     $("linkForm").hidden = true;
     history.replaceState(null, "", "/");
@@ -443,15 +442,18 @@ async function handleLinkPage() {
   const kind = location.pathname.slice(1);
   const token = new URLSearchParams(location.search).get("token");
   if (!token) return;
-  if (kind === "verify-email") { state.registration = true; showSteps((await call("POST", "/auth/flow", { token })).json); history.replaceState(null, "", "/"); }
+  if (kind === "verify-email" || kind === "reset-password") {
+    // both links continue as a flow; a reset ends in set_credential like a registration
+    state.registration = kind === "verify-email";
+    showSteps((await call("POST", "/auth/flow", { token })).json);
+    history.replaceState(null, "", "/");
+  }
   else if (kind === "confirm-email-change") { await call("POST", "/auth/confirm-email-change", { token }); history.replaceState(null, "", "/"); }
-  else if (kind === "reset-password" || kind === "accept-invitation") {
+  else if (kind === "accept-invitation") {
     state.link = { kind, token };
-    $("linkTitle").textContent = kind === "reset-password" ? "Set a new password" : "Accept the invitation – choose a password";
-    if (kind === "accept-invitation") {
-      const info = await call("POST", "/auth/invitation/info", { token });
-      if (info.ok) $("linkTitle").textContent += ` for ${info.json.email}`;
-    }
+    $("linkTitle").textContent = "Accept the invitation – choose a password";
+    const info = await call("POST", "/auth/invitation/info", { token });
+    if (info.ok) $("linkTitle").textContent += ` for ${info.json.email}`;
     $("linkForm").hidden = false;
   }
 }

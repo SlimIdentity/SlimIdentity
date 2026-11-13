@@ -107,7 +107,7 @@ public sealed class ClaimsRefreshTests
         await RevokeAdminRoleAsync(app);
 
         await app.CreateClient().PostJsonAsync("/auth/refresh", new { refreshToken = tokens.RefreshToken });
-        await app.CreateClient().PostJsonAsync("/auth/reset-password", new { token = resetLink, newPassword = "New-Admin-Pass-2026" });
+        await app.CreateClient().ResetPasswordJsonAsync(resetLink, "New-Admin-Pass-2026");
     }
 
     [Fact]

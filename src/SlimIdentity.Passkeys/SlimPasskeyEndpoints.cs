@@ -85,33 +85,31 @@ internal sealed class SlimPasskeyEndpoints : ISlimEndpointModule
             .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
             .AllowAnonymous();
 
-        if (o.Email.Enabled)
-        {
-            auth.MapPost("/register/passkey/options", static ([FromBody] SlimRegisterPasskeyOptionsRequest request,
-                    [FromServices] SlimPasskeyHandlers h) => h.NewAccountOptions(request))
-                .WithName("SlimIdentity_RegisterPasskeyOptions")
-                .WithSummary("Step set_credential with a passkey, part 1: options for navigator.credentials.create and a state.")
-                .Produces<SlimPasskeyCreationOptionsResponse>()
-                .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
-                .ProducesSlimProblem(StatusCodes.Status403Forbidden)
-                .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
-                .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
-                .AllowAnonymous();
+        // step set_credential of every flow: a registration, a reset, an invitation
+        auth.MapPost("/register/passkey/options", static ([FromBody] SlimRegisterPasskeyOptionsRequest request,
+                [FromServices] SlimPasskeyHandlers h, CancellationToken ct) => h.NewAccountOptionsAsync(request, ct))
+            .WithName("SlimIdentity_RegisterPasskeyOptions")
+            .WithSummary("Step set_credential with a passkey, part 1: options for navigator.credentials.create and a state.")
+            .Produces<SlimPasskeyCreationOptionsResponse>()
+            .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
+            .ProducesSlimProblem(StatusCodes.Status403Forbidden)
+            .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
+            .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
+            .AllowAnonymous();
 
-            auth.MapPost("/register/passkey", static ([FromBody] SlimRegisterPasskeyRequest request,
-                    [FromServices] SlimPasskeyHandlers h, CancellationToken ct) => h.RegisterNewAccountAsync(request, ct))
-                .WithName("SlimIdentity_RegisterPasskey")
-                .WithSummary("Step set_credential with a passkey, part 2: creates the account with the passkey; the session or the next step.")
-                .Produces<SlimAuthResponse>()
-                .Produces<SlimActionRequiredResponse>()
-                .ProducesSlimProblem(StatusCodes.Status400BadRequest)
-                .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
-                .ProducesSlimProblem(StatusCodes.Status403Forbidden)
-                .ProducesSlimProblem(StatusCodes.Status409Conflict)
-                .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
-                .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
-                .AllowAnonymous();
-        }
+        auth.MapPost("/register/passkey", static ([FromBody] SlimRegisterPasskeyRequest request,
+                [FromServices] SlimPasskeyHandlers h, CancellationToken ct) => h.RegisterNewAccountAsync(request, ct))
+            .WithName("SlimIdentity_RegisterPasskey")
+            .WithSummary("Step set_credential with a passkey, part 2: creates the account with the passkey; the session or the next step.")
+            .Produces<SlimAuthResponse>()
+            .Produces<SlimActionRequiredResponse>()
+            .ProducesSlimProblem(StatusCodes.Status400BadRequest)
+            .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
+            .ProducesSlimProblem(StatusCodes.Status403Forbidden)
+            .ProducesSlimProblem(StatusCodes.Status409Conflict)
+            .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
+            .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
+            .AllowAnonymous();
 
         signInMethods.MapPost("/passkeys/rename", static ([FromBody] SlimPasskeyRenameRequest request,
                 [FromServices] SlimPasskeyHandlers h, CancellationToken ct) => h.RenameAsync(request, ct))

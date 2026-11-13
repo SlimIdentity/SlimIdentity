@@ -85,18 +85,17 @@ matched).
 | :--- | :--- | :--- | :--- |
 | `POST /register?useCookies=…` ⏱ | `email`, `rememberMe` | `200 action_required` `["verify_email", "set_credential"]` (always – also for existing and throttled addresses) – see [registration](#registration) | `400` validation (also for a `password` or `profile`: they come with `/register/password`), `403 <veto>` of a registration guard |
 | `POST /register/verify` ⏱ | `flowToken`, `code` (from the verification mail) | `200 action_required` `["set_credential"]` | `401 invalid_token`, `401 invalid_verification_code`, `429 too_many_attempts` (5 wrong codes per flow, 10 per address in 24 hours – the link of the mail still works) |
-| `POST /register/password` ⏱ | `flowToken`, `password`, `profile` (optional object – [business data](guides/registration-profile.md)) | `200` session – the account is created with its address confirmed | `400` validation (`profile.<field>` from your profile hook; `profile` if none is registered), `401 invalid_token`, `403 <veto>` of a registration guard (the flow stays open), `409 email_taken` (completed already, or the address got an account meanwhile) |
-| `POST /forgot-password` ⏱ | `email` | `200 reset_requested` (always; no link for a pure SSO account) | – |
-| `POST /reset-password` ⏱ | `token`, `newPassword` | `200 password_reset` – all sessions end | `400 invalid_token`, `400` validation, `409 external_sign_in_only` |
+| `POST /register/password` ⏱ | `flowToken`, `password`, `profile` (optional object – [business data](guides/registration-profile.md); refused after a reset) | `200` session – the account is created with its address confirmed; after a [reset](#password-reset) the new password is set and all other sessions end | `400` validation (`profile.<field>` from your profile hook; `profile` if none is registered), `401 invalid_token`, `403 <veto>` of a registration guard (the flow stays open), `409 email_taken` (completed already, or the address got an account meanwhile) |
+| `POST /forgot-password` ⏱ | `email` | `200 reset_requested` (always; no link for a pure SSO account) – the link continues at `/flow`, see [password reset](#password-reset) | – |
 | `POST /change-password` ⏱ 🔒 | `currentPassword`, `newPassword` | `200` new session for this device – others end | `400 invalid_password`, `400` validation, `403 not_allowed_while_impersonating`, `409 password_not_set`, `423 locked_out` |
 | `POST /change-email` ⏱ 🔒 | `newEmail`, `password` | `200 email_change_requested` (always – also for taken addresses); link goes to the new address | `400 email_unchanged`, `400 invalid_password`, `400` validation, `403` during impersonation, `423 locked_out` |
 | `POST /confirm-email-change` ⏱ | `token` | `200 email_changed` – address changed, confirmed, all sessions end, old address notified | `400 invalid_token`, `400 email_taken` |
 | `GET /password-policy` | – | `200` `minimumLength`, `maximumLength`, `hasAdditionalRules` – for hints and live validation in the front end (no composition rules, NIST SP 800-63B) | – |
 | `GET /me` 🔒 | – | `200` `id`, `email`, `isImpersonating`, `impersonatorId`, `authenticationMethod`, `sudoUntil`, `claims` | `401` |
 
-With `WithoutEmail()` the mail-based routes are not mapped: `/forgot-password`, `/register/verify`, `/register/password`,
+With `WithoutEmail()` the mail-based routes are not mapped: `/forgot-password`, `/register/verify`,
 `/change-email`, `/confirm-email-change`, `/2fa/enable-email` and – unless `allowSelfRegistration` – `/register`.
-`/reset-password` stays for links an administrator hands over. Without mail, `/register` takes `email` (any identifier),
+`/flow` and `/register/password` (or `/register/passkey`) stay for reset links an administrator hands over. Without mail, `/register` takes `email` (any identifier),
 `password` and `profile` and answers `200 registration_accepted`; the address stays unconfirmed.
 
 ### Registration
@@ -121,8 +120,28 @@ proof of the mailbox on, the link itself is valid for `Tokens.EmailVerificationT
 accepted by no sign-in step, and a sign-in flow token by no registration step. `details.setCredential.kinds` lists the
 ways the account can start with: `["password"]`, or `["password", "passkey"]` with the passkey package – an account
 created with a passkey has no password until it sets one with `/forgot-password`. A host endpoint can replace the first
-step with `ISlimAuthManager.BeginRegistrationAsync` (same answer, same rules); the following steps stay mapped while
-mail is on, also with `EnableRegistration = false`.
+step with `ISlimAuthManager.BeginRegistrationAsync` (same answer, same rules); the following steps stay mapped,
+also with `EnableRegistration = false` (`/register/verify` only while mail is on).
+
+### Password reset
+
+A reset link – mailed by `/forgot-password` or created with `ISlimAuthManager.CreatePasswordResetAsync` – continues as a
+flow and ends in the same step `set_credential`:
+
+```
+POST /flow               { "token" }                  → action_required [ "verify_email"?, "second_factor"?, "set_credential"], flowToken
+POST /register/password  { "flowToken", "password" }  → session; all other sessions of the account end
+  or POST /register/passkey/options + /register/passkey (package SlimIdentity.Passkeys) – the passkey replaces the password
+```
+
+The steps before `set_credential` follow from the account: a mailed link proves the mailbox, an administrator's link
+does not (`verify_email` by mailed code while confirmation is required). An account with a second factor passes
+`second_factor` – a mailed code is never offered there, the mailbox being the reset's own proof. If the address was
+not confirmed yet, a mailed reset takes the account over instead: second factor, passkeys and external logins are
+removed, and no `second_factor` step is asked. `details.setCredential` names the `email` and the `kinds`. The link
+works once and only until the security stamp changes; afterwards `/flow` answers `401 invalid_token`. A confirmed pure
+SSO account gets `409 external_sign_in_only`; with an `ISlimCustomPasswordValidator` and no passkeys there is nothing
+to set (`400 password_managed_externally`). `profile` is refused in this flow.
 
 ## Invitations
 

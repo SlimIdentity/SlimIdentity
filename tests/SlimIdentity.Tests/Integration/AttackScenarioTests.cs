@@ -50,7 +50,7 @@ public sealed class AttackScenarioTests
 
         await app.CreateClient().PostAsync("/auth/forgot-password", new { email = victim });
         var link = (await app.Mail.WaitForAsync("password-reset", victim)).Payload;
-        await app.CreateClient().PostJsonAsync("/auth/reset-password", new { token = link, newPassword = "Owner-Pass-456" });
+        await app.CreateClient().ResetPasswordJsonAsync(link, "Owner-Pass-456");
 
         await app.LoginBearerAsync(victim, "Owner-Pass-456");   // no second factor of the attacker in the way
         await app.CreateClient().PostJsonAsync("/auth/login", new { email = victim, password = "Attacker-Pass-123" }, HttpStatusCode.Unauthorized);
@@ -96,9 +96,21 @@ public sealed class AttackScenarioTests
 
         await app.CreateClient().PostAsync("/auth/forgot-password", new { email = TestApp.UserEmail });
         var link = (await app.Mail.WaitForAsync("password-reset", TestApp.UserEmail)).Payload;
-        await app.CreateClient().PostJsonAsync("/auth/reset-password", new { token = link, newPassword = "New-Pass-789" });
+        // a reset alone must never bypass an owner's 2FA – and the mailbox the link proved is no second factor
+        var client = app.CreateClient();
+        var started = await client.ResetPasswordJsonAsync(link, "New-Pass-789");
+        Assert.Equal("second_factor", started.GetProperty("actions")[0].GetString());
+        Assert.DoesNotContain("email", started.GetProperty("details").GetProperty("secondFactor").GetProperty("methods").EnumerateArray().Select(m => m.GetString()));
+        await app.CreateClient().PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = TestApp.UserPassword });   // nothing changed yet
+
+        app.Time.Advance(TimeSpan.FromSeconds(30));
+        code = SlimTotp.Compute(SlimBase32.Decode(setup.Str("sharedKey")), app.Time.GetUtcNow().ToUnixTimeSeconds() / 30);
+        var proven = await client.PostJsonAsync("/auth/login/2fa", new { flowToken = started.Str("flowToken"), code });
+        Assert.Equal("set_credential", proven.GetProperty("actions")[0].GetString());
+        var session = await client.PostJsonAsync("/auth/register/password", new { flowToken = proven.Str("flowToken"), password = "New-Pass-789" });
+        Assert.False(string.IsNullOrEmpty(session.Str("accessToken")));
 
         var login = await app.CreateClient().PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = "New-Pass-789" });
-        Assert.Equal("second_factor", login.GetProperty("actions")[0].GetString());   // a reset alone must never bypass an owner's 2FA
+        Assert.Equal("second_factor", login.GetProperty("actions")[0].GetString());
     }
 }

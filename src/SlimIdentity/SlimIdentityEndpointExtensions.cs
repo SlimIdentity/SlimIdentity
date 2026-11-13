@@ -230,21 +230,23 @@ public static class SlimIdentityEndpointExtensions
                 .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
                 .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
                 .AllowAnonymous();
-
-            group.MapPost("/register/password", static ([FromBody] SlimRegisterPasswordRequest request,
-                    [FromServices] SlimRegistrationFlow h, CancellationToken ct) => h.CompleteWithPasswordAsync(request, ct))
-                .WithName("SlimIdentity_RegisterPassword")
-                .WithSummary("Step set_credential with a password: creates the account; the session or the next step.")
-                .Produces<SlimAuthResponse>()
-                .Produces<SlimActionRequiredResponse>()
-                .ProducesSlimProblem(StatusCodes.Status400BadRequest)
-                .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
-                .ProducesSlimProblem(StatusCodes.Status403Forbidden)
-                .ProducesSlimProblem(StatusCodes.Status409Conflict)
-                .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
-                .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
-                .AllowAnonymous();
         }
+
+        // step set_credential of every flow – registration, reset and invitation links (administrators hand them out
+        // without mail as well)
+        group.MapPost("/register/password", static ([FromBody] SlimRegisterPasswordRequest request,
+                [FromServices] SlimRegistrationFlow h, CancellationToken ct) => h.CompleteWithPasswordAsync(request, ct))
+            .WithName("SlimIdentity_RegisterPassword")
+            .WithSummary("Step set_credential with a password: creates the account of a registration or replaces the password of an existing one; the session or the next step.")
+            .Produces<SlimAuthResponse>()
+            .Produces<SlimActionRequiredResponse>()
+            .ProducesSlimProblem(StatusCodes.Status400BadRequest)
+            .ProducesSlimProblem(StatusCodes.Status401Unauthorized)
+            .ProducesSlimProblem(StatusCodes.Status403Forbidden)
+            .ProducesSlimProblem(StatusCodes.Status409Conflict)
+            .ProducesSlimProblem(StatusCodes.Status429TooManyRequests)
+            .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
+            .AllowAnonymous();
 
         if (e.EnablePasswordReset && o.Email.Enabled)
         {
@@ -253,19 +255,6 @@ public static class SlimIdentityEndpointExtensions
                 .WithName("SlimIdentity_ForgotPassword")
                 .WithSummary("Send a password reset mail. Always 200 (enumeration prevention).")
                 .Produces<SlimStatusResponse>()
-                .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
-                .AllowAnonymous();
-        }
-
-        // also without mail: administrators hand out reset links (ISlimAuthManager.CreatePasswordResetAsync)
-        if (e.EnablePasswordReset)
-        {
-            group.MapPost("/reset-password", static ([FromBody] SlimResetPasswordRequest request,
-                    [FromServices] SlimAccountHandlers h, CancellationToken ct) => h.ResetPasswordAsync(request, ct))
-                .WithName("SlimIdentity_ResetPassword")
-                .WithSummary("Set a new password with the reset token. Rotates the security stamp.")
-                .Produces<SlimStatusResponse>()
-                .ProducesSlimProblem(StatusCodes.Status400BadRequest)
                 .RequireRateLimiting(SlimIdentityDefaults.BruteForcePolicy)
                 .AllowAnonymous();
         }

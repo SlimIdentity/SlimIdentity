@@ -94,10 +94,16 @@ public sealed record SlimRegisterRequest(string Email, string? Password = null, 
     }
 }
 
-/// <summary>Body of <c>POST /auth/register/password</c>: step <c>set_credential</c> with a password – creates the account.</summary>
-/// <param name="FlowToken"><c>flowToken</c> of a registration whose mailbox is proven.</param>
+/// <summary>
+/// Body of <c>POST /auth/register/password</c>: step <c>set_credential</c> with a password – creates the account of a
+/// registration, or replaces the password after a reset link.
+/// </summary>
+/// <param name="FlowToken"><c>flowToken</c> at step <c>set_credential</c>.</param>
 /// <param name="Password">Password according to the password policy.</param>
-/// <param name="Profile">Optional business data, validated by the host's <see cref="ISlimRegistrationProfile"/>.</param>
+/// <param name="Profile">
+/// Optional business data of a registration, validated by the host's <see cref="ISlimRegistrationProfile"/>. Refused for
+/// an existing account.
+/// </param>
 public sealed record SlimRegisterPasswordRequest(string FlowToken, string Password, JsonElement? Profile = null)
 {
     private bool PrintMembers(System.Text.StringBuilder builder)
@@ -112,19 +118,6 @@ public sealed record SlimRegisterPasswordRequest(string FlowToken, string Passwo
 /// <summary>Body of <c>POST /auth/forgot-password</c>.</summary>
 /// <param name="Email">E-mail address of the account.</param>
 public sealed record SlimEmailRequest(string Email);
-
-/// <summary>Body of <c>POST /auth/reset-password</c>.</summary>
-/// <param name="Token">Token from the reset mail.</param>
-/// <param name="NewPassword">New password according to the password policy.</param>
-public sealed record SlimResetPasswordRequest(string Token, string NewPassword)
-{
-    private bool PrintMembers(System.Text.StringBuilder builder)
-    {
-        builder.Append("Token = ").Append(SlimRedaction.Mask(Token));
-        builder.Append(", NewPassword = ").Append(SlimRedaction.Mask(NewPassword));
-        return true;
-    }
-}
 
 /// <summary>
 /// Body of <c>POST /auth/login/verify-email</c> and <c>POST /auth/register/verify</c>: the mailed code proves the mailbox.
@@ -396,11 +389,19 @@ public sealed class SlimActionDetails
     public SlimSetCredentialDetails? SetCredential { get; init; }
 }
 
-/// <summary>The ways to sign in a registration can choose as its first one.</summary>
+/// <summary>
+/// The ways to sign in the step can set: the first one of a registration, or the new one after a reset link.
+/// </summary>
 public sealed class SlimSetCredentialDetails
 {
-    /// <summary><c>password</c> (<c>POST /auth/register/password</c>). Clients ignore kinds they do not know.</summary>
+    /// <summary>
+    /// <c>password</c> (<c>POST /auth/register/password</c>) and, with the passkey package, <c>passkey</c>
+    /// (<c>POST /auth/register/passkey</c>). Clients ignore kinds they do not know.
+    /// </summary>
     public required IReadOnlyList<string> Kinds { get; init; }
+
+    /// <summary>The address of the account – to show it, and as the user name for password managers.</summary>
+    public required string Email { get; init; }
 }
 
 /// <summary>How the open second factor can be proven.</summary>

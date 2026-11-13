@@ -19,8 +19,8 @@ silently losing password resets.
 | Sign-in, sessions, 2FA with an authenticator app, `/change-password` | ✓ | ✓ |
 | `/register` | ✓ – code or link, then the password ([registration](../endpoints.md#registration)) | off – `WithoutEmail(allowSelfRegistration: true)` keeps it in one step (`email`, `password`, `profile`; accounts stay unconfirmed) |
 | `/forgot-password` | ✓ | off – an administrator hands out a reset link |
-| `/reset-password`, `/invitation/*` | ✓ | ✓ – for links the administrator hands over |
-| `/register/verify`, `/register/password`, `/change-email`, `/confirm-email-change` | ✓ | off |
+| `/flow`, `/register/password`, `/invitation/*` | ✓ | ✓ – for links the administrator hands over |
+| `/register/verify`, `/change-email`, `/confirm-email-change` | ✓ | off |
 | 2FA with e-mail codes (`/2fa/enable-email`) | ✓ (unless `TwoFactor.AllowEmailCodes = false`) | off |
 | Lockout notification, "account exists" notice | ✓ | dropped |
 

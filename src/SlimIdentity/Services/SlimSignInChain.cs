@@ -12,7 +12,9 @@ internal static class SlimSignInActions
     public const string SecondFactor = "second_factor";
     /// <summary>A start password set by an administrator is replaced by an own one.</summary>
     public const string ChangePassword = "change_password";
-    /// <summary>A registration whose mailbox is proven gets its first way to sign in (password or passkey).</summary>
+    /// <summary>
+    /// A way to sign in is set: the first one of a registration whose mailbox is proven, or a new one after a reset link.
+    /// </summary>
     public const string SetCredential = "set_credential";
 }
 
@@ -32,7 +34,7 @@ internal enum SlimSignInProofs
     Mailbox = 4,
 }
 
-/// <summary>The outcome of <see cref="SlimSignInChain.Evaluate"/>.</summary>
+/// <summary>The outcome of <see cref="SlimSignInChain.Evaluate(SlimUser, SlimFlowPayload, SlimIdentityOptions)"/>.</summary>
 /// <param name="Refusal">The account cannot sign in at all (<see cref="SlimErrorCodes.AccountDisabled"/>).</param>
 /// <param name="Pending">The open steps in order; empty when a session may be issued.</param>
 internal readonly record struct SlimSignInDecision(string? Refusal, IReadOnlyList<string> Pending)
@@ -70,9 +72,38 @@ internal static class SlimSignInChain
         return new(null, pending ?? (IReadOnlyList<string>)[]);
     }
 
+    /// <summary>The steps of a flow: those of its link (<see cref="SlimFlowPayload.Link"/>), otherwise those of a sign-in.</summary>
+    public static SlimSignInDecision Evaluate(SlimUser user, SlimFlowPayload state, SlimIdentityOptions options) =>
+        state.Link is null ? Evaluate(user, state.Proofs, options) : EvaluateLink(user, state, options);
+
+    /// <summary>
+    /// The steps of a link that sets a new way to sign in (<see cref="SlimSignInActions.SetCredential"/>, always last).
+    /// The mailbox first, unless the link proved it. The second factor before it – except at the first proof of the
+    /// mailbox by a reset: setting the new way removes the second factor with everything else whoever registered the
+    /// address may have added.
+    /// </summary>
+    private static SlimSignInDecision EvaluateLink(SlimUser user, SlimFlowPayload state, SlimIdentityOptions options)
+    {
+        if (!user.IsActive) return new(SlimErrorCodes.AccountDisabled, []);
+        var pending = new List<string>(3);
+        if (options.Email.Enabled && !user.EmailConfirmed && !state.Proofs.HasFlag(SlimSignInProofs.Mailbox))
+            pending.Add(SlimSignInActions.VerifyEmail);
+        if (user.TwoFactorEnabled && !state.Proofs.HasFlag(SlimSignInProofs.SecondFactor) && !ResetsUnconfirmedAccount(user, state))
+            pending.Add(SlimSignInActions.SecondFactor);
+        pending.Add(SlimSignInActions.SetCredential);
+        return new(null, pending);
+    }
+
+    /// <summary>
+    /// A reset that proves the mailbox of an unconfirmed account for the first time: the new way to sign in replaces
+    /// every other one – the second factor, external logins and passkeys go.
+    /// </summary>
+    public static bool ResetsUnconfirmedAccount(SlimUser user, SlimFlowPayload state) =>
+        state.Link == SlimLinkPayload.Reset && state.Proofs.HasFlag(SlimSignInProofs.Mailbox) && !user.EmailConfirmed;
+
     /// <summary>
     /// The steps of a registration before its account exists: the mailbox first, then the way to sign in. The account is
-    /// created with the last step and continues with <see cref="Evaluate"/>.
+    /// created with the last step and continues with <see cref="Evaluate(SlimUser, SlimFlowPayload, SlimIdentityOptions)"/>.
     /// </summary>
     public static SlimSignInDecision EvaluateRegistration(SlimSignInProofs proofs) =>
         new(null, proofs.HasFlag(SlimSignInProofs.Mailbox)

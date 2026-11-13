@@ -366,8 +366,8 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
 - **Breaking** (`ISlimAuthManager`): `RegisterAsync` and `SlimRegistrationResult` are removed.
   `BeginRegistrationAsync(email, useCookies?, rememberMe)` is the first step of `/register` for a host endpoint of its
   own (address rules, `Begin` guards, uniform `action_required` answer and mails; requires mail). The following steps
-  (`/register/verify`, `/register/password`, `/register/passkey`, the registration link) are mapped whenever mail is
-  on; `Endpoints.EnableRegistration` controls only `/register`. `CreateUserAsync(email, initialPassword?, profile?)`
+  (`/register/verify` while mail is on; `/register/password`, `/register/passkey` and the registration link always) are
+  mapped independently of `Endpoints.EnableRegistration`, which controls only `/register`. `CreateUserAsync(email, initialPassword?, profile?)`
   creates an account for administrators and imports – address confirmed, no guards, no mail, `user_created` with reason
   `administrator`; a start password must be changed at the first sign-in (`SlimCreateUserResult`: `User` or `Failure`
   with `400` / `409 email_taken`). `HasSignInMethodAsync(user)` tells whether an account has a password, an external
@@ -376,6 +376,13 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
   unconfirmed account with any way in (password, external login, passkey) answers `account_conflict` and keeps
   everything; one without a way in (created by an administrator or an import) is confirmed and linked. Only a password
   reset of an unconfirmed account still removes the other ways in. Log event `5004` is removed.
+- **Breaking** (wire format): `POST /auth/reset-password` is removed. A reset link – mailed or from
+  `CreatePasswordResetAsync` – is opened with `POST /auth/flow { token }` and ends in step `set_credential`
+  (`/register/password` or, with the passkey package, `/register/passkey`; a passkey replaces the password). The steps
+  before follow from the account: `second_factor` for an account with one (never with a mailed code), `verify_email`
+  for an administrator's link to an unconfirmed account while confirmation is required. A used, outdated or invalid
+  link answers `401 invalid_token`; with a custom password validator and no passkeys `400 password_managed_externally`.
+  TypeScript client: `openRegistrationLink` becomes `openLink`, `account.resetPassword` is removed.
 - **Breaking** with `UseTenantKey`: the tenant of the request is part of the Data Protection purpose of every token
   (mail links, invitations, sign-in flows, refresh tokens, remembered devices, exchange and link codes, passkey
   ceremonies). A token of one tenant no longer decrypts in another; tokens issued before the update, or outside a

@@ -62,7 +62,7 @@ public sealed class SlimIdentityBuilder
     /// <c>/change-email</c>, <c>/confirm-email-change</c>, <c>/2fa/enable-email</c> and – unless
     /// <paramref name="allowSelfRegistration"/> – <c>/register</c>. Lockout and "account exists" notices are dropped.
     /// Passwords are changed with <c>/change-password</c>; forgotten passwords are reset by an administrator
-    /// (<see cref="ISlimAuthManager"/>), whose links use <c>/reset-password</c> and <c>/invitation/accept</c>.
+    /// (<see cref="ISlimAuthManager"/>), whose links use <c>/flow</c> (then <c>/register/password</c>) and <c>/invitation/accept</c>.
     /// </summary>
     /// <param name="allowSelfRegistration">Keeps <c>/register</c> (accounts without a confirmed address).</param>
     public SlimIdentityBuilder WithoutEmail(bool allowSelfRegistration = false)

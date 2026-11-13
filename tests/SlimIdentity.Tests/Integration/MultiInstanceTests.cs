@@ -224,8 +224,8 @@ public sealed class MultiInstanceTests
         await cluster.On(cluster.A).PostAsync("/auth/forgot-password", new { email = TestApp.UserEmail });
         var link = (await cluster.Mail.WaitForAsync("password-reset", TestApp.UserEmail)).Payload;
 
-        await cluster.On(cluster.B).PostJsonAsync("/auth/reset-password", new { token = link, newPassword = "Cluster-Pass-123" });
-        await cluster.On(cluster.A).PostJsonAsync("/auth/reset-password", new { token = link, newPassword = "Again-Pass-456" }, HttpStatusCode.BadRequest);
+        await cluster.On(cluster.B).ResetPasswordJsonAsync(link, "Cluster-Pass-123");
+        await cluster.On(cluster.A).ResetPasswordJsonAsync(link, "Again-Pass-456", HttpStatusCode.Unauthorized);
     }
 
     [Fact]
@@ -285,6 +285,6 @@ public sealed class MultiInstanceTests
         var link = (await cluster.Mail.WaitForAsync("password-reset", TestApp.UserEmail)).Payload;
 
         Assert.Equal(HttpStatusCode.Unauthorized, (await cluster.On(cluster.B, takeOver: onA).GetAsync("/api/hello")).StatusCode);
-        await cluster.On(cluster.B).PostJsonAsync("/auth/reset-password", new { token = link, newPassword = "Cluster-Pass-123" }, HttpStatusCode.BadRequest);
+        await cluster.On(cluster.B).ResetPasswordJsonAsync(link, "Cluster-Pass-123", HttpStatusCode.Unauthorized);
     }
 }

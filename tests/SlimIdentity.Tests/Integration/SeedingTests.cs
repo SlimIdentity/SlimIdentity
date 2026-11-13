@@ -59,7 +59,14 @@ public sealed class SeedingTests
             token = (await auth.CreatePasswordResetAsync(admin, TimeSpan.FromDays(1))).Token;   // log or print the link once
         }
 
-        await app.CreateClient().PostJsonAsync("/auth/reset-password", new { token, newPassword = "Own-Admin-Password-789" });
+        // an administrator's link proves no mailbox: the address is confirmed with a mailed code first
+        var client = app.CreateClient();
+        var started = await client.PostJsonAsync("/auth/flow", new { token });
+        Assert.Equal("verify_email", started.GetProperty("actions")[0].GetString());
+        var code = (await app.Mail.WaitForAsync("verification-code", AdminEmail)).Payload;
+        var verified = await client.PostJsonAsync("/auth/login/verify-email", new { flowToken = started.Str("flowToken"), code });
+        Assert.Equal("set_credential", verified.GetProperty("actions")[0].GetString());
+        await client.PostJsonAsync("/auth/register/password", new { flowToken = verified.Str("flowToken"), password = "Own-Admin-Password-789" });
 
         await app.CreateClient().PostJsonAsync("/auth/login", new { email = AdminEmail, password = "Own-Admin-Password-789" });
     }

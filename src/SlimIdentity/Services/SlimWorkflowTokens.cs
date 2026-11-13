@@ -21,7 +21,6 @@ internal sealed class SlimWorkflowTokens(
     private const string FormatPrefix = "v2.";
 
     public const string LinkPurpose = "SlimIdentity.Link.v1";
-    public const string PasswordResetPurpose = "SlimIdentity.PasswordReset.v1";
     public const string SignInFlowPurpose = "SlimIdentity.SignInFlow.v1";
     public const string TwoFactorSetupPurpose = "SlimIdentity.TwoFactorSetup.v1";
     public const string ExternalExchangePurpose = "SlimIdentity.ExternalExchange.v1";
@@ -103,30 +102,36 @@ internal sealed class SlimWorkflowTokens(
 }
 
 
-/// <summary><c>ByAdministrator</c>: handed over by an administrator – no proof that the user controls the mailbox.</summary>
-internal sealed record SlimResetTokenPayload(string Uid, string Stamp, bool ByAdministrator = false);
 /// <summary>
 /// A sign-in between its first factor and the session. <c>Proofs</c> and <c>Amr</c> (method of the session) say what is
 /// proven so far; <c>FlowId</c> completes at most one session; <c>StartedAt</c> (unix milliseconds) bounds the whole flow.
 /// The open second-factor challenge: <c>Method</c>, <c>CodeHash</c> of an e-mail code and <c>IssuedAt</c> (unix
 /// milliseconds, single use via <c>ISlimTwoFactorStore.TryMarkChallengeUsedAsync</c> and <c>TryMarkCodeUsedAsync</c>).
 /// A registration before its account has no <c>Uid</c> and <c>Stamp</c>, but the <c>Email</c> it registers.
+/// <c>Link</c>: the kind of link (<see cref="SlimLinkPayload"/>) that started a flow ending in <c>set_credential</c> for an
+/// existing account.
 /// </summary>
 internal sealed record SlimFlowPayload(string Uid, string Stamp, string FlowId, long StartedAt, SlimSignInProofs Proofs, string Amr,
     bool UseCookies, bool RememberMe, bool RememberDevice = false, string? Method = null, string? CodeHash = null, long IssuedAt = 0,
-    string? Email = null)
+    string? Email = null, string? Link = null)
 {
     /// <summary>A registration whose account does not exist yet.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public bool IsRegistration => Email is not null;
 }
 /// <summary>
-/// The link of a mail: proves the mailbox like the code of the same mail and continues its flow (<c>FlowId</c>).
-/// <c>Kind</c>: <see cref="Registration"/>.
+/// The link of a mail or of an administrator: starts or continues a flow (<c>FlowId</c>). A <see cref="Registration"/>
+/// carries the address, the links of an existing account (<see cref="Reset"/>, <see cref="AdminReset"/>) its
+/// <c>Uid</c> and <c>Stamp</c> – the next security change ends them.
 /// </summary>
-internal sealed record SlimLinkPayload(string Kind, string FlowId, string? Email = null)
+internal sealed record SlimLinkPayload(string Kind, string FlowId, string? Email = null, string? Uid = null, string? Stamp = null)
 {
+    /// <summary>A registration: proves the mailbox like the code of the same mail.</summary>
     public const string Registration = "registration";
+    /// <summary>A reset the owner requested: the mail proves the mailbox.</summary>
+    public const string Reset = "reset";
+    /// <summary>A reset an administrator handed over: proves no mailbox.</summary>
+    public const string AdminReset = "admin_reset";
 }
 /// <summary>"Remember this device" for 2FA; <c>ExpiresAt</c> (unix seconds) is checked against the injected clock.</summary>
 internal sealed record SlimRememberDevicePayload(string Uid, string Stamp, long ExpiresAt);

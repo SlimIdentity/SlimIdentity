@@ -146,10 +146,11 @@ public interface ISlimAuthManager
 
     /// <summary>
     /// Administrator: a single-use link with which <paramref name="user"/> chooses a new password
-    /// (<c>POST /auth/reset-password</c>) – for hosts without mail, handed over by chat, ticket or in person. Valid for
-    /// <paramref name="lifetime"/> (default <c>Tokens.PasswordResetTokenLifetime</c>, at most 7 days) and only until the
-    /// security stamp changes. Unlike a mailed reset it is <b>no</b> proof that the user controls the mailbox: an
-    /// unconfirmed account stays unconfirmed.
+    /// (<c>POST /auth/flow</c> with the token, then step <c>set_credential</c>) – for hosts without mail, handed over by
+    /// chat, ticket or in person. Valid for <paramref name="lifetime"/> (default <c>Tokens.PasswordResetTokenLifetime</c>,
+    /// at most 7 days), once, and only until the security stamp changes. Unlike a mailed reset it is <b>no</b> proof that
+    /// the user controls the mailbox: if confirmation is required, an unconfirmed account first passes
+    /// <c>verify_email</c>, and a second factor still applies.
     /// </summary>
     Task<SlimPasswordReset> CreatePasswordResetAsync(SlimUser user, TimeSpan? lifetime = null, CancellationToken ct = default);
 

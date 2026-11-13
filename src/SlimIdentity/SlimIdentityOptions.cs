@@ -80,7 +80,7 @@ public sealed class SlimEndpointOptions
     /// <summary><c>/register</c> (with mail also <c>/register/verify</c> and <c>/register/password</c>). Disable for invite-only applications or custom registration endpoints.</summary>
     public bool EnableRegistration { get; set; } = true;
 
-    /// <summary><c>/forgot-password</c> and <c>/reset-password</c>.</summary>
+    /// <summary><c>/forgot-password</c>; the link continues at <c>/flow</c>.</summary>
     public bool EnablePasswordReset { get; set; } = true;
     /// <summary><c>/change-password</c>. Disable for LDAP-only setups – the password then lives in the directory.</summary>
     public bool EnableChangePassword { get; set; } = true;

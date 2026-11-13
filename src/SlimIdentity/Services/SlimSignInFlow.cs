@@ -65,7 +65,7 @@ internal sealed class SlimSignInFlow(
     /// </summary>
     public async Task<SlimAuthResult> ContinueAsync(SlimUser user, SlimFlowPayload state, CancellationToken ct)
     {
-        var decision = SlimSignInChain.Evaluate(user, state.Proofs, O);
+        var decision = SlimSignInChain.Evaluate(user, state, O);
         if (decision.Refusal is { } refusal) return SlimAuthResult.Failed(refusal);
         if (!decision.Complete) return await StepsAsync(user, state, decision, ct);
 
@@ -101,13 +101,12 @@ internal sealed class SlimSignInFlow(
     /// </summary>
     public async Task<IResult> ReadAsync(SlimFlowRequest? request, bool? useCookies, CancellationToken ct)
     {
-        if (request is { Token: { } link, FlowToken: null })
-            return await services.GetRequiredService<SlimRegistrationFlow>().ExchangeAsync(link, useCookies, ct);
+        if (request is { Token: { } link, FlowToken: null }) return await ExchangeAsync(link, useCookies, ct);
         if (request is null || !TryRead(request.FlowToken, out var state, out var expiresAt)) return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
         if (state.IsRegistration)
             return await services.GetRequiredService<SlimRegistrationFlow>().ReadAsync(state, request.FlowToken!, expiresAt, ct);
         var user = await FindUserAsync(state, ct);
-        var decision = user is null ? default : SlimSignInChain.Evaluate(user, state.Proofs, O);
+        var decision = user is null ? default : SlimSignInChain.Evaluate(user, state, O);
         if (user is null || decision.Refusal is not null || decision.Complete) return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
 
         return SlimResults.ActionRequired(new SlimActionRequiredResponse
@@ -115,8 +114,57 @@ internal sealed class SlimSignInFlow(
             Actions = decision.Pending,
             FlowToken = request.FlowToken!,
             ExpiresIn = (int)Math.Max(0, (expiresAt - time.GetUtcNow()).TotalSeconds),
-            Details = Details(decision, state),
+            Details = Details(decision, state, user),
         });
+    }
+
+    /// <summary>
+    /// <c>POST /flow</c> with the token of a link, in the mode of this request (the link may open on another device): a
+    /// registration continues, a reset starts the flow to its new way to sign in.
+    /// </summary>
+    private async Task<IResult> ExchangeAsync(string token, bool? useCookies, CancellationToken ct)
+    {
+        if (!SlimModes.TryResolve(O, useCookies, out var cookies, out var modeError)) return modeError!;
+        if (!workflow.TryUnprotect<SlimLinkPayload>(SlimWorkflowTokens.LinkPurpose, token, out var link))
+            return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
+        if (link.Kind == SlimLinkPayload.Registration)
+            return await services.GetRequiredService<SlimRegistrationFlow>().ExchangeAsync(link, cookies, ct);
+        if (link.Kind is not (SlimLinkPayload.Reset or SlimLinkPayload.AdminReset) || link.Uid is null
+            || await store.FindByIdAsync(link.Uid, ct) is not { IsActive: true } user
+            || !SlimUser.IsSameSecurityState(user.SecurityStamp, link.Stamp))
+            return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
+
+        // the owner's request does not give an account that signs in through SSO only a local way in; an administrator may
+        if (link.Kind == SlimLinkPayload.Reset && user.EmailConfirmed
+            && await services.GetRequiredService<SlimCredentialService>().SignsInOnlyExternallyAsync(user, ct))
+            return SlimResults.Status(SlimErrorCodes.ExternalSignInOnly,
+                "The account signs in with an external provider and has no local password.", StatusCodes.Status409Conflict);
+        if (CredentialKinds().Count == 0)
+            return SlimResults.BadRequest(SlimErrorCodes.PasswordManagedExternally,
+                "Passwords are validated externally (LDAP / custom validator) and no other way to sign in can be set.");
+
+        var proofs = link.Kind == SlimLinkPayload.Reset ? SlimSignInProofs.Mailbox : SlimSignInProofs.None;
+        var state = new SlimFlowPayload(user.Id, user.SecurityStamp, link.FlowId, time.GetUtcNow().ToUnixTimeMilliseconds(), proofs, "",
+            cookies, RememberMe: false, Link: link.Kind);
+        var result = await StepsAsync(user, state, SlimSignInChain.Evaluate(user, state, O), ct);
+        return ToHttpResult(result, user);
+    }
+
+    /// <summary>
+    /// The ways to sign in step <c>set_credential</c> of an existing account offers: a password – unless an external
+    /// validator owns it – and a passkey with the passkey package.
+    /// </summary>
+    internal IReadOnlyList<string> CredentialKinds()
+    {
+        var password = services.GetService<ISlimCustomPasswordValidator>() is null;
+        var passkey = services.GetService<ISlimPasskeySignInMethods>() is not null;
+        return (password, passkey) switch
+        {
+            (true, true) => [SlimCredentialKinds.Password, SlimCredentialKinds.Passkey],
+            (true, false) => [SlimCredentialKinds.Password],
+            (false, true) => [SlimCredentialKinds.Passkey],
+            _ => [],
+        };
     }
 
     /// <summary>
@@ -165,7 +213,7 @@ internal sealed class SlimSignInFlow(
         }
         else if (decision.Next == SlimSignInActions.SecondFactor && state.Method is null or SlimSignInActions.VerifyEmail)
         {
-            if (await ChallengeAsync(user, ct) is not { } challenge) return SlimAuthResult.Failed(SlimErrorCodes.TwoFactorUnavailable);
+            if (await ChallengeAsync(user, mailCode: state.Link is null, ct) is not { } challenge) return SlimAuthResult.Failed(SlimErrorCodes.TwoFactorUnavailable);
             state = state with { Method = challenge.Method, CodeHash = challenge.CodeHash, IssuedAt = challenge.IssuedAt };
         }
 
@@ -177,12 +225,14 @@ internal sealed class SlimSignInFlow(
             Actions = decision.Pending,
             FlowToken = workflow.Protect(SlimWorkflowTokens.SignInFlowPurpose, state, lifetime),
             ExpiresIn = (int)lifetime.TotalSeconds,
-            Details = Details(decision, state),
+            Details = Details(decision, state, user),
         });
     }
 
-    private static SlimActionDetails? Details(SlimSignInDecision decision, SlimFlowPayload state) =>
-        decision.Next == SlimSignInActions.SecondFactor && state.Method is { } method and not SlimSignInActions.VerifyEmail
+    private SlimActionDetails? Details(SlimSignInDecision decision, SlimFlowPayload state, SlimUser user) =>
+        decision.Next == SlimSignInActions.SetCredential
+            ? new SlimActionDetails { SetCredential = new SlimSetCredentialDetails { Kinds = CredentialKinds(), Email = user.Email } }
+        : decision.Next == SlimSignInActions.SecondFactor && state.Method is { } method and not SlimSignInActions.VerifyEmail
             ? new SlimActionDetails
             {
                 SecondFactor = new SlimSecondFactorDetails
@@ -192,8 +242,12 @@ internal sealed class SlimSignInFlow(
             }
             : null;
 
-    /// <summary>The second-factor challenge: the method, and for e-mail codes the sent code's hash.</summary>
-    private async Task<(string Method, string? CodeHash, long IssuedAt)?> ChallengeAsync(SlimUser user, CancellationToken ct)
+    /// <summary>
+    /// The second-factor challenge: the method, and for e-mail codes the sent code's hash. Without
+    /// <paramref name="mailCode"/> (a link: whoever reads the mail must not pass the second factor with it) only TOTP or
+    /// a recovery code.
+    /// </summary>
+    private async Task<(string Method, string? CodeHash, long IssuedAt)?> ChallengeAsync(SlimUser user, bool mailCode, CancellationToken ct)
     {
         var twoFactor = services.GetService<SlimTwoFactorService>();
         if (twoFactor is null)
@@ -207,7 +261,7 @@ internal sealed class SlimSignInFlow(
 
         // e-mail codes cannot be sent (WithoutEmail, AllowEmailCodes = false): only a recovery code completes the
         // sign-in – or an administrator resets the second factor
-        if (!O.EmailCodesEnabled) return (SlimLoginHandlers.MethodRecovery, null, issuedAt);
+        if (!O.EmailCodesEnabled || !mailCode) return (SlimLoginHandlers.MethodRecovery, null, issuedAt);
 
         var code = SlimTotp.GenerateNumericCode();
         var sent = await SendCodeAsync(SlimEmailKinds.TwoFactorCode, user, (s, x, c) => s.SendTwoFactorCodeAsync(x, user.Email, code, c), ct);

@@ -18,7 +18,6 @@ public sealed class WithoutEmailTests
     [InlineData("/auth/forgot-password")]
     [InlineData("/auth/register")]
     [InlineData("/auth/register/verify")]
-    [InlineData("/auth/register/password")]
     [InlineData("/auth/login/verify-email")]
     [InlineData("/auth/change-email")]
     [InlineData("/auth/confirm-email-change")]
@@ -38,8 +37,8 @@ public sealed class WithoutEmailTests
         await me.PostJsonAsync("/auth/change-password", new { currentPassword = TestApp.UserPassword, newPassword = "Changed-Pass-123" });
         await app.LoginBearerAsync(TestApp.UserEmail, "Changed-Pass-123");
 
-        // /reset-password stays for links the administrator hands over
-        await app.CreateClient().PostJsonAsync("/auth/reset-password", new { token = "invalid", newPassword = "Another-Pass-123" }, HttpStatusCode.BadRequest);
+        // reset links the administrator hands over still open the flow
+        await app.CreateClient().ResetPasswordJsonAsync("invalid", "Another-Pass-123", HttpStatusCode.Unauthorized);
     }
 
     [Fact]

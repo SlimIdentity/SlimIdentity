@@ -52,7 +52,7 @@ All defaults are the secure choice. The options are listed in three tiers – mo
 | Option | Default | Description |
 | :--- | :--- | :--- |
 | `RoutePrefix` | `/auth` | Prefix of all endpoints. |
-| `Endpoints.EnablePasswordReset` | `true` | `/forgot-password`, `/reset-password`. |
+| `Endpoints.EnablePasswordReset` | `true` | `/forgot-password` (the link continues at `/flow`). |
 | `Endpoints.EnableChangePassword` | `true` | `/change-password`. Disable for LDAP-only setups. |
 | `Endpoints.EnableChangeEmail` | `true` | `/change-email`, `/confirm-email-change`. Disable if the login identifier is managed elsewhere (LDAP, SSO). |
 | `Endpoints.AllowCookieAuth` | `true` | Cookie sessions on/off (e.g. off for pure APIs). |

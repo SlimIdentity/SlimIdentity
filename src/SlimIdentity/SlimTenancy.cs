@@ -23,7 +23,7 @@ public enum SlimLinkKind
 {
     /// <summary>Proves the mailbox of a registration (<c>POST /auth/flow</c> with its token).</summary>
     EmailVerification,
-    /// <summary>Sets a new password (<c>POST /auth/reset-password</c>) – mailed or created by an administrator.</summary>
+    /// <summary>Sets a new password or passkey (<c>POST /auth/flow</c> with its token, then step <c>set_credential</c>) – mailed or created by an administrator.</summary>
     PasswordReset,
     /// <summary>Accepts an invitation (<c>POST /auth/invitation/accept</c>).</summary>
     Invitation,

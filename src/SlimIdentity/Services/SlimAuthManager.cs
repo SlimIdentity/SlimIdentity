@@ -222,8 +222,10 @@ internal sealed class SlimAuthManager(
         if (validity <= TimeSpan.Zero || validity > TimeSpan.FromDays(7))
             throw new ArgumentOutOfRangeException(nameof(lifetime), "SlimIdentity: a reset link must be valid for more than 0 and at most 7 days.");
 
-        var token = workflow.Protect(SlimWorkflowTokens.PasswordResetPurpose,
-            new SlimResetTokenPayload(user.Id, user.SecurityStamp, ByAdministrator: true), validity);
+        // no proof of the mailbox: an unconfirmed account verifies its address in the flow first
+        var flowId = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
+        var token = workflow.Protect(SlimWorkflowTokens.LinkPurpose,
+            new SlimLinkPayload(SlimLinkPayload.AdminReset, flowId, Uid: user.Id, Stamp: user.SecurityStamp), validity);
         Log.AdminPasswordResetCreated(logger, user.Id);
         var link = services.GetRequiredService<SlimLinks>().Build(SlimLinkKind.PasswordReset, token);
         return Task.FromResult(new SlimPasswordReset(token, link, time.GetUtcNow() + validity));

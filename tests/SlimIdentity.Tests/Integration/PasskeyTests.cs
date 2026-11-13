@@ -254,6 +254,30 @@ public sealed class PasskeyTests
     }
 
     [Fact]
+    public async Task A_reset_can_replace_the_password_with_a_passkey()
+    {
+        await using var app = await RegistrationAppAsync();
+        var client = app.CreateClient();
+        using var key = new SoftwarePasskey();
+        await client.PostAsync("/auth/forgot-password", new { email = TestApp.UserEmail });
+        var token = (await app.Mail.WaitForAsync("password-reset", TestApp.UserEmail)).Payload;
+        var started = await client.PostJsonAsync("/auth/flow", new { token });
+        Assert.Equal(["password", "passkey"],
+            started.GetProperty("details").GetProperty("setCredential").GetProperty("kinds").EnumerateArray().Select(k => k.GetString()));
+
+        var (options, state) = await NewAccountOptionsAsync(client, started.Str("flowToken"));
+        Assert.Equal(TestApp.UserEmail, options.GetProperty("user").Str("name"));
+        var session = await client.PostJsonAsync("/auth/register/passkey",
+            new { flowToken = started.Str("flowToken"), state, credential = key.Create(options, Origin), name = "Phone" });
+        Assert.False(string.IsNullOrEmpty(session.Str("accessToken")));
+
+        Assert.True(string.IsNullOrEmpty(app.Users.Get(TestApp.UserEmail).PasswordHash));
+        await client.PostJsonAsync("/auth/login", new { email = TestApp.UserEmail, password = TestApp.UserPassword }, HttpStatusCode.Unauthorized);
+        Assert.Equal(HttpStatusCode.OK, (await LoginAsync(app, key)).Status);
+        await client.PostJsonAsync("/auth/flow", new { token }, HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
     public async Task A_passkey_completes_a_registration_without_a_password()
     {
         await using var app = await RegistrationAppAsync();
@@ -557,7 +581,7 @@ public sealed class PasskeyTests
 
         await app.CreateClient().PostAsync("/auth/forgot-password", new { email = TestApp.UserEmail });
         var token = (await app.Mail.WaitForAsync("password-reset", TestApp.UserEmail)).Payload;
-        await app.CreateClient().PostJsonAsync("/auth/reset-password", new { token, newPassword = "Owner-Pass-456" });
+        await app.CreateClient().ResetPasswordJsonAsync(token, "Owner-Pass-456");
 
         Assert.Empty(await app.App.Services.GetRequiredService<ISlimPasskeyStore>().GetPasskeysAsync(user.Id, default));
         Assert.Equal(HttpStatusCode.Unauthorized, (await LoginAsync(app, key)).Status);

@@ -67,11 +67,11 @@ public sealed class TenantStoreTests
         await using var app = await StartAsync();
         var token = await (await Tenant(app, "a.api.test").PostAsync($"/api/reset-link/{UserA}")).Content.ReadAsStringAsync();   // plain text
 
-        var foreign = await Tenant(app, "b.api.test").PostAsync("/auth/reset-password", new { token, newPassword = "Hijacked-Pass-9" });
+        var foreign = await Tenant(app, "b.api.test").ResetPasswordAsync(token, "Hijacked-Pass-9");
 
-        Assert.Equal(HttpStatusCode.BadRequest, foreign.StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, foreign.StatusCode);
         await Tenant(app, "b.api.test").PostJsonAsync("/auth/login", new { email = UserB, password = PasswordB });    // unchanged
-        await Tenant(app, "a.api.test").PostJsonAsync("/auth/reset-password", new { token, newPassword = "Anna-New-Pass-2" });   // works at home
+        await Tenant(app, "a.api.test").ResetPasswordJsonAsync(token, "Anna-New-Pass-2");   // works at home
     }
 
     [Theory]

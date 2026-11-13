@@ -118,16 +118,16 @@ public sealed class PropertyTests
     [Property(MaxTest = Many)]
     public Property Arbitrary_strings_are_never_accepted_as_tokens() =>
         Prop.ForAll(AnyString(), input =>
-            !Tokens.TryUnprotect<SlimResetTokenPayload>(SlimWorkflowTokens.PasswordResetPurpose, input, out _));
+            !Tokens.TryUnprotect<SlimLinkPayload>(SlimWorkflowTokens.LinkPurpose, input, out _));
 
     [Property(MaxTest = 500)]
     public Property Tampered_tokens_are_rejected(PositiveInt position, char replacement)
     {
-        var token = Tokens.Protect(SlimWorkflowTokens.PasswordResetPurpose, new SlimResetTokenPayload("user-1", "stamp"), TimeSpan.FromHours(1));
+        var token = Tokens.Protect(SlimWorkflowTokens.LinkPurpose, new SlimLinkPayload(SlimLinkPayload.Reset, "flow-1", Uid: "user-1", Stamp: "stamp"), TimeSpan.FromHours(1));
         var index = position.Get % token.Length;
         var tampered = token[..index] + replacement + token[(index + 1)..];
         return (tampered == token
-                || !Tokens.TryUnprotect<SlimResetTokenPayload>(SlimWorkflowTokens.PasswordResetPurpose, tampered, out var payload)
+                || !Tokens.TryUnprotect<SlimLinkPayload>(SlimWorkflowTokens.LinkPurpose, tampered, out var payload)
                 || payload.Uid == "user-1")   // base64url padding bits may decode identically – then the payload is intact
             .ToProperty();
     }
@@ -135,9 +135,9 @@ public sealed class PropertyTests
     [Fact]
     public void A_token_is_bound_to_its_purpose()
     {
-        var token = Tokens.Protect(SlimWorkflowTokens.PasswordResetPurpose, new SlimResetTokenPayload("user-1", "stamp"), TimeSpan.FromHours(1));
-        Assert.True(Tokens.TryUnprotect<SlimResetTokenPayload>(SlimWorkflowTokens.PasswordResetPurpose, token, out _));
-        Assert.False(Tokens.TryUnprotect<SlimResetTokenPayload>(SlimWorkflowTokens.InvitationPurpose, token, out _));
+        var token = Tokens.Protect(SlimWorkflowTokens.LinkPurpose, new SlimLinkPayload(SlimLinkPayload.Reset, "flow-1", Uid: "user-1", Stamp: "stamp"), TimeSpan.FromHours(1));
+        Assert.True(Tokens.TryUnprotect<SlimLinkPayload>(SlimWorkflowTokens.LinkPurpose, token, out _));
+        Assert.False(Tokens.TryUnprotect<SlimLinkPayload>(SlimWorkflowTokens.InvitationPurpose, token, out _));
     }
 
     // ------------------------------------------------------------------ claims

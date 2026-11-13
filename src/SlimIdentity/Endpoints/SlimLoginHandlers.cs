@@ -139,7 +139,7 @@ internal sealed class SlimLoginHandlers(
 
         // once confirmed, the step is no longer open: the token cannot confirm twice
         var user = await flow.FindUserAsync(state, ct);
-        if (user is null || state.Method != SlimSignInActions.VerifyEmail || SlimSignInChain.Evaluate(user, state.Proofs, O).Next != SlimSignInActions.VerifyEmail)
+        if (user is null || state.Method != SlimSignInActions.VerifyEmail || SlimSignInChain.Evaluate(user, state, O).Next != SlimSignInActions.VerifyEmail)
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
 
         // a lockout of the password that started after the token was issued holds
@@ -185,7 +185,7 @@ internal sealed class SlimLoginHandlers(
 
         // the stamp rotates with the new password: the token works once, and a newer administrator password kills it
         var user = await flow.FindUserAsync(state, ct);
-        if (user is null || SlimSignInChain.Evaluate(user, state.Proofs, O).Next != SlimSignInActions.ChangePassword)
+        if (user is null || SlimSignInChain.Evaluate(user, state, O).Next != SlimSignInActions.ChangePassword)
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
 
         // a lockout of the password that started after the token was issued holds; the new password must not lift it
@@ -221,7 +221,7 @@ internal sealed class SlimLoginHandlers(
         if (state.UseCookies && SlimCsrfEndpointFilter.Validate(Http.Request, O, logger) is { } csrfError) return csrfError;
 
         var user = await flow.FindUserAsync(state, ct);
-        if (user is null || state.Method is null or SlimSignInActions.VerifyEmail || SlimSignInChain.Evaluate(user, state.Proofs, O).Next != SlimSignInActions.SecondFactor)
+        if (user is null || state.Method is null or SlimSignInActions.VerifyEmail || SlimSignInChain.Evaluate(user, state, O).Next != SlimSignInActions.SecondFactor)
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
 
         // reserved in the store before the check: of parallel guesses, at most the threshold is checked

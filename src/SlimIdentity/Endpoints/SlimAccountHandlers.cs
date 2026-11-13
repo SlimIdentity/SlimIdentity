@@ -43,7 +43,7 @@ internal sealed class SlimAccountHandlers(
         return await registration.CreateAsync(email!, request.Password!, profile, ct);
     }
 
-    // ------------------------------------------------------------------ POST /forgot-password & /reset-password
+    // ------------------------------------------------------------------ POST /forgot-password
 
     public async Task<IResult> ForgotPasswordAsync(SlimEmailRequest? request, CancellationToken ct)
     {
@@ -52,10 +52,11 @@ internal sealed class SlimAccountHandlers(
         {
             var user = await store.FindByEmailAsync(email, ct);
             // a pure SSO account gets no local password; an unconfirmed one still may (first proof of the mailbox)
-            if (user is { IsActive: true } && !(user.EmailConfirmed && await SignsInOnlyExternallyAsync(user, ct)))
+            if (user is { IsActive: true } && !(user.EmailConfirmed && await credentials.SignsInOnlyExternallyAsync(user, ct)))
             {
-                var token = workflow.Protect(SlimWorkflowTokens.PasswordResetPurpose,
-                    new SlimResetTokenPayload(user.Id, user.SecurityStamp), O.Tokens.PasswordResetTokenLifetime);
+                var flowId = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
+                var token = workflow.Protect(SlimWorkflowTokens.LinkPurpose,
+                    new SlimLinkPayload(SlimLinkPayload.Reset, flowId, Uid: user.Id, Stamp: user.SecurityStamp), O.Tokens.PasswordResetTokenLifetime);
                 var address = user.Email;
                 var link = links.Build(SlimLinkKind.PasswordReset, token);
                 await mail.SendAsync(SlimEmailKinds.PasswordReset, address, user.Id, (s, x, c) => s.SendPasswordResetEmailAsync(x, address, link, c), ct);
@@ -63,53 +64,6 @@ internal sealed class SlimAccountHandlers(
             }
         }
         return SlimResults.Status("reset_requested", "If the account exists, a reset e-mail has been sent.");
-    }
-
-    public async Task<IResult> ResetPasswordAsync(SlimResetPasswordRequest? request, CancellationToken ct)
-    {
-        if (!workflow.TryUnprotect<SlimResetTokenPayload>(SlimWorkflowTokens.PasswordResetPurpose, request?.Token, out var payload))
-            return SlimResults.InvalidToken();
-
-        var user = await store.FindByIdAsync(payload.Uid, ct);
-        if (user is null || !user.IsActive || !SlimUser.IsSameSecurityState(user.SecurityStamp, payload.Stamp))
-            return SlimResults.InvalidToken();
-
-        if (!payload.ByAdministrator && user.EmailConfirmed && await SignsInOnlyExternallyAsync(user, ct))
-            return ExternalSignInOnly();
-        if (await passwordPolicy.ValidateAsync(request!.NewPassword, user.Email, ct, "newPassword") is { } errors)
-            return SlimResults.Validation(errors);
-
-        var firstProof = false;
-        var written = await store.TryWriteSecurityStateAsync(user, u =>
-        {
-            credentials.ApplyNewPassword(u, request.NewPassword); // rotates stamp → token single-use, all sessions revoked
-            // a link handed over by an administrator proves no mailbox
-            firstProof = !u.EmailConfirmed && !payload.ByAdministrator;
-            if (firstProof) (u.TwoFactorEnabled, u.EmailConfirmed) = (false, true);
-        }, ct);
-        if (!written) return SlimResults.InvalidToken();
-        if (firstProof)
-        {
-            // First proof of the mailbox: whoever registered the address before (possibly an attacker – pre-account
-            // hijacking) must keep neither a second factor that locks the real owner out nor a linked external login.
-            // Removed after the state is written: a link that lost against a concurrent change removes nothing.
-            if (services.GetService<SlimTwoFactorService>() is { } twoFactor)
-            {
-                await twoFactor.RemoveSecretAsync(user, ct);
-                await twoFactor.RemoveRecoveryCodesAsync(user, ct);
-            }
-            if (services.GetService<ISlimExternalLoginStore>() is { } externalLogins)
-                await externalLogins.RemoveExternalLoginsAsync(user.Id, ct);
-            if (services.GetService<ISlimPasskeySignInMethods>() is { } passkeys)
-                await passkeys.RemoveAllAsync(user.Id, ct);
-        }
-        await credentials.ResetAttemptsAsync(user, SlimAttemptFactor.Password, ct);   // the mailbox proved the account
-        await authManager.RevokeSessionsAsync(user.Id, exceptSessionId: null, ct);
-
-        Log.PasswordReset(logger, user.Id);
-        await hooks.RaiseAsync(SlimEventTypes.PasswordChanged, user.Id, reason: "reset", ct: ct);
-        metrics.PasswordReset("completed");
-        return SlimResults.Status("password_reset");
     }
 
     // ------------------------------------------------------------------ POST /change-email & /confirm-email-change
@@ -340,16 +294,6 @@ internal sealed class SlimAccountHandlers(
     }
 
     // ------------------------------------------------------------------ helpers
-
-    /// <summary>No local password, but an external login: the account signs in through SSO only.</summary>
-    private async Task<bool> SignsInOnlyExternallyAsync(SlimUser user, CancellationToken ct) =>
-        !await credentials.HasPasswordAsync(user, ct)
-        && services.GetService<ISlimExternalLoginStore>() is { } externalLogins
-        && (await externalLogins.GetExternalLoginsAsync(user.Id, ct)).Count > 0;
-
-    private static IResult ExternalSignInOnly() =>
-        SlimResults.Status(SlimErrorCodes.ExternalSignInOnly,
-            "The account signs in with an external provider and has no local password.", StatusCodes.Status409Conflict);
 
     internal async Task<(SlimUser? User, IResult? Error)> LoadCurrentUserAsync(bool forbidImpersonation, CancellationToken ct)
     {

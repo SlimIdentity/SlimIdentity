@@ -90,36 +90,45 @@ internal sealed class SlimPasskeyHandlers(
     // ------------------------------------------------------------------ registration of a new account (step set_credential)
 
     /// <summary>
-    /// <c>POST /register/passkey/options</c>: the creation options for the first passkey of a registration whose mailbox
-    /// is proven. The state is bound to the flow; the account does not exist yet.
+    /// <c>POST /register/passkey/options</c>: the creation options for the passkey of step <c>set_credential</c> – the
+    /// first of a registration whose mailbox is proven, or the new way in of an existing account. The state is bound to
+    /// the flow.
     /// </summary>
-    public IResult NewAccountOptions(SlimRegisterPasskeyOptionsRequest? request)
+    public async Task<IResult> NewAccountOptionsAsync(SlimRegisterPasskeyOptionsRequest? request, CancellationToken ct)
     {
-        var registration = services.GetRequiredService<SlimRegistrationFlow>();
-        var (flow, error) = registration.ReadForCredential(request?.FlowToken);
+        var (flow, account, error) = await services.GetRequiredService<SlimCredentialSetup>().ReadAsync(request?.FlowToken, ct);
         if (flow is null) return error!;
 
+        // a reset that takes over an unconfirmed account removes its passkeys: they neither name nor exclude the new one
+        IReadOnlyList<SlimPasskey> existing = account is null || SlimSignInChain.ResetsUnconfirmedAccount(account, flow)
+            ? [] : await passkeys.GetPasskeysAsync(account.Id, ct);
         var challenge = SlimWebAuthn.NewChallenge();
-        var userHandle = Base64Url.EncodeToString(RandomNumberGenerator.GetBytes(32));
+        var userHandle = Base64Url.EncodeToString(account is null ? RandomNumberGenerator.GetBytes(32) : UserHandleFor(account.Id, existing));
         var state = workflow.Protect(SlimPasskeyPurposes.NewAccount, new SlimPasskeyNewAccountPayload(flow.FlowId, challenge, userHandle),
             CeremonyLifetime, SlimPasskeyJsonContext.Default.SlimPasskeyNewAccountPayload);
-        return Results.Ok(CreationOptions(new SlimPasskeyUser(userHandle, flow.Email!, flow.Email!), challenge, [], state));
+        var email = account?.Email ?? flow.Email!;
+        return Results.Ok(CreationOptions(new SlimPasskeyUser(userHandle, email, email), challenge,
+            [.. existing.Select(p => new SlimPasskeyCredentialDescriptor(PublicKey, Base64Url.EncodeToString(p.CredentialId)))], state));
     }
 
     /// <summary>
-    /// <c>POST /register/passkey</c>: step <c>set_credential</c> with a passkey. Verifies the ceremony, creates the
-    /// account with its address confirmed and the passkey, and continues like a passkey sign-in – the session.
+    /// <c>POST /register/passkey</c>: step <c>set_credential</c> with a passkey. Verifies the ceremony; a registration
+    /// creates the account with its address confirmed and the passkey, an existing account gets the passkey instead of
+    /// its password. Continues like a passkey sign-in – the session.
     /// </summary>
     public async Task<IResult> RegisterNewAccountAsync(SlimRegisterPasskeyRequest? request, CancellationToken ct)
     {
-        var registration = services.GetRequiredService<SlimRegistrationFlow>();
-        var (flow, error) = registration.ReadForCredential(request?.FlowToken);
+        var setup = services.GetRequiredService<SlimCredentialSetup>();
+        var (flow, account, error) = await setup.ReadAsync(request?.FlowToken, ct);
         if (flow is null) return error!;
 
         if (request!.Credential is not { Type: PublicKey } credential
             || !workflow.TryUnprotect(SlimPasskeyPurposes.NewAccount, request.State, SlimPasskeyJsonContext.Default.SlimPasskeyNewAccountPayload, out var state)
             || !string.Equals(state.FlowId, flow.FlowId, StringComparison.Ordinal))
             return Rejected("registration", "state");
+        if (account is not null) return await ReplaceCredentialAsync(setup, account, flow, credential, state, request, ct);
+
+        var registration = services.GetRequiredService<SlimRegistrationFlow>();
         var (profile, invalidProfile) = await registration.ValidateProfileAsync(flow, request.Profile, ct);
         if (invalidProfile is not null) return invalidProfile;
         var (authData, reason) = VerifyCreation(credential, state.Challenge);
@@ -140,6 +149,30 @@ internal sealed class SlimPasskeyHandlers(
         Log.PasskeyAdded(logger, user.Id);
         await hooks.RaiseAsync(SlimEventTypes.PasskeyAdded, user.Id, SlimAuthManager.MethodPasskey, ct: ct);
         return await registration.SignInAsync(user, flow, SlimSignInProofs.SecondFactor, SlimAuthManager.MethodPasskey, ct);
+    }
+
+    private async Task<IResult> ReplaceCredentialAsync(SlimCredentialSetup setup, SlimUser user, SlimFlowPayload flow,
+        SlimPasskeyCredential credential, SlimPasskeyNewAccountPayload state, SlimRegisterPasskeyRequest request, CancellationToken ct)
+    {
+        if (request.Profile is not null) return SlimCredentialSetup.ProfileRefused();
+        var (authData, reason) = VerifyCreation(credential, state.Challenge);
+        if (authData is null) return Rejected("registration", reason!);
+        // before the password goes: a known credential must not leave the account without a way in
+        if (await passkeys.FindPasskeyAsync(authData.CredentialId!, ct) is not null) return PasskeyExists();
+
+        return await setup.CompleteAsync(user, flow, null, async c =>
+        {
+            var passkey = NewPasskey(user.Id, state.UserHandle, authData, request.Name);
+            if (!await passkeys.AddPasskeyAsync(passkey, c))
+            {
+                // registered in parallel: the account has no way in now – a new reset link gives it one
+                Log.PasskeyRejected(logger, "registration", "credential registered meanwhile");
+                return PasskeyExists();
+            }
+            Log.PasskeyAdded(logger, user.Id);
+            await hooks.RaiseAsync(SlimEventTypes.PasskeyAdded, user.Id, SlimAuthManager.MethodPasskey, ct: c);
+            return null;
+        }, ct);
     }
 
     // ------------------------------------------------------------------ sign-in (anonymous, discoverable credentials)

@@ -123,15 +123,11 @@ internal sealed class SlimRegistrationFlow(
     }
 
     /// <summary>
-    /// <c>POST /flow</c> with the token of a registration link: proves the mailbox like the code and continues the flow –
-    /// in the mode of this request (the link may open on another device).
+    /// <c>POST /flow</c> with the token of a registration link: proves the mailbox like the code and continues the flow.
     /// </summary>
-    public async Task<IResult> ExchangeAsync(string token, bool? useCookies, CancellationToken ct)
+    public async Task<IResult> ExchangeAsync(SlimLinkPayload link, bool cookies, CancellationToken ct)
     {
-        if (!SlimModes.TryResolve(O, useCookies, out var cookies, out var modeError)) return modeError!;
-        if (!workflow.TryUnprotect<SlimLinkPayload>(SlimWorkflowTokens.LinkPurpose, token, out var link)
-            || link.Kind != SlimLinkPayload.Registration || link.Email is null
-            || await store.FindByEmailAsync(link.Email, ct) is not null)
+        if (link.Email is null || await store.FindByEmailAsync(link.Email, ct) is not null)
             return SlimResults.InvalidToken(StatusCodes.Status401Unauthorized);
 
         var state = new SlimFlowPayload("", "", link.FlowId, 0, SlimSignInProofs.None, "", cookies, false, Email: link.Email);
@@ -148,7 +144,7 @@ internal sealed class SlimRegistrationFlow(
             Actions = decision.Pending,
             FlowToken = flowToken,
             ExpiresIn = (int)Math.Max(0, (expiresAt - time.GetUtcNow()).TotalSeconds),
-            Details = Details(decision),
+            Details = Details(decision, state.Email!),
         });
     }
 
@@ -158,8 +154,11 @@ internal sealed class SlimRegistrationFlow(
     /// </summary>
     public async Task<IResult> CompleteWithPasswordAsync(SlimRegisterPasswordRequest? request, CancellationToken ct)
     {
-        var (state, error) = ReadForCredential(request?.FlowToken);
+        var setup = Http.RequestServices.GetRequiredService<SlimCredentialSetup>();
+        var (state, account, error) = await setup.ReadAsync(request?.FlowToken, ct);
         if (state is null) return error!;
+        if (account is not null)
+            return request!.Profile is not null ? SlimCredentialSetup.ProfileRefused() : await setup.CompleteAsync(account, state, request.Password, null, ct);
 
         var email = state.Email!;
         if (await passwordPolicy.ValidateAsync(request!.Password, email, ct) is { } errors) return SlimResults.Validation(errors);
@@ -170,18 +169,6 @@ internal sealed class SlimRegistrationFlow(
         var (user, taken) = await CreateAccountAsync(state, SlimCredentialKinds.Password, hash, profile, ct);
         if (user is null) return taken!;
         return await SignInAsync(user, state, SlimSignInProofs.Password, SlimAuthManager.MethodPassword, ct);
-    }
-
-    /// <summary>
-    /// The flow token of a registration whose mailbox is proven – the start of every <c>set_credential</c> endpoint,
-    /// with the CSRF check of cookie mode.
-    /// </summary>
-    internal (SlimFlowPayload? State, IResult? Error) ReadForCredential(string? flowToken)
-    {
-        if (!flow.TryRead(flowToken, out var state, out _) || !state.IsRegistration || !state.Proofs.HasFlag(SlimSignInProofs.Mailbox))
-            return (null, SlimResults.InvalidToken(StatusCodes.Status401Unauthorized));
-        if (state.UseCookies && SlimCsrfEndpointFilter.Validate(Http.Request, O, logger) is { } csrfError) return (null, csrfError);
-        return (state, null);
     }
 
     /// <summary>The profile of the registration, validated by the host's hook (<c>400</c> on failure).</summary>
@@ -238,13 +225,13 @@ internal sealed class SlimRegistrationFlow(
             Actions = decision.Pending,
             FlowToken = workflow.Protect(SlimWorkflowTokens.SignInFlowPurpose, state, lifetime),
             ExpiresIn = (int)lifetime.TotalSeconds,
-            Details = Details(decision),
+            Details = Details(decision, state.Email!),
         });
     }
 
-    private SlimActionDetails? Details(SlimSignInDecision decision) =>
+    private SlimActionDetails? Details(SlimSignInDecision decision, string email) =>
         decision.Next == SlimSignInActions.SetCredential
             ? new SlimActionDetails { SetCredential = new SlimSetCredentialDetails
-                { Kinds = isService.IsService(typeof(ISlimPasskeySignInMethods)) ? [SlimCredentialKinds.Password, SlimCredentialKinds.Passkey] : [SlimCredentialKinds.Password] } }
+                { Kinds = isService.IsService(typeof(ISlimPasskeySignInMethods)) ? [SlimCredentialKinds.Password, SlimCredentialKinds.Passkey] : [SlimCredentialKinds.Password], Email = email } }
             : null;
 }

@@ -116,10 +116,17 @@ Content-Type: application/json
 { "email": "user@demo.local" }
 
 ###
-POST {{auth}}/reset-password
+# the reset link continues as a flow: answers { status: "action_required", actions: ["set_credential"], flowToken }
+POST {{auth}}/flow
 Content-Type: application/json
 
-{ "token": "<token from console>", "newPassword": "Changed123!" }
+{ "token": "<token from console>" }
+
+###
+POST {{auth}}/register/password
+Content-Type: application/json
+
+{ "flowToken": "<flowToken>", "password": "Changed123!" }
 
 ###
 POST {{auth}}/change-password

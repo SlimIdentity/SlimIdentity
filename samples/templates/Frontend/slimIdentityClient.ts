@@ -22,8 +22,9 @@ export interface AuthResponse {
  * The password (passkey, external login) was right, but steps follow before the session: "verify_email" (code from
  * the mail) at verifyEmail, "second_factor" at loginTwoFactor / loginRecoveryCode, "change_password" (set by an administrator) at completePasswordChange. Each step
  * answers with the remaining ones and a new flowToken – or with the session.
- * A registration answers the same way: "verify_email" at verifyRegistration (or the mailed link at openRegistrationLink),
- * then "set_credential" at completeRegistration or completeRegistrationWithPasskey.
+ * A registration answers the same way: "verify_email" at verifyRegistration (or the mailed link at openLink),
+ * then "set_credential" at completeRegistration or completeRegistrationWithPasskey. A reset link (openLink) ends in
+ * "set_credential" as well – possibly after "verify_email" or "second_factor".
  */
 export interface ActionRequired {
   status: "action_required";
@@ -158,10 +159,6 @@ export const account = {
     return anonymousPost("/forgot-password", { email });
   },
 
-  /** Page behind the reset link: /reset-password?token=… – all sessions of the account end. */
-  resetPassword(token: string, newPassword: string): Promise<FormResult> {
-    return anonymousPost("/reset-password", { token, newPassword });
-  },
 };
 
 // =====================================================================================
@@ -268,13 +265,16 @@ export const cookieAuth = {
     return toLoginResult(await cookieFetch("/auth/register/verify", { method: "POST", body: JSON.stringify({ flowToken, code }) }));
   },
 
-  /** Page behind the verification link (/verify-email?token=…) – also on another device. Next is "set_credential". */
-  async openRegistrationLink(token: string): Promise<LoginResult> {
+  /**
+   * Page behind a mailed link (/verify-email?token=…, /reset-password?token=…) – also on another device. Next is
+   * "set_credential"; after a reset all other sessions of the account end.
+   */
+  async openLink(token: string): Promise<LoginResult> {
     return toLoginResult(await cookieFetch("/auth/flow?useCookies=true", { method: "POST", body: JSON.stringify({ token }) }));
   },
 
   /**
-   * Registration step "set_credential": creates the account and signs in. `profile` is your business data (company,
+   * Step "set_credential": creates the account (or sets the new password after a reset) and signs in. `profile` is your business data (company,
    * name, …) – the server validates it with its ISlimRegistrationProfile; field errors come back as
    * `errors["profile.<field>"]`.
    */
@@ -680,12 +680,12 @@ export const bearerAuth = {
     return flowStep("/register/verify", { flowToken, code });
   },
 
-  /** Page behind the verification link (/verify-email?token=…) – also on another device. */
-  async openRegistrationLink(token: string): Promise<LoginResult> {
+  /** Page behind a mailed link (/verify-email?token=…, /reset-password?token=…) – also on another device. */
+  async openLink(token: string): Promise<LoginResult> {
     return toLoginResult(await fetch(`${AUTH}/flow?useCookies=false`, { method: "POST", headers: jsonHeaders, body: JSON.stringify({ token }) }));
   },
 
-  /** Registration step "set_credential": creates the account and signs in (profile: see cookieAuth.completeRegistration). */
+  /** Step "set_credential": creates the account or sets the new password, then signs in (profile: see cookieAuth.completeRegistration). */
   async completeRegistration(flowToken: string, password: string, profile?: object): Promise<LoginResult> {
     return flowStep("/register/password", { flowToken, password, profile });
   },

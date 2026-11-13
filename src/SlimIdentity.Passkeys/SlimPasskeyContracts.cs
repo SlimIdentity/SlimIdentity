@@ -56,11 +56,11 @@ public sealed record SlimPasskeyCredential(string Id, string RawId, string Type,
 public sealed record SlimPasskeyRegisterRequest(string State, SlimPasskeyCredential Credential, string? Name = null);
 
 /// <summary>Body of <c>POST /auth/register/passkey/options</c>.</summary>
-/// <param name="FlowToken">The flow token of a registration whose next step is <c>set_credential</c>.</param>
+/// <param name="FlowToken">The flow token of a registration or reset whose next step is <c>set_credential</c>.</param>
 public sealed record SlimRegisterPasskeyOptionsRequest(string FlowToken);
 
 /// <summary>Body of <c>POST /auth/register/passkey</c>: step <c>set_credential</c> with a passkey.</summary>
-/// <param name="FlowToken">The flow token of the registration.</param>
+/// <param name="FlowToken">The flow token at step <c>set_credential</c>.</param>
 /// <param name="State">The state of the options call.</param>
 /// <param name="Credential">The result of <c>navigator.credentials.create</c>.</param>
 /// <param name="Name">Display name of the passkey (at most 64 characters).</param>

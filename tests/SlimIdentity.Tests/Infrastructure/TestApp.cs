@@ -273,6 +273,27 @@ public sealed class ApiClient(HttpClient http)
         return content.Length == 0 ? default : JsonDocument.Parse(content).RootElement.Clone();
     }
 
+    /// <summary>
+    /// A reset link: <c>POST /flow</c> with its token, then <c>/register/password</c>. Returns the last answer – the
+    /// one of <c>/flow</c> when it fails or opens another step before <c>set_credential</c>.
+    /// </summary>
+    public async Task<HttpResponseMessage> ResetPasswordAsync(string token, string newPassword)
+    {
+        var started = await PostAsync("/auth/flow", new { token });
+        if (started.StatusCode != HttpStatusCode.OK) return started;
+        var body = JsonDocument.Parse(await started.Content.ReadAsStringAsync()).RootElement;
+        if (body.GetProperty("actions")[0].GetString() != "set_credential") return started;
+        return await PostAsync("/auth/register/password", new { flowToken = body.Str("flowToken"), password = newPassword });
+    }
+
+    public async Task<JsonElement> ResetPasswordJsonAsync(string token, string newPassword, HttpStatusCode expected = HttpStatusCode.OK)
+    {
+        var response = await ResetPasswordAsync(token, newPassword);
+        var content = await response.Content.ReadAsStringAsync();
+        Assert.True(response.StatusCode == expected, $"reset: expected {(int)expected}, got {(int)response.StatusCode}: {content}");
+        return content.Length == 0 ? default : JsonDocument.Parse(content).RootElement.Clone();
+    }
+
     /// <summary>POST with a raw body (malformed JSON, other content types).</summary>
     public async Task<HttpResponseMessage> SendRawAsync(string path, string body, string contentType)
     {

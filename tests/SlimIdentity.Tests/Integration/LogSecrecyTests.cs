@@ -47,7 +47,7 @@ public sealed class LogSecrecyTests
         // password reset
         await client.PostAsync("/auth/forgot-password", new { email });
         var reset = (await app.Mail.WaitForAsync("password-reset", email)).Payload;
-        await client.PostJsonAsync("/auth/reset-password", new { token = reset, newPassword });
+        await client.ResetPasswordJsonAsync(reset, newPassword);
         secrets.AddRange([verify, reset]);
 
         // 2FA: setup, enable, challenge, wrong code, recovery code

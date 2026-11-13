@@ -72,8 +72,8 @@ public sealed class AccountTests
         await client.PostAsync("/auth/forgot-password", new { email = TestApp.UserEmail });
         var token = (await app.Mail.WaitForAsync("password-reset", TestApp.UserEmail)).Payload;
 
-        await client.PostJsonAsync("/auth/reset-password", new { token, newPassword = "Reset1234!" });
-        await client.PostJsonAsync("/auth/reset-password", new { token, newPassword = "Again1234!" }, HttpStatusCode.BadRequest);
+        await client.ResetPasswordJsonAsync(token, "Reset1234!");
+        await client.ResetPasswordJsonAsync(token, "Again1234!", HttpStatusCode.Unauthorized);
 
         var old = app.CreateClient();
         old.BearerToken = session.AccessToken;
@@ -92,11 +92,49 @@ public sealed class AccountTests
         await client.PostAsync("/auth/forgot-password", new { email = TestApp.UserEmail });
         var token = (await app.Mail.WaitForAsync("password-reset", TestApp.UserEmail)).Payload;
 
-        await client.PostJsonAsync("/auth/reset-password", new { token, newPassword = "Reset1234!" });
+        await client.ResetPasswordJsonAsync(token, "Reset1234!");
 
         var user = app.Users.Get(TestApp.UserEmail);
         Assert.Equal((0, null), (user.FailedLoginAttempts, user.LockoutEndUtc));
         Assert.True(user.IsSecondFactorLockedOut(app.Time.GetUtcNow()));   // the mailbox proves no second factor
+    }
+
+    [Fact]
+    public async Task A_reset_link_opens_step_set_credential_and_ends_in_a_session()
+    {
+        await using var app = await TestApp.StartAsync(new TestAppOptions { Configure = o => o.Endpoints.DefaultUseCookies = false });
+        var client = app.CreateClient();
+        await client.PostAsync("/auth/forgot-password", new { email = TestApp.UserEmail });
+        var token = (await app.Mail.WaitForAsync("password-reset", TestApp.UserEmail)).Payload;
+
+        var started = await client.PostJsonAsync("/auth/flow", new { token });
+        Assert.Equal("""["set_credential"]""", started.GetProperty("actions").GetRawText());
+        var details = started.GetProperty("details").GetProperty("setCredential");
+        Assert.Equal(TestApp.UserEmail, details.Str("email"));
+        Assert.Equal("""["password"]""", details.GetProperty("kinds").GetRawText());
+
+        var flowToken = started.Str("flowToken");
+        await client.PostJsonAsync("/auth/register/password", new { flowToken, password = "x" }, HttpStatusCode.BadRequest);
+        await client.PostJsonAsync("/auth/register/password", new { flowToken, password = "Reset1234!", profile = new { name = "x" } }, HttpStatusCode.BadRequest);
+        var session = await client.PostJsonAsync("/auth/register/password", new { flowToken, password = "Reset1234!" });
+        Assert.False(string.IsNullOrEmpty(session.Str("accessToken")));
+        await client.PostJsonAsync("/auth/register/password", new { flowToken, password = "Again1234!" }, HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task With_an_external_password_validator_and_no_passkeys_a_reset_link_sets_nothing()
+    {
+        await using var app = await TestApp.StartAsync(new TestAppOptions { Builder = b => b.AddCustomPasswordValidator<DirectoryValidator>() });
+        await app.CreateClient().PostAsync("/auth/forgot-password", new { email = TestApp.UserEmail });
+        var token = (await app.Mail.WaitForAsync("password-reset", TestApp.UserEmail)).Payload;
+
+        var refused = await app.CreateClient().PostJsonAsync("/auth/flow", new { token }, HttpStatusCode.BadRequest);
+        Assert.Equal("password_managed_externally", refused.Str("code"));
+    }
+
+    private sealed class DirectoryValidator : ISlimCustomPasswordValidator
+    {
+        public Task<bool> ValidateAsync(SlimUser user, string providedPassword, CancellationToken ct) => Task.FromResult(false);
     }
     [Fact]
     public async Task Me_returns_the_user_without_internal_claims()

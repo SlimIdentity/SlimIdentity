@@ -69,10 +69,9 @@ public sealed class ReviewRound2Tests
         // the mailbox is compromised – not the phone: the reset keeps the second factor
         await app.CreateClient().PostAsync("/auth/forgot-password", new { email });
         var resetToken = (await app.Mail.WaitForAsync("password-reset", email)).Payload;
-        await app.CreateClient().PostJsonAsync("/auth/reset-password", new { token = resetToken, newPassword = "Attacker-New-Pass-123!" });
-
-        var login = await app.CreateClient().PostJsonAsync("/auth/login", new { email, password = "Attacker-New-Pass-123!" });
-        Assert.Equal("second_factor", login.GetProperty("actions")[0].GetString());
+        var started = await app.CreateClient().ResetPasswordJsonAsync(resetToken, "Attacker-New-Pass-123!");
+        Assert.Equal("second_factor", started.GetProperty("actions")[0].GetString());
+        await app.CreateClient().PostJsonAsync("/auth/login", new { email, password = "Attacker-New-Pass-123!" }, HttpStatusCode.Unauthorized);
     }
 
     private static TestAppOptions SocialProvider(string providerKey, string email) => new()
@@ -144,7 +143,7 @@ public sealed class ReviewRound2Tests
         // … resets the password ("I have no password here"), which ends the attacker's access, and links Google itself
         await app.CreateClient().PostAsync("/auth/forgot-password", new { email = victim });
         var resetToken = (await app.Mail.WaitForAsync("password-reset", victim)).Payload;
-        await app.CreateClient().PostJsonAsync("/auth/reset-password", new { token = resetToken, newPassword = "Victim-Own-Pass-456" });
+        await app.CreateClient().ResetPasswordJsonAsync(resetToken, "Victim-Own-Pass-456");
         await app.CreateClient().PostJsonAsync("/auth/login", new { email = victim, password = "Attacker-Pass-123" }, HttpStatusCode.Unauthorized);
     }
 

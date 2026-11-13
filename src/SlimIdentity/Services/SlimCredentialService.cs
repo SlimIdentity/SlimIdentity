@@ -72,6 +72,12 @@ internal sealed class SlimCredentialService(
         !string.IsNullOrEmpty(user.PasswordHash)
         || (services.GetService<ISlimCustomPasswordValidator>() is { } custom && await custom.HasPasswordAsync(user, ct).ConfigureAwait(false));
 
+    /// <summary>No local password, but an external login: the account signs in through SSO only.</summary>
+    public async ValueTask<bool> SignsInOnlyExternallyAsync(SlimUser user, CancellationToken ct) =>
+        !await HasPasswordAsync(user, ct)
+        && services.GetService<ISlimExternalLoginStore>() is { } externalLogins
+        && (await externalLogins.GetExternalLoginsAsync(user.Id, ct).ConfigureAwait(false)).Count > 0;
+
     /// <summary>
     /// The owner confirms a sensitive change (a sign-in method, 2FA, the e-mail address) – a stolen session alone must
     /// not do it. With a password: the password, with lockout bookkeeping (400 <c>invalid_password</c> or 423). Without
@@ -204,6 +210,14 @@ internal sealed class SlimCredentialService(
     public void ApplyNewPassword(SlimUser user, string newPassword)
     {
         user.PasswordHash = hasher.HashPassword(user, newPassword);
+        user.SecurityStamp = SlimUser.NewSecurityStamp();
+        user.PasswordChangeRequired = false;
+    }
+
+    /// <summary>Removes the local password, rotates the stamp and clears a pending forced change (does not persist).</summary>
+    public static void RemovePassword(SlimUser user)
+    {
+        user.PasswordHash = "";
         user.SecurityStamp = SlimUser.NewSecurityStamp();
         user.PasswordChangeRequired = false;
     }

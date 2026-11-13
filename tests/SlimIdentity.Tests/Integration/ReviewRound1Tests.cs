@@ -251,7 +251,7 @@ public sealed class ReviewRound1Tests
 
         await app.CreateClient().PostAsync("/auth/forgot-password", new { email = Victim });
         var token = (await app.Mail.WaitForAsync("password-reset", Victim)).Payload;
-        await app.CreateClient().PostJsonAsync("/auth/reset-password", new { token, newPassword = "Owner-Pass-456" });
+        await app.CreateClient().ResetPasswordJsonAsync(token, "Owner-Pass-456");
 
         Assert.Null(await links.FindByExternalLoginAsync("Fake", "attacker-idp-account", default));
         var again = app.CreateClient();

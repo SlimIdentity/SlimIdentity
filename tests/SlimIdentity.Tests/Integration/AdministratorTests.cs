@@ -150,9 +150,9 @@ public sealed class AdministratorTests
         var link = await (await AdminAsync(app)).PostJsonAsync($"/api/admin/reset-link/{TestApp.UserEmail}");
         Assert.True(link.GetProperty("expiresAt").GetDateTimeOffset() > app.Time.GetUtcNow());
 
-        await app.CreateClient().PostJsonAsync("/auth/reset-password", new { token = link.Str("token"), newPassword = "Chosen-By-Me-2026" });
+        await app.CreateClient().ResetPasswordJsonAsync(link.Str("token"), "Chosen-By-Me-2026");
         await app.LoginBearerAsync(TestApp.UserEmail, "Chosen-By-Me-2026");
-        await app.CreateClient().PostJsonAsync("/auth/reset-password", new { token = link.Str("token"), newPassword = "Again-2026-Pass" }, HttpStatusCode.BadRequest);
+        await app.CreateClient().ResetPasswordJsonAsync(link.Str("token"), "Again-2026-Pass", HttpStatusCode.Unauthorized);
     }
 
     [Fact]
@@ -167,7 +167,7 @@ public sealed class AdministratorTests
         await app.Users.UpdateSecurityStateAsync(user, default);
 
         var link = await (await AdminAsync(app)).PostJsonAsync($"/api/admin/reset-link/{TestApp.UserEmail}");
-        await app.CreateClient().PostJsonAsync("/auth/reset-password", new { token = link.Str("token"), newPassword = "Chosen-By-Me-2026" });
+        await app.CreateClient().ResetPasswordJsonAsync(link.Str("token"), "Chosen-By-Me-2026");
 
         var after = app.Users.Get(TestApp.UserEmail);
         Assert.False(after.EmailConfirmed);

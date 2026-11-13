@@ -115,7 +115,7 @@ POST /auth/sign-in-methods/external/remove    { "provider": "Google", "providerK
   (`409 last_sign_in_method` – link another provider first). Parallel removals cannot get around it.
 - **A pure SSO account stays without local credentials:** an account without a password but with an external login
   gets no password via `/change-password` (`409 password_not_set`) or a self-service reset (`/forgot-password` sends
-  no link, `/reset-password` answers `409 external_sign_in_only`), and no passkey (`403 password_required`). An
+  no link, an older link answers `409 external_sign_in_only` at `/flow`), and no passkey (`403 password_required`). An
   administrator can still set one (`SetPasswordAsync`, `CreatePasswordResetAsync`). Linking a provider to an account
   with a password changes nothing – password and passkeys stay.
 - Not during an impersonation (`403`). Event `external_login_removed`.

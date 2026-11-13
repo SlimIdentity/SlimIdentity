@@ -100,7 +100,7 @@ public sealed class ReviewRound4Tests
         SlimPasswordReset byAdministrator;
         await using (var scope = app.App.Services.CreateAsyncScope())
             byAdministrator = await scope.ServiceProvider.GetRequiredService<ISlimAuthManager>().CreatePasswordResetAsync(user);
-        await app.CreateClient().PostJsonAsync("/auth/reset-password", new { token = byAdministrator.Token, newPassword = "Set-By-Admin-123" });
+        await app.CreateClient().ResetPasswordJsonAsync(byAdministrator.Token, "Set-By-Admin-123");
         await app.CreateClient().PostJsonAsync("/auth/login", new { email = SocialEmail, password = "Set-By-Admin-123" });
     }
 
