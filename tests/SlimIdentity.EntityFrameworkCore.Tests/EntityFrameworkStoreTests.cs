@@ -144,7 +144,7 @@ public sealed class EntityFrameworkStoreTests
     private static string SqliteFile() =>
         new SqliteConnectionStringBuilder
         {
-            DataSource = Path.Combine(Path.GetTempPath(), $"slimidentity-ef-{Guid.NewGuid():N}.db"), DefaultTimeout = 30, Pooling = false,
+            DataSource = Path.Combine(Path.GetTempPath(), $"slimidentity-ef-{Guid.NewGuid():N}.db"), DefaultTimeout = 30,
         }.ToString();
 
     private static async Task<ServiceProvider> BuildAsync<TContext, TUser, TKey>(Action<DbContextOptionsBuilder> provider, bool wal = false,

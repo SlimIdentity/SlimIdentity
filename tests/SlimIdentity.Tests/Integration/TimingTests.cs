@@ -18,7 +18,7 @@ public sealed class TimingTests(ITestOutputHelper output)
     {
         Skip.IfNot(Environment.GetEnvironmentVariable("SLIMIDENTITY_TIMING") == "1", "Set SLIMIDENTITY_TIMING=1 to run timing measurements.");
 
-        await using var app = await TestApp.StartAsync(new TestAppOptions { Configure = o => o.Lockout.MaxFailedAttempts = 0 });
+        await using var app = await TestApp.StartAsync(new TestAppOptions { FastHashing = false, Configure = o => o.Lockout.MaxFailedAttempts = 0 });
         var inactive = app.Users.Seed("inactive@test.local", "Inactive-123");
         app.Users.SetActive(inactive.Id, false);
         var locked = app.Users.Seed("locked@test.local", "Locked-123");

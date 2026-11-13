@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Options;
 
 namespace SlimIdentity.Tests.Infrastructure;
 
@@ -9,13 +10,18 @@ public sealed class TestUserStore : ISlimUserStore
     private readonly ConcurrentDictionary<string, SlimUser> _users = new();
     private readonly ConcurrentDictionary<string, string[]> _roles = new();
 
+    /// <summary>PBKDF2 iterations of seeded hashes – kept equal to the app's setting (see <see cref="TestAppOptions.FastHashing"/>).</summary>
+    public int HashIterations { get; set; } = TestApp.FastHashIterations;
+
+    private PasswordHasher<SlimUser> Hasher => new(Options.Create(new PasswordHasherOptions { IterationCount = HashIterations }));
+
     public SlimUser Seed(string email, string? password, params string[] roles) => SeedWithId(Guid.NewGuid().ToString(), email, password, roles);
 
     /// <summary>A user with a chosen id – e.g. the same id in two tenant stores.</summary>
     public SlimUser SeedWithId(string id, string email, string? password, params string[] roles)
     {
         var user = new SlimUser { Id = id, Email = email, EmailConfirmed = true };
-        if (password is not null) user.PasswordHash = new PasswordHasher<SlimUser>().HashPassword(user, password);
+        if (password is not null) user.PasswordHash = Hasher.HashPassword(user, password);
         _users[user.Id] = user;
         _roles[user.Id] = roles;
         return Clone(user);
@@ -35,7 +41,7 @@ public sealed class TestUserStore : ISlimUserStore
         var stored = _users[userId];
         lock (stored)
         {
-            stored.PasswordHash = new PasswordHasher<SlimUser>().HashPassword(stored, password);
+            stored.PasswordHash = Hasher.HashPassword(stored, password);
             stored.SecurityStamp = SlimUser.NewSecurityStamp();
         }
     }

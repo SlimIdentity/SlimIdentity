@@ -18,13 +18,14 @@ public sealed class EfCoreTemplateConformanceTests
     public async Task EfCore_templates_honour_all_store_contracts_on_SQLite()
     {
         var file = Path.Combine(Path.GetTempPath(), $"slimidentity-conformance-{Guid.NewGuid():N}.db");
-        var connectionString = new SqliteConnectionStringBuilder { DataSource = file, DefaultTimeout = 30, Pooling = false }.ToString();
+        var connectionString = new SqliteConnectionStringBuilder { DataSource = file, DefaultTimeout = 30 }.ToString();
         try
         {
             await VerifyAsync(o => o.UseSqlite(connectionString), async db => await db.Database.ExecuteSqlRawAsync("PRAGMA journal_mode=WAL;"));
         }
         finally
         {
+            SqliteConnection.ClearAllPools();
             foreach (var f in new[] { file, file + "-wal", file + "-shm" })
                 if (File.Exists(f)) File.Delete(f);
         }

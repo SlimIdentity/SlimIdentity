@@ -29,6 +29,11 @@ public sealed class TestAppOptions
     public Action<WebApplication>? Map { get; init; }
     /// <summary>Receives all log output (minimum level Trace) – e.g. to assert that no secret is ever logged.</summary>
     public ILoggerProvider? LoggerProvider { get; init; }
+    /// <summary>
+    /// Password hashes with <see cref="TestApp.FastHashIterations"/> instead of the production setting. Off for tests of
+    /// the hash parameters and of the response timing.
+    /// </summary>
+    public bool FastHashing { get; init; } = true;
 }
 
 /// <summary>An in-memory host with SlimIdentity, test stores, a fake clock and a few host endpoints.</summary>
@@ -38,6 +43,7 @@ public sealed class TestApp : IAsyncDisposable
     public const string AdminPassword = "Admin123!";
     public const string UserEmail = "user@test.local";
     public const string UserPassword = "User1234!";
+    public const int FastHashIterations = 1_000;
 
     private TestApp(WebApplication app, FakeTimeProvider time)
     {
@@ -68,6 +74,7 @@ public sealed class TestApp : IAsyncDisposable
         var time = new FakeTimeProvider(DateTimeOffset.UtcNow);
         builder.Services.AddSingleton<TimeProvider>(time);
 
+        if (options.FastHashing) builder.Services.Configure<PasswordHasherOptions>(o => o.IterationCount = FastHashIterations);
         var slim = builder.Services.AddSlimIdentity(o =>
             {
                 o.Tokens.JwtSecret = "test-secret-0123456789-abcdefghijklmnopqrstuvwxyz";
@@ -93,6 +100,7 @@ public sealed class TestApp : IAsyncDisposable
 
         if (app.Services.GetRequiredService<ISlimUserStore>() is TestUserStore users)
         {
+            users.HashIterations = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<PasswordHasherOptions>>().Value.IterationCount;
             users.Seed(AdminEmail, AdminPassword, "Admin");
             users.Seed(UserEmail, UserPassword);
         }
