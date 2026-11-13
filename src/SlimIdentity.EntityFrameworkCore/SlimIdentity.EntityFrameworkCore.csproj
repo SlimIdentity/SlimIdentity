@@ -15,6 +15,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
     <ProjectReference Include="..\SlimIdentity\SlimIdentity.csproj" />
     <!-- small, no third-party dependencies; the passkey store is only registered with o.Passkeys = true -->
