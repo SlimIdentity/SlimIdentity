@@ -101,8 +101,8 @@ one and never removes the last way in.
 TypeScript: `addPasskey(name, password)`, `completeRegistrationWithPasskey(flowToken, name, profile)`, `loginWithPasskey()`, `loginWithPasskeyAutofill(signal)`, `signInMethods()`,
 `renamePasskey(id, name)`, `removePasskey(id, password)`.
 
-**Taking over an account** – when the owner of an address proves the mailbox for the first time (password reset of an
-unconfirmed account, verified external sign-in), every passkey of the account is removed together with the password,
+**Taking over an account** – when the owner of an address proves the mailbox for the first time through a password
+reset of an unconfirmed account, every passkey of the account is removed together with the password,
 2FA and external logins: whoever registered the address before keeps no way in. Passkeys can only be added to confirmed
 accounts anyway; this covers accounts imported or created while mail was off.
 

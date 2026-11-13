@@ -175,7 +175,7 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
 
 ### Security (external review round 3)
 
-- The first proof of the mailbox (password reset of an unconfirmed account, verified external sign-in) also removes
+- The first proof of the mailbox (password reset of an unconfirmed account) also removes
   the account's passkeys – relevant for accounts imported or created while mail was off. `ISlimPasskeyStore` gains
   `RemovePasskeysAsync` (checked by the conformance kit). **Breaking** for passkey stores.
 - RS256 passkeys need a modulus of at least 2048 bit; a weak key zero-padded to 256 bytes is refused.
@@ -372,6 +372,10 @@ Every finding was first proven by a failing test (`ReviewRound1Tests`, `SharedCo
   `administrator`; a start password must be changed at the first sign-in (`SlimCreateUserResult`: `User` or `Failure`
   with `400` / `409 email_taken`). `HasSignInMethodAsync(user)` tells whether an account has a password, an external
   login or a passkey.
+- **Breaking** (external login): a verified external sign-in no longer takes over an unconfirmed account. An
+  unconfirmed account with any way in (password, external login, passkey) answers `account_conflict` and keeps
+  everything; one without a way in (created by an administrator or an import) is confirmed and linked. Only a password
+  reset of an unconfirmed account still removes the other ways in. Log event `5004` is removed.
 - **Breaking** with `UseTenantKey`: the tenant of the request is part of the Data Protection purpose of every token
   (mail links, invitations, sign-in flows, refresh tokens, remembered devices, exchange and link codes, passkey
   ceremonies). A token of one tenant no longer decrypts in another; tokens issued before the update, or outside a

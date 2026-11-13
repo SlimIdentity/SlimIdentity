@@ -89,9 +89,10 @@ Challenge them only if you can show a concrete attack or a concrete integration 
 - CSRF protection = custom header `X-CSRF` + `Origin` check, always on in cookie mode; `SameSite=Strict` by default.
 - No password composition rules (NIST SP 800-63B); length + optional `ISlimPasswordRule`.
 - TOTP uses HMAC-SHA1 (RFC 6238, authenticator compatibility).
-- The first proof of a mailbox (verified external login, password reset of an unconfirmed account) removes the
-  registrant's password, 2FA and sessions (pre-account hijacking defence). External logins are never linked
-  automatically to an account that has a password; linking is an explicit flow for signed-in users.
+- A password reset of an unconfirmed account (the first proof of its mailbox) removes the registrant's password, 2FA,
+  sessions, external logins and passkeys (pre-account hijacking defence). External logins are never linked
+  automatically to an account that has a password, or to an unconfirmed account with any way in
+  (`account_conflict`); linking is an explicit flow for signed-in users.
 - A provider's e-mail address counts as verified only with its own `email_verified=true` claim or when the host lists
   the provider in `ExternalLogin.TrustedEmailProviders`. The guides map Google's `email_verified` (the ASP.NET Core
   handler drops it) and allow trusting Entra ID only for a single tenant (nOAuth); Entra has no back-channel logout.

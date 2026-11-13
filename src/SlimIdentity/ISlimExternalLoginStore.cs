@@ -14,7 +14,7 @@ public interface ISlimExternalLoginStore
 
     /// <summary>
     /// Removes <b>all</b> external identities linked to the user. Called when the owner of an unconfirmed address proves
-    /// the mailbox for the first time: whatever was linked before (possibly by someone else) must not keep access.
+        /// the mailbox for the first time (password reset): whatever was linked before (possibly by someone else) must not keep access.
     /// </summary>
     Task RemoveExternalLoginsAsync(string userId, CancellationToken ct);
 

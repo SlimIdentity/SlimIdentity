@@ -57,8 +57,12 @@ verifier – an intercepted code (deep link, history, another app) is worthless.
 
 1. Known external identity (`provider` + subject) → that user.
 2. Otherwise, an existing account with the same e-mail:
-   - never confirmed (someone registered the address without proving the mailbox): the verified owner takes it over –
-     the registrant's password, 2FA, sessions and external logins are removed;
+   - never confirmed and **without** any way in (no password, external login or passkey – e.g. created by an
+     administrator who expects the owner to choose one): confirmed and linked if the e-mail is **verified** and
+     `AutoLinkVerifiedEmails` is on;
+   - never confirmed **with** a way in: `slim_error=account_conflict`. Whoever set it up may not own the mailbox, and
+     the external login does not take the account over; the owner proves the mailbox with a password reset, which
+     removes the other ways in;
    - confirmed and **without** a password of its own (created by another provider, LDAP): linked automatically if the
      e-mail is **verified** (`email_verified=true`, or the provider is listed in `TrustedEmailProviders` – only for
      providers whose addresses you control, e.g. your company's single-tenant Entra ID) and

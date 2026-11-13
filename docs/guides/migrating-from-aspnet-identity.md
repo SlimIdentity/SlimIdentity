@@ -12,7 +12,7 @@ working – users do not have to reset their passwords. The migration is mostly 
 | `Email` / `NormalizedEmail` | `Email` | look up by `NormalizedEmail` (upper-case) |
 | `PasswordHash` | `PasswordHash` | identical format (Identity V3 / PBKDF2); `null` → empty string |
 | `SecurityStamp` | `SecurityStamp` | keep it; rotating it signs users out |
-| `EmailConfirmed` | `EmailConfirmed` | |
+| `EmailConfirmed` | `EmailConfirmed` | see [Unconfirmed addresses](#unconfirmed-addresses) |
 | `AccessFailedCount` | `FailedLoginAttempts` | |
 | `LockoutEnd` | `LockoutEndUtc` | ignore it if `LockoutEnabled` is false for a user |
 | – | `FailedSecondFactorAttempts`, `SecondFactorLockoutEndUtc` | new columns, start with `0` / `null` (ASP.NET Core Identity counts 2FA failures on `AccessFailedCount`) |
@@ -29,6 +29,21 @@ working – users do not have to reset their passwords. The migration is mostly 
 
 You can keep the existing tables and implement the stores directly against them (EF Core: map your existing
 `IdentityUser` entity or a plain class to the same table), or migrate into your own schema.
+
+## Unconfirmed addresses
+
+ASP.NET Core Identity lets accounts sign in with an unconfirmed address unless `RequireConfirmedEmail` is set; with
+mail on, SlimIdentity treats such an account as not yet proven to belong to the owner of the address:
+
+- every sign-in continues with the `verify_email` step (a code to the address) until the address is confirmed –
+  after that the account keeps everything;
+- a password reset confirms the address and removes the other ways in (2FA, external logins, passkeys), since
+  whoever set them up may not own the mailbox;
+- a verified external login of the same address answers `account_conflict` instead of joining the account;
+- a second factor or a passkey cannot be added.
+
+Carry `EmailConfirmed` over as it is to keep this protection. Setting it to `true` for every migrated user skips all
+of the above, but trusts that each imported address belongs to whoever set up the account.
 
 ## Behavioural differences
 

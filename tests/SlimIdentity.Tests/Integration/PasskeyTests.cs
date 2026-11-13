@@ -564,7 +564,7 @@ public sealed class PasskeyTests
     }
 
     [Fact]
-    public async Task The_registrants_passkeys_do_not_survive_a_verified_external_sign_in_of_the_owner()
+    public async Task An_unconfirmed_account_with_passkeys_is_not_joined_by_a_verified_external_sign_in()
     {
         await using var app = await TestApp.StartAsync(WithPasskeys(b =>
         {
@@ -584,10 +584,11 @@ public sealed class PasskeyTests
 
         var browser = app.CreateClient();
         var challenge = await browser.GetAsync("/auth/login/Fake?useCookies=true&returnUrl=/done");
-        await browser.GetAsync(challenge.Headers.Location!.OriginalString);
+        var callback = await browser.GetAsync(challenge.Headers.Location!.OriginalString);
 
-        Assert.True(app.Users.Get(TestApp.UserEmail).EmailConfirmed);   // the owner took the account over
-        Assert.Empty(await app.App.Services.GetRequiredService<ISlimPasskeyStore>().GetPasskeysAsync(user.Id, default));
+        Assert.Contains("slim_error=account_conflict", callback.Headers.Location!.OriginalString);
+        Assert.False(app.Users.Get(TestApp.UserEmail).EmailConfirmed);   // the owner proves the mailbox with a reset instead
+        Assert.Null(await app.App.Services.GetRequiredService<ISlimExternalLoginStore>().FindByExternalLoginAsync("Fake", "owner-1", default));
     }
 
     // ------------------------------------------------------------------ management

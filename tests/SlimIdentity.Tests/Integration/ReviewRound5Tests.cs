@@ -197,7 +197,7 @@ public sealed class ReviewRound5Tests
     // ---------------------------------------------------------------- S-4: start password + unconfirmed + external login
 
     [Fact]
-    public async Task An_unconfirmed_account_with_a_start_password_is_not_dead_ended_by_the_owners_external_login()
+    public async Task An_unconfirmed_account_with_a_start_password_is_not_joined_by_an_external_login()
     {
         await using var app = await TestApp.StartAsync(WithProvider());
         await using (var scope = app.App.Services.CreateAsyncScope())
@@ -210,10 +210,10 @@ public sealed class ReviewRound5Tests
 
         var location = await ExternalSignInAsync(app.CreateClient());
 
-        Assert.DoesNotContain("slim_error", location);
+        Assert.Contains("slim_error=account_conflict", location);
         var user = app.Users.Get(SocialEmail);
-        Assert.True(string.IsNullOrEmpty(user.PasswordHash));
-        Assert.False(user.PasswordChangeRequired);
+        Assert.False(string.IsNullOrEmpty(user.PasswordHash));   // the start password and its change requirement stay
+        Assert.True(user.PasswordChangeRequired);
     }
 
     // ---------------------------------------------------------------- S-5: impersonation is not the owner's fresh sign-in

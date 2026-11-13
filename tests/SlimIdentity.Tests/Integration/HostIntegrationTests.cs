@@ -120,10 +120,11 @@ public sealed class ExternalLoginTests
     }
 
     [Fact]
-    public async Task Pre_registered_unverified_account_is_taken_over_by_the_verified_owner_not_shared()
+    public async Task Pre_registered_unverified_account_is_not_joined_by_the_verified_owner()
     {
         // Attack scenario E8 (pre-account hijacking): the attacker registers the victim's address with an own password
-        // before the victim ever signs up. The victim later signs in with a provider that has verified the address.
+        // before the victim ever signs up (without mail, or imported). The victim later signs in with a provider that has
+        // verified the address – the account is not shared; the victim takes it over with a password reset.
         const string victim = "victim@test.local";
         await using var app = await TestApp.StartAsync(WithProvider(
             new Claim(ClaimTypes.NameIdentifier, "google-victim"), new Claim(ClaimTypes.Email, victim), new Claim("email_verified", "true")));
@@ -133,11 +134,30 @@ public sealed class ExternalLoginTests
         Assert.Equal("verify_email", pending.GetProperty("actions")[0].GetString());   // no session without the mailbox
 
         var browser = app.CreateClient();
+        var target = await NavigateAsync(browser, "useCookies=true&returnUrl=/done");
+
+        Assert.Equal("account_conflict", QueryHelpers.ParseQuery(target.Query)["slim_error"].ToString());
+        Assert.Equal(HttpStatusCode.Unauthorized, (await browser.GetAsync("/api/hello")).StatusCode);
+        var account = app.Users.Get(victim);
+        Assert.False(account.EmailConfirmed);
+        Assert.Null(await app.App.Services.GetRequiredService<ISlimExternalLoginStore>().FindByExternalLoginAsync("Fake", "google-victim", default));
+    }
+
+    [Fact]
+    public async Task An_unconfirmed_account_without_a_way_in_is_confirmed_and_linked_by_a_verified_external_login()
+    {
+        // created by a host or an import without a password: the provider's verified address is the first proof
+        const string member = "member@test.local";
+        await using var app = await TestApp.StartAsync(WithProvider(
+            new Claim(ClaimTypes.NameIdentifier, "google-member"), new Claim(ClaimTypes.Email, member), new Claim("email_verified", "true")));
+        await using (var scope = app.App.Services.CreateAsyncScope())
+            Assert.False((await scope.ServiceProvider.GetRequiredService<ISlimUserStore>().CreateAsync(new SlimNewUser { Email = member }, default))!.EmailConfirmed);
+
+        var browser = app.CreateClient();
         await NavigateAsync(browser, "useCookies=true&returnUrl=/done");
-        Assert.Equal(HttpStatusCode.OK, (await browser.GetAsync("/api/hello")).StatusCode);   // the victim is in
-        await app.CreateClient().PostJsonAsync("/auth/login", new { email = victim, password = "Attacker-Pass-123" }, HttpStatusCode.Unauthorized);
-        await app.CreateClient().PostJsonAsync("/auth/login/verify-email",
-            new { flowToken = pending.Str("flowToken"), code = "000000" }, HttpStatusCode.Unauthorized);   // the pending sign-in ended too
+
+        Assert.Equal(HttpStatusCode.OK, (await browser.GetAsync("/api/hello")).StatusCode);
+        Assert.True(app.Users.Get(member).EmailConfirmed);
     }
 
     [Fact]
